@@ -1,0 +1,47 @@
+[build-system]
+requires = ["uv_build>=0.8.19,<0.9.0"]
+build-backend = "uv_build"
+
+[project]
+name = "mc-mjlab"
+version = "0.1.0"
+description = "mc_rtc controller integration and HRP5P assets for mjlab."
+readme = "README.md"
+license = "Apache-2.0"
+authors = [{ name = "Martin Filliung" }]
+# mc_rtc's Python bindings are interpreter-specific: this pin must match the
+# interpreter the ROS workspace built them for (see README), and moves with it.
+requires-python = ">=3.14,<3.15"
+dependencies = [
+  # Where mjlab comes from (PyPI, local checkout, git) is a per-machine
+  # choice: see "mjlab dependency" in the README.
+  "mjlab",
+  # Imported directly by this package; versions are constrained by mjlab.
+  "mujoco",
+  "torch",
+]
+
+[dependency-groups]
+dev = [
+  "ruff>=0.14.14",
+  "ty>=0.0.14",
+]
+
+[tool.uv]
+# This package is developed on a single Linux/CUDA box; resolve for it only.
+required-environments = [
+  "sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+
+[tool.ruff]
+src = ["src"]
+indent-width = 2
+# Pin the formatter's target below requires-python: left to infer it, ruff
+# adopts newer-only syntax (e.g. PEP 758 `except A, B:`) that older
+# interpreters cannot parse, and requires-python moves with whichever
+# interpreter the mc_rtc bindings are built for.
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B"]
+ignore = ["B011"]

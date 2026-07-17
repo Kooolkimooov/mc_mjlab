@@ -1,0 +1,1 @@
+"""HRP5P humanoid."""
