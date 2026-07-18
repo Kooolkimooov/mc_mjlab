@@ -195,6 +195,12 @@ class ControllerHost:
     rn = robot.name()
     self._robot_key: bytes = rn if isinstance(rn, bytes) else rn.encode()
 
+    # jointIndexByName on a missing joint throws a C++ std::out_of_range that
+    # terminates the process (it cannot be caught from Python), so always
+    # probe with hasJoint first.
+    def joint_index(name: str) -> int:
+      return robot.jointIndexByName(name) if robot.hasJoint(name) else -1
+
     # refJointOrder includes joints mjlab does not simulate; those keep their
     # default-stance values.
     self._ref_joint_order = [
@@ -204,9 +210,8 @@ class ControllerHost:
     stance_q = robot.mbc.q
     self._default_encoders = np.array(
       [
-        stance_q[robot.jointIndexByName(name)][0]
-        if robot.jointIndexByName(name) != -1
-        and len(stance_q[robot.jointIndexByName(name)]) > 0
+        stance_q[joint_index(name)][0]
+        if joint_index(name) != -1 and len(stance_q[joint_index(name)]) > 0
         else 0.0
         for name in self._ref_joint_order
       ],
@@ -220,9 +225,13 @@ class ControllerHost:
       [k for k, r in enumerate(target_to_ref) if r != -1], dtype=np.intp
     )
     self._valid_ref = np.array([r for r in target_to_ref if r != -1], dtype=np.intp)
-    self._target_mbc_indices = [
-      robot.jointIndexByName(name) for name in self._target_names
-    ]
+    self._target_mbc_indices = [joint_index(name) for name in self._target_names]
+    if all(i == -1 for i in self._target_mbc_indices):
+      robot_name = self._robot_key.decode()
+      raise RuntimeError(
+        f"none of the mjlab entity's joints exist on the mc_rtc robot "
+        f"'{robot_name}': the entity does not match the config's MainRobot."
+      )
 
     body_sensor_names: list[str] = []
     try:
