@@ -26,9 +26,8 @@ choose where it comes from. Pick one before the first sync:
 
 - **PyPI release**: nothing to add.
 
-- **Local checkout**: (development; required whenever no PyPI release supports
-  the Python version this package pins). Add to `pyproject.toml`, but do not
-  commit it:
+- **Local checkout**: develop against a local mjlab instead of a release.
+  Add to `pyproject.toml`, but do not commit it:
 
   ```toml
   [tool.uv.sources]
@@ -62,8 +61,10 @@ or worse, segfaults.
 
 ```sh
 scripts/demos/run_test_mc_rtc.sh                # viser viewer (2 envs, cpu)
-scripts/demos/run_test_mc_rtc.sh --viewer none  # throughput benchmark (512 envs, cuda)
+scripts/demos/run_test_mc_rtc.sh --viewer none  # throughput benchmark (420 envs, cuda)
 ```
+
+This loads the config from `etc/mc_rtc.yaml`.
 
 ### External paths
 
