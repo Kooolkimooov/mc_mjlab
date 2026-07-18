@@ -9,9 +9,9 @@ dist/
 MUJOCO_LOG.TXT
 # Symlinked to the ROS workspace's mc_mujoco copies on first use
 # (see robots/HRP5P/hrp5p_constants.py).
-src/mc_mjlab/robots/HRP5P/meshes
-src/mc_mjlab/robots/HRP5P/xmls/
-src/mc_mjlab/robots/HRP5P/pdgains
+src/mc_mjlab/robots/*/meshes
+src/mc_mjlab/robots/*/xmls/
+src/mc_mjlab/robots/*/pdgains
 
 **/mc_plugins/*
 # Depends on the per-machine mjlab source choice (see README).

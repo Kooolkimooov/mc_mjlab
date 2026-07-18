@@ -9,8 +9,7 @@
 src/mc_mjlab/
   actions/mc_rtc_joint_position_actions.py  # McRtcResidualJointPositionAction(Cfg)
   actions/mc_rtc_host.py      # worker-process controller host (shared-memory I/O)
-  robots/HRP5P/               # HRP5P constants (MJCF + meshes symlinked from
-                              # the ROS ws mc_mujoco share on first use)
+  robots/                     # constants (assets are dynamically symlinked from mc_rtc install path)
 etc/
   mc_rtc.yaml                 # mc_rtc controller config
 scripts/demos/
@@ -71,6 +70,6 @@ scripts/demos/run_test_mc_rtc.sh --viewer none  # throughput benchmark (512 envs
 These point outside this repo (into the ROS workspace) and must exist for the
 demo to actually step controllers:
 
-- `src/mc_mjlab/robots/HRP5P/` — the MJCF, meshes, and PD gains are symlinked on
-  first use from `$HOME/workspace/install/share/mc_mujoco/HRP5P` if they are
-  found
+- `src/mc_mjlab/robots/<ROBOT>/` — the MJCF, meshes, and PD gains are symlinked
+  on first use from `$HOME/workspace/install/share/mc_mujoco/<ROBOT>` if they
+  are found

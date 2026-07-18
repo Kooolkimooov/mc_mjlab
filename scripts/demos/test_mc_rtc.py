@@ -10,9 +10,12 @@ Two modes:
 import argparse
 import os
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import torch
+from mjlab.entity import EntityCfg
 from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 from mjlab.rl import RslRlVecEnvWrapper
 from mjlab.scene.scene import SceneCfg
@@ -23,23 +26,54 @@ from mjlab.viewer import NativeMujocoViewer, ViserPlayViewer
 from mc_mjlab.actions.mc_rtc_joint_position_actions import (
   McRtcResidualJointPositionActionCfg,
 )
-from mc_mjlab.robots.HRP5P.hrp5p_constants import (
-  HRP5P_NOMINAL_EFFORT_LIMITS,
-  PD_GAINS_PATH,
-  get_hrp5p_robot_cfg,
-)
+from mc_mjlab.robots.HRP5P import hrp5p_constants
+from mc_mjlab.robots.JVRC1 import jvrc1_constants
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+MC_RTC_YAML = REPO_ROOT / "etc" / "mc_rtc.yaml"
 
 
-def get_hrp5p_cfg_for_mc_rtc():
-  """HRP5P robot cfg prepared for the mc_rtc coupling.
+@dataclass(frozen=True)
+class RobotSpec:
+  """Per-robot wiring for the mc_rtc coupling."""
 
-  Re-enables the collision geoms (the stock presets match nothing in HRP5P.xml,
-  so the robot would fall through the ground) and deletes the XML's own motors
-  (mjlab adds its own; keeping both doubles ``nu`` with dead actuators).
+  cfg_fn: Callable[[], EntityCfg]
+  residual_joints: tuple[str, ...]
+  pd_gains_path: Path
+
+
+ROBOTS = {
+  "HRP5P": RobotSpec(
+    cfg_fn=hrp5p_constants.get_hrp5p_robot_cfg,
+    residual_joints=tuple(hrp5p_constants.HRP5P_NOMINAL_EFFORT_LIMITS),
+    pd_gains_path=hrp5p_constants.PD_GAINS_PATH,
+  ),
+  "JVRC1": RobotSpec(
+    cfg_fn=jvrc1_constants.get_jvrc1_robot_cfg,
+    residual_joints=jvrc1_constants.JVRC1_RESIDUAL_JOINTS,
+    pd_gains_path=jvrc1_constants.PD_GAINS_PATH,
+  ),
+}
+
+
+def read_main_robot(path: Path) -> str:
+  """The config's MainRobot; it selects the mjlab entity, keeping the two
+  sides of the coupling on the same robot."""
+  for line in path.read_text().splitlines():
+    line = line.split("#", 1)[0].strip()
+    if line.startswith("MainRobot:"):
+      return line.split(":", 1)[1].strip()
+  raise ValueError(f"No MainRobot key found in {path}")
+
+
+def prep_cfg_for_mc_rtc(robot_cfg):
+  """Prepare a robot cfg for the mc_rtc coupling.
+
+  Re-enables the collision geoms (the geoms are unnamed, so the name-based
+  presets match nothing and the robot would fall through the ground) and
+  deletes the XML's own motors (mjlab adds its own; keeping both doubles
+  ``nu`` with dead actuators).
   """
-  robot_cfg = get_hrp5p_robot_cfg()
   base_spec_fn = robot_cfg.spec_fn
 
   def spec_fn():
@@ -144,7 +178,15 @@ def main():
   if args.device is None:
     args.device = "cuda" if benchmark else "cpu"
 
-  robot_cfg = get_hrp5p_cfg_for_mc_rtc()
+  robot_name = read_main_robot(MC_RTC_YAML)
+  if robot_name not in ROBOTS:
+    raise SystemExit(
+      f"MainRobot '{robot_name}' in {MC_RTC_YAML} has no RobotSpec "
+      f"(known: {', '.join(sorted(ROBOTS))})."
+    )
+  print(f"[mc_rtc] MainRobot: {robot_name}")
+  robot = ROBOTS[robot_name]
+  robot_cfg = prep_cfg_for_mc_rtc(robot.cfg_fn())
 
   # A terrain is required for a ground plane; it also spreads the env origins.
   scene_cfg = SceneCfg(
@@ -154,17 +196,17 @@ def main():
   )
 
   # mc_mujoco parity: controller at 0.002s over a 1 kHz sim (frameskip=2), real
-  # PD gains, all 53 joints controlled but the RL residual only on the 33
-  # non-finger joints.
+  # PD gains, all controlled joints track mc_rtc but the RL residual only
+  # reaches the non-finger joints.
   action_cfg = McRtcResidualJointPositionActionCfg(
     entity_name="robot",
     actuator_names=(".*",),
-    residual_actuator_names=tuple(HRP5P_NOMINAL_EFFORT_LIMITS),
-    mc_rtc_config_path=str(REPO_ROOT / "etc" / "mc_rtc.yaml"),
-    mc_rtc_robot_name="HRP5P",
+    residual_actuator_names=robot.residual_joints,
+    mc_rtc_config_path=str(MC_RTC_YAML),
+    mc_rtc_robot_name=robot_name,
     frameskip=2,
     num_workers=args.num_workers,
-    pd_gains_path=str(PD_GAINS_PATH),
+    pd_gains_path=str(robot.pd_gains_path),
   )
 
   # Solver/integrator settings from mc_mujoco's HRP5Pmain.xml.
