@@ -9,6 +9,8 @@ from mjlab.actuator import IdealPdActuatorCfg
 from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
 from mjlab.utils.spec_config import CollisionCfg
 
+from mc_mjlab.robots.workspace_assets import MC_MUJOCO_SHARE, ensure_workspace_link
+
 ##
 # MJCF and assets.
 ##
@@ -16,13 +18,11 @@ from mjlab.utils.spec_config import CollisionCfg
 
 HRP5_XML: Path = Path(__file__).parent / "xmls" / "HRP5P.xml"
 
-# The MJCF and meshes are not tracked in this repo: they are byte-identical
-# to the mc_mujoco copies in the ROS workspace, so both are symlinked in on
-# first use. The XML symlink keeps the local name `HRP5P.xml` even though the
-# workspace file is `HRP5Pmain.xml`: get_spec()'s HRP5Pmain-specific
-# geom-naming branch keys on the file name, and must stay off (the demo's
-# collision handling in test_mc_rtc.py is built around it not running).
-_WORKSPACE_HRP5P = Path.home() / "workspace/install/share/mc_mujoco/HRP5P"
+# The XML symlink keeps the local name `HRP5P.xml` even though the workspace
+# file is `HRP5Pmain.xml`: get_spec()'s HRP5Pmain-specific geom-naming branch
+# keys on the file name, and must stay off (the demo's collision handling in
+# test_mc_rtc.py is built around it not running).
+_WORKSPACE_HRP5P = MC_MUJOCO_SHARE / "HRP5P"
 MESH_DIR: Path = Path(__file__).parent / "meshes"
 PD_GAINS_DIR: Path = Path(__file__).parent / "pdgains"
 # The real robot PD gains mc_mujoco applies (one `kp kd` row per
@@ -30,28 +30,10 @@ PD_GAINS_DIR: Path = Path(__file__).parent / "pdgains"
 PD_GAINS_PATH: Path = PD_GAINS_DIR / "PDgains_sim.dat"
 
 
-def _ensure_workspace_link(link: Path, target: Path) -> None:
-  if link.exists():
-    return
-  if link.is_symlink():  # dangling: workspace moved/removed
-    link.unlink()
-  if not target.exists():
-    raise FileNotFoundError(
-      f"HRP5P asset not found: neither {link} nor the workspace copy at "
-      f"{target} exists. Build/install mc_mujoco in the ROS workspace "
-      "(or restore the file) and retry."
-    )
-  link.parent.mkdir(parents=True, exist_ok=True)
-  try:
-    link.symlink_to(target, target_is_directory=target.is_dir())
-  except FileExistsError:  # concurrent first use
-    pass
-
-
 def _ensure_assets() -> None:
-  _ensure_workspace_link(MESH_DIR, _WORKSPACE_HRP5P / "meshes")
-  _ensure_workspace_link(HRP5_XML, _WORKSPACE_HRP5P / "xml" / "HRP5Pmain.xml")
-  _ensure_workspace_link(PD_GAINS_DIR, _WORKSPACE_HRP5P / "pdgains")
+  ensure_workspace_link(MESH_DIR, _WORKSPACE_HRP5P / "meshes")
+  ensure_workspace_link(HRP5_XML, _WORKSPACE_HRP5P / "xml" / "HRP5Pmain.xml")
+  ensure_workspace_link(PD_GAINS_DIR, _WORKSPACE_HRP5P / "pdgains")
 
 
 def get_assets(meshdir: str) -> dict[str, bytes]:
