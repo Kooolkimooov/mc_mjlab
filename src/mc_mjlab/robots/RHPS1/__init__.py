@@ -1,0 +1,1 @@
+"""RHPS1 humanoid."""

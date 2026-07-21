@@ -28,6 +28,7 @@ from mc_mjlab.actions.mc_rtc_joint_position_actions import (
 )
 from mc_mjlab.robots.HRP5P import hrp5p_constants
 from mc_mjlab.robots.JVRC1 import jvrc1_constants
+from mc_mjlab.robots.RHPS1 import rhps1_constants
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MC_RTC_YAML = REPO_ROOT / "etc" / "mc_rtc.yaml"
@@ -52,6 +53,11 @@ ROBOTS = {
     cfg_fn=jvrc1_constants.get_jvrc1_robot_cfg,
     residual_joints=jvrc1_constants.JVRC1_RESIDUAL_JOINTS,
     pd_gains_path=jvrc1_constants.PD_GAINS_PATH,
+  ),
+  "RHPS1_MuJoCo": RobotSpec(
+    cfg_fn=rhps1_constants.get_rhps1_robot_cfg,
+    residual_joints=rhps1_constants.RHPS1_RESIDUAL_JOINTS,
+    pd_gains_path=rhps1_constants.PD_GAINS_PATH,
   ),
 }
 
