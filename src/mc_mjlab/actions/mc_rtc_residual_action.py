@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import abc
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import torch
 from mjlab.envs.mdp.actions.actions import BaseAction, BaseActionCfg
@@ -75,6 +75,14 @@ class McRtcResidualActionCfg(BaseActionCfg):
   the GUI/StateBuilder fix). When False, resets re-run ``init()``, which raises
   for plugins that register datastore entries."""
 
+  console_output: Literal["none", "single", "all"] = "none"
+  """mc_rtc terminal output: "none" silences every controller, "single" lets
+  only env 0's controller print (it gets a dedicated worker process), "all"
+  suppresses nothing. Workers are silenced by an fd redirect at startup (no
+  per-step cost) and their error replies still carry the captured mc_rtc
+  output. In-process hosting falls back to per-call fd guards; a threaded
+  in-process pool honors "single" only at construction/reset."""
+
 
 class McRtcResidualActionBase(BaseAction):
   """mc_rtc residual action base: steps controllers via a pool, adds RL residual.
@@ -111,6 +119,7 @@ class McRtcResidualActionBase(BaseAction):
       self._target_names,
       num_workers=cfg.num_workers,
       use_worker_processes=cfg.use_worker_processes,
+      console_output=cfg.console_output,
     )
     metadata = self._pool.await_ready()
 

@@ -167,6 +167,13 @@ def main():
     help="Worker processes hosting the mc_rtc controllers (default: cpu_count - 2).",
   )
   parser.add_argument(
+    "--console-output",
+    choices=("none", "single", "all"),
+    default="none",
+    help="mc_rtc terminal output: silence every controller (default), let "
+    "only env 0's controller print, or let all of them print.",
+  )
+  parser.add_argument(
     "--viewer",
     choices=("none", "auto", "native", "viser"),
     default="none",
@@ -213,6 +220,7 @@ def main():
     frameskip=2,
     num_workers=args.num_workers,
     pd_gains_path=str(robot.pd_gains_path),
+    console_output=args.console_output,
   )
 
   # Solver/integrator settings from mc_mujoco's HRP5Pmain.xml.

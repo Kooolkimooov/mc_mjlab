@@ -18,6 +18,7 @@ path. Torch- and mjlab-free, like the worker-side ``ControllerHost``.
 
 from __future__ import annotations
 
+import contextlib
 import multiprocessing as mp
 import os
 import time
@@ -27,6 +28,7 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from multiprocessing.connection import Connection
 from multiprocessing.shared_memory import SharedMemory
+from typing import Literal
 
 import numpy as np
 
@@ -34,6 +36,7 @@ from mc_mjlab.actions.mc_rtc_controller_host import (
   ControllerHost,
   HostMetadata,
   IoLayout,
+  redirect_output_to_devnull,
   worker_main,
 )
 
@@ -76,6 +79,11 @@ class ControllerPool:
 
   One async step is outstanding at a time: ``dispatch_controller_step`` sends without
   blocking and ``collect`` awaits it, so each worker holds at most one command.
+
+  ``console_output`` picks which controllers may write mc_rtc terminal output:
+  "none" silences everything, "single" lets only env 0 print (it gets a
+  dedicated worker so every other worker is silenced wholesale at startup)
+  and "all" suppresses nothing.
   """
 
   # Assigned in `configure`; the action reads/writes these on the hot path.
@@ -89,11 +97,17 @@ class ControllerPool:
     target_names: Sequence[str],
     num_workers: int | None = None,
     use_worker_processes: bool = True,
+    console_output: Literal["none", "single", "all"] = "none",
   ):
+    if console_output not in ("none", "single", "all"):
+      raise ValueError(
+        f"console_output must be 'none', 'single' or 'all', got {console_output!r}"
+      )
     self._config_path = config_path
     self._num_envs = num_envs
     self._target_names = list(target_names)
     self._use_worker_processes = use_worker_processes
+    self._console_output = console_output
 
     self._procs: list[mp.process.BaseProcess] = []
     self._conns: list[Connection] = []
@@ -119,14 +133,22 @@ class ControllerPool:
 
   def _start_workers(self, num_workers: int | None) -> None:
     """Spawn the worker processes (non-blocking); metadata is awaited later."""
-    n = min(self._num_envs, max(1, num_workers or ((os.cpu_count() or 4) - 2)))
+    budget = min(self._num_envs, max(1, num_workers or ((os.cpu_count() or 4) - 2)))
+    if self._console_output == "single" and self._num_envs > 1:
+      # Env 0 (the one allowed to print) gets a dedicated worker so every
+      # other worker can silence its fds wholesale at startup.
+      rest = np.array_split(
+        np.arange(1, self._num_envs), min(self._num_envs - 1, max(1, budget - 1))
+      )
+      splits = [np.array([0]), *rest]
+    else:
+      splits = np.array_split(np.arange(self._num_envs), budget)
+    self._worker_env_ids = [s.tolist() for s in splits]
     print(
       f"[mc_rtc] constructing {self._num_envs} controllers across "
-      f"{n} worker processes..."
+      f"{len(self._worker_env_ids)} worker processes..."
     )
     self._t0 = time.perf_counter()
-    splits = np.array_split(np.arange(self._num_envs), n)
-    self._worker_env_ids = [s.tolist() for s in splits]
     # Forkserver so workers skip re-importing the launch script (spawn would
     # pull torch/mjlab into each worker; ~20% slower startup). Any non-empty
     # preload keeps the server from importing __main__; it must not pull in
@@ -140,10 +162,13 @@ class ControllerPool:
     try:
       for w, env_ids in enumerate(self._worker_env_ids):
         self._worker_of[env_ids] = w
+        suppress = self._console_output == "none" or (
+          self._console_output == "single" and 0 not in env_ids
+        )
         parent, child = ctx.Pipe()
         proc = ctx.Process(
           target=worker_main,
-          args=(child, self._config_path, env_ids, self._target_names),
+          args=(child, self._config_path, env_ids, self._target_names, suppress),
           daemon=True,
         )
         proc.start()
@@ -161,11 +186,20 @@ class ControllerPool:
       self, _shutdown_workers, self._procs, self._conns, self._shms
     )
 
+  def _allowed_output_envs(self) -> tuple[int, ...] | None:
+    """In-process suppression set (``None`` = every env may print)."""
+    if self._console_output == "all":
+      return None
+    return (0,) if self._console_output == "single" else ()
+
   def await_ready(self) -> HostMetadata:
     """Block until the controllers are constructed and return their metadata."""
     if not self._use_worker_processes:
       self._host = ControllerHost(
-        self._config_path, range(self._num_envs), self._target_names
+        self._config_path,
+        range(self._num_envs),
+        self._target_names,
+        allowed_output_envs=self._allowed_output_envs(),
       )
       return self._host.metadata()
     metadata: HostMetadata | None = None
@@ -238,12 +272,21 @@ class ControllerPool:
       return
     if self._host is not None:
       if self._thread_pool is not None and len(run_indices) > 1:
-        list(
-          self._thread_pool.map(
-            partial(self._host.step_env, in_arr=self.in_np, out_arr=self.out_np),
-            run_indices,
-          )
+        # fd redirection is process-global, so per-env guards cannot run under
+        # threads: silence the whole batch in "none" mode; "single" is only
+        # honored serially (the host guards per env in step_envs).
+        guard = (
+          redirect_output_to_devnull()
+          if self._console_output == "none"
+          else contextlib.nullcontext()
         )
+        with guard:
+          list(
+            self._thread_pool.map(
+              partial(self._host.step_env, in_arr=self.in_np, out_arr=self.out_np),
+              run_indices,
+            )
+          )
       else:
         self._host.step_envs(run_indices, self.in_np, self.out_np)
       self._dispatched_indices = run_indices

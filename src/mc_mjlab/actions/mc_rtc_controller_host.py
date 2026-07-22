@@ -35,22 +35,16 @@ except ImportError:
   eigen = None
 
 
-# Set when MC_MJLAB_WORKER_LOG_DIR is active (see worker_main): keeps
-# suppress_mc_rtc_output a no-op so worker logs retain construction output.
-_debug_keep_output = True
-
-
 @contextlib.contextmanager
 def suppress_mc_rtc_output() -> Iterator[None]:
   """Silence mc_rtc's terminal logging for the duration of the block.
 
   The spdlog loggers write from C++ and have no config switch, so fds 1/2
   themselves must be redirected (a ``sys.stdout`` swap catches nothing). On
-  error the captured text is replayed to the real stderr.
+  error the captured text is replayed to the real stderr. The trailing
+  flush-drain sleep makes this a cold-path tool (construction, reset); the
+  step path uses ``redirect_output_to_devnull``.
   """
-  if _debug_keep_output:
-    yield
-    return
   sys.stdout.flush()
   sys.stderr.flush()
   saved_out, saved_err = os.dup(1), os.dup(2)
@@ -75,6 +69,34 @@ def suppress_mc_rtc_output() -> Iterator[None]:
     os.close(saved_out)
     os.close(saved_err)
     capture.close()
+
+
+@contextlib.contextmanager
+def redirect_output_to_devnull() -> Iterator[None]:
+  """Discard fds 1/2 for the duration of the block, cheaply.
+
+  No capture, no replay and no flush-drain sleep, so it is safe on the step
+  path; the price is that a line spdlog flushes asynchronously right after
+  the block can slip through.
+  """
+  sys.stdout.flush()
+  sys.stderr.flush()
+  saved_out, saved_err = os.dup(1), os.dup(2)
+  devnull = os.open(os.devnull, os.O_WRONLY)
+  try:
+    os.dup2(devnull, 1)
+    os.dup2(devnull, 2)
+    try:
+      yield
+    finally:
+      sys.stdout.flush()
+      sys.stderr.flush()
+      os.dup2(saved_out, 1)
+      os.dup2(saved_err, 2)
+  finally:
+    os.close(devnull)
+    os.close(saved_out)
+    os.close(saved_err)
 
 
 class _IterItemsDict(dict):
@@ -169,11 +191,17 @@ class ControllerHost:
   """Owns a slice of MCGlobalControllers and steps/resets them from I/O rows.
 
   ``env_ids`` maps global env indices to local controllers; all I/O goes
-  through ``IoLayout``-shaped arrays.
+  through ``IoLayout``-shaped arrays. ``allowed_output_envs`` lists the global
+  env ids whose controllers may write to the console; ``None`` (the worker
+  path, where silencing is fd-level for the whole process) suppresses nothing.
   """
 
   def __init__(
-    self, config_path: str, env_ids: Sequence[int], target_names: Sequence[str]
+    self,
+    config_path: str,
+    env_ids: Sequence[int],
+    target_names: Sequence[str],
+    allowed_output_envs: Sequence[int] | None = None,
   ):
     if mc_control is None:
       raise ImportError(
@@ -182,10 +210,13 @@ class ControllerHost:
     self._env_ids = list(env_ids)
     self._local_of = {env_id: k for k, env_id in enumerate(self._env_ids)}
     self._target_names = list(target_names)
+    self._allowed_output = (
+      None if allowed_output_envs is None else frozenset(allowed_output_envs)
+    )
 
     self._controllers = []
-    with suppress_mc_rtc_output():
-      for _ in self._env_ids:
+    for env_id in self._env_ids:
+      with self._output_guard(env_id):
         self._controllers.append(mc_control.MCGlobalController(config_path))
     # mc_mujoco calls init() exactly once per controller; later resets go
     # through MCGlobalController::reset().
@@ -217,6 +248,7 @@ class ControllerHost:
       ],
       dtype=np.float64,
     )
+
     target_to_ref = [
       self._ref_joint_order.index(n) if n in self._ref_joint_order else -1
       for n in self._target_names
@@ -276,6 +308,20 @@ class ControllerHost:
     self._imu_keys = [name.encode() for name, _, _ in layout.imu]
     self._wrench_keys = [name.encode() for name in layout.wrenches]
 
+  def _output_guard(
+    self, env_id: int, hot: bool = False
+  ) -> contextlib.AbstractContextManager[None]:
+    """Suppression wrapper for one env's controller call.
+
+    A no-op when the env may print; otherwise capture-and-replay on cold
+    paths and a plain fd discard on the step path (``hot``). ``step_env``
+    itself stays guard-free: fd redirection is process-global, so the
+    threaded in-process pool must guard whole batches instead.
+    """
+    if self._allowed_output is None or env_id in self._allowed_output:
+      return contextlib.nullcontext()
+    return redirect_output_to_devnull() if hot else suppress_mc_rtc_output()
+
   def _expand(self, values: np.ndarray, base: np.ndarray) -> list[float]:
     """Expand target-joint values into refJointOrder on top of ``base``."""
     full = base.copy()
@@ -292,8 +338,8 @@ class ControllerHost:
     assert layout is not None
     T = layout.num_targets
     ro = layout.root_off
-    with suppress_mc_rtc_output():
-      for env_id in env_ids:
+    for env_id in env_ids:
+      with self._output_guard(env_id):
         local = self._local_of[env_id]
         controller = self._controllers[local]
         row = in_arr[env_id]
@@ -442,8 +488,13 @@ class ControllerHost:
   def step_envs(
     self, env_ids: Sequence[int], in_arr: np.ndarray, out_arr: np.ndarray
   ) -> None:
+    if self._allowed_output is None:
+      for env_id in env_ids:
+        self.step_env(env_id, in_arr, out_arr)
+      return
     for env_id in env_ids:
-      self.step_env(env_id, in_arr, out_arr)
+      with self._output_guard(env_id, hot=True):
+        self.step_env(env_id, in_arr, out_arr)
 
 
 def worker_main(
@@ -451,6 +502,7 @@ def worker_main(
   config_path: str,
   env_ids: Sequence[int],
   target_names: Sequence[str],
+  suppress_output: bool = False,
 ) -> None:
   """Entry point of a controller worker process.
 
@@ -458,14 +510,19 @@ def worker_main(
   HostMetadata)`` or ``("error", tb)``; then ``configure``/``step``/``reset``
   commands each reply ``("ok", None)`` or ``("error", tb)`` (the worker stays
   alive); ``stop`` replies and exits.
+
+  ``suppress_output`` silences the whole process by pointing fds 1/2 at a
+  capture file once at startup (zero per-step cost); error replies carry the
+  captured tail so mc_rtc's own error text is not lost. The
+  ``MC_MJLAB_WORKER_LOG_DIR`` debug hook takes precedence: output then goes
+  to a per-worker log file instead.
   """
   # Ctrl+C hits the whole foreground process group; shutdown is coordinated by
   # the trainer instead ("stop", pipe EOF, or the daemon flag).
   signal.signal(signal.SIGINT, signal.SIG_IGN)
+  capture = None
   log_dir = os.environ.get("MC_MJLAB_WORKER_LOG_DIR")
   if log_dir:
-    global _debug_keep_output
-    _debug_keep_output = True
     fd = os.open(
       os.path.join(log_dir, f"worker-{os.getpid()}.log"),
       os.O_CREAT | os.O_WRONLY | os.O_TRUNC,
@@ -477,6 +534,38 @@ def worker_main(
     import faulthandler
 
     faulthandler.enable()
+  elif suppress_output:
+    # spdlog writes from C++, so only an fd-level redirect silences it. A
+    # capture file rather than /dev/null so error replies can attach mc_rtc's
+    # own error text; reply_ok truncates it to keep it from growing.
+    capture = tempfile.TemporaryFile()
+    os.dup2(capture.fileno(), 1)
+    os.dup2(capture.fileno(), 2)
+
+  def error_payload() -> str:
+    tb = traceback.format_exc()
+    if capture is None:
+      return tb
+    try:
+      capture.seek(0)
+      tail = capture.read()[-8192:].decode(errors="replace")
+      capture.seek(0)
+      capture.truncate()
+    except OSError:
+      return tb
+    if not tail.strip():
+      return tb
+    return f"{tb}\n--- captured mc_rtc output (tail) ---\n{tail}"
+
+  def reply_ok() -> None:
+    conn.send(("ok", None))
+    if capture is not None:
+      try:
+        capture.seek(0)
+        capture.truncate()
+      except OSError:
+        pass
+
   host: ControllerHost | None = None
   in_h: _ShmHandle | None = None
   out_h: _ShmHandle | None = None
@@ -484,7 +573,7 @@ def worker_main(
     try:
       host = ControllerHost(config_path, env_ids, target_names)
     except BaseException:
-      conn.send(("error", traceback.format_exc()))
+      conn.send(("error", error_payload()))
       return
     conn.send(("meta", host.metadata()))
 
@@ -496,22 +585,22 @@ def worker_main(
           in_h = attach_shm(in_name, in_shape)
           out_h = attach_shm(out_name, out_shape)
           host.configure(layout)
-          conn.send(("ok", None))
+          reply_ok()
         elif cmd == "step":
           assert in_h is not None and out_h is not None
           host.step_envs(payload, in_h.arr, out_h.arr)
-          conn.send(("ok", None))
+          reply_ok()
         elif cmd == "reset":
           assert in_h is not None
           host.reset_envs(payload, in_h.arr)
-          conn.send(("ok", None))
+          reply_ok()
         elif cmd == "stop":
           conn.send(("ok", None))
           return
         else:
           conn.send(("error", f"unknown command {cmd!r}"))
       except BaseException:
-        conn.send(("error", traceback.format_exc()))
+        conn.send(("error", error_payload()))
   except (EOFError, BrokenPipeError, ConnectionResetError, KeyboardInterrupt):
     pass  # trainer went away: exit quietly
   finally:
@@ -519,3 +608,5 @@ def worker_main(
       in_h.close()
     if out_h is not None:
       out_h.close()
+    if capture is not None:
+      capture.close()
