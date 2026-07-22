@@ -60,6 +60,59 @@ def apply_reference_pd_gains(
   )
 
 
+def _actuator_gain_columns(
+  entity, target_names: Sequence[str]
+) -> list[tuple[int, torch.Tensor, torch.Tensor, int]]:
+  """``(target index, stiffness, damping, column)`` per PD-driven target joint.
+
+  The gain tensors are the actuators' own, so writing through them retunes the
+  entity in place.
+  """
+  index_of = {name: i for i, name in enumerate(target_names)}
+  columns: list[tuple[int, torch.Tensor, torch.Tensor, int]] = []
+  for act in entity.actuators:
+    stiffness = getattr(act, "stiffness", None)
+    damping = getattr(act, "damping", None)
+    if stiffness is None or damping is None:
+      continue
+    for j, name in enumerate(act.target_names):
+      i = index_of.get(name)
+      if i is not None:
+        columns.append((i, stiffness, damping, j))
+  return columns
+
+
+def read_pd_gains(
+  entity, target_names: Sequence[str], num_envs: int, device
+) -> tuple[torch.Tensor, torch.Tensor]:
+  """``(kp, kd)`` copies, each ``(num_envs, num_targets)`` in target order.
+
+  Targets driven by an actuator without PD gains read zero, so a PD law built
+  on these tensors contributes nothing for them.
+  """
+  kp = torch.zeros(num_envs, len(target_names), device=device)
+  kd = torch.zeros_like(kp)
+  for i, stiffness, damping, j in _actuator_gain_columns(entity, target_names):
+    kp[:, i] = stiffness[:, j]
+    kd[:, i] = damping[:, j]
+  return kp, kd
+
+
+def zero_pd_gains(entity, target_names: Sequence[str]) -> int:
+  """Zero the entity's PD gains for the target joints; returns the count.
+
+  Turns mjlab's PD actuators into pass-through motors (their control law is
+  ``kp * pos_err + kd * vel_err + effort_target``), leaving the action term as
+  the only source of joint torque. Take a copy with ``read_pd_gains`` first if
+  the term still needs the gains.
+  """
+  columns = _actuator_gain_columns(entity, target_names)
+  for _, stiffness, damping, j in columns:
+    stiffness[:, j] = 0.0
+    damping[:, j] = 0.0
+  return len(columns)
+
+
 class ControllerIoBinding:
   """Owns the ``IoLayout`` and fills the mc_rtc input block from the sim.
 
@@ -177,6 +230,7 @@ class ControllerIoBinding:
       feed_accel_fallback=self._accel_adr >= 0,
       imu=tuple((n, g >= 0, a >= 0) for n, g, a in imu_sensors),
       wrenches=tuple(n for n, _, _ in wrench_sensors),
+      output_channels=self._output_channels,
     )
 
     # Gather columns for a single fancy-indexed sensordata copy per step;

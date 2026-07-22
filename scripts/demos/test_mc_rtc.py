@@ -26,6 +26,9 @@ from mjlab.viewer import NativeMujocoViewer, ViserPlayViewer
 from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionActionCfg,
 )
+from mc_mjlab.actions.mc_rtc_residual_joint_torque_actions import (
+  McRtcResidualJointTorqueActionCfg,
+)
 from mc_mjlab.robots.HRP5P import hrp5p_constants
 from mc_mjlab.robots.JVRC1 import jvrc1_constants
 from mc_mjlab.robots.RHPS1 import rhps1_constants
@@ -167,6 +170,13 @@ def main():
     help="Worker processes hosting the mc_rtc controllers (default: cpu_count - 2).",
   )
   parser.add_argument(
+    "--control",
+    choices=("position", "torque"),
+    default="position",
+    help="Actuation the mc_rtc output drives: joint position+velocity targets "
+    "(default) or joint torques with mc_mujoco's per-joint PD fallback.",
+  )
+  parser.add_argument(
     "--console-output",
     choices=("none", "single", "all"),
     default="none",
@@ -211,7 +221,12 @@ def main():
   # mc_mujoco parity: controller at 0.002s over a 1 kHz sim (frameskip=2), real
   # PD gains, all controlled joints track mc_rtc but the RL residual only
   # reaches the non-finger joints.
-  action_cfg = McRtcResidualJointPositionActionCfg(
+  action_cls = (
+    McRtcResidualJointPositionActionCfg
+    if args.control == "position"
+    else McRtcResidualJointTorqueActionCfg
+  )
+  action_cfg = action_cls(
     entity_name="robot",
     actuator_names=(".*",),
     residual_actuator_names=robot.residual_joints,

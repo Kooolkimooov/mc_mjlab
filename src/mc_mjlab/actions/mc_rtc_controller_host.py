@@ -106,6 +106,11 @@ class _IterItemsDict(dict):
     return iter(self.items())
 
 
+# Controller output channel -> the rbdyn MultiBodyConfig member holding it.
+# All are per-joint vectors indexed like mbc.q, so one write loop serves all.
+MBC_ATTR_BY_CHANNEL = {"q": "q", "alpha": "alpha", "tau": "jointTorque"}
+
+
 @dataclass(frozen=True)
 class HostMetadata:
   """What the trainer needs to know about the mc_rtc robot, probed worker-side."""
@@ -132,7 +137,9 @@ class IoLayout:
     [imu_off, ...)  6 per IMU body sensor: gyro(3), accel(3)
     [wrench_off, ..) 6 per force sensor: force(3), torque(3) as MuJoCo reads them
 
-  Output row: target q ``[0, T)`` and alpha ``[T, 2T)`` for the target joints.
+  Output row: one T-wide block per entry of ``output_channels``, in order --
+  e.g. the default ``("q", "alpha")`` gives q in ``[0, T)`` and alpha in
+  ``[T, 2T)``, for the target joints.
   """
 
   num_targets: int
@@ -145,6 +152,9 @@ class IoLayout:
   imu: tuple[tuple[str, bool, bool], ...] = ()
   # Force sensor names, in input-block order.
   wrenches: tuple[str, ...] = ()
+  # Controller outputs written per env, in output-block order. Keys of
+  # MBC_ATTR_BY_CHANNEL; the action term's `output_channels` must match.
+  output_channels: tuple[str, ...] = ("q", "alpha")
 
   @property
   def root_off(self) -> int:
@@ -164,7 +174,7 @@ class IoLayout:
 
   @property
   def out_width(self) -> int:
-    return 2 * self.num_targets
+    return len(self.output_channels) * self.num_targets
 
 
 @dataclass
@@ -304,7 +314,14 @@ class ControllerHost:
 
   def configure(self, layout: IoLayout) -> None:
     """Fix the I/O layout and precompute the per-step name keys."""
+    unknown = set(layout.output_channels) - set(MBC_ATTR_BY_CHANNEL)
+    if unknown:
+      raise ValueError(
+        f"unknown controller output channel(s) {sorted(unknown)}; "
+        f"known: {sorted(MBC_ATTR_BY_CHANNEL)}"
+      )
     self._layout = layout
+    self._output_attrs = [MBC_ATTR_BY_CHANNEL[c] for c in layout.output_channels]
     self._imu_keys = [name.encode() for name, _, _ in layout.imu]
     self._wrench_keys = [name.encode() for name in layout.wrenches]
 
@@ -475,15 +492,14 @@ class ControllerHost:
     controller.run()
 
     mbc = controller.robot().mbc
-    mbc_q, mbc_alpha = mbc.q, mbc.alpha
     out_row = out_arr[env_id]
-    for k, j in enumerate(self._target_mbc_indices):
-      if j != -1 and len(mbc_q[j]) > 0:
-        out_row[k] = mbc_q[j][0]
-        out_row[T + k] = mbc_alpha[j][0]
-      else:
-        out_row[k] = 0.0
-        out_row[T + k] = 0.0
+    for c, attr in enumerate(self._output_attrs):
+      values = getattr(mbc, attr)
+      base = c * T
+      for k, j in enumerate(self._target_mbc_indices):
+        # A joint the controller does not drive (or, for tau, one the QP left
+        # unset) reads 0.0; consumers treat that as "no command".
+        out_row[base + k] = values[j][0] if j != -1 and len(values[j]) > 0 else 0.0
 
   def step_envs(
     self, env_ids: Sequence[int], in_arr: np.ndarray, out_arr: np.ndarray

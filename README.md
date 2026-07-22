@@ -8,6 +8,7 @@
 ```
 src/mc_mjlab/
   actions/mc_rtc_residual_joint_position_actions.py  # McRtcResidualJointPositionAction(Cfg)
+  actions/mc_rtc_residual_joint_torque_actions.py    # McRtcResidualJointTorqueAction(Cfg)
   actions/mc_rtc_residual_action.py        # residual action base (interpolation, async dispatch)
   actions/mc_rtc_controller_pool.py        # worker processes, pipes, shared-memory blocks
   actions/mc_rtc_controller_io_binding.py  # sim <-> mc_rtc I/O wiring (IoLayout, input assembly)

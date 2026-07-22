@@ -179,10 +179,9 @@ class McRtcResidualActionBase(BaseAction):
     subset) and laid out in the output block in ``output_channels`` order -- the
     same order the host writes.
     """
-    out_width = self._io.layout.out_width
-    assert out_width == len(self.output_channels) * self._num_targets, (
-      f"output block width {out_width} does not match "
-      f"{len(self.output_channels)} channel(s) x {self._num_targets} targets"
+    assert self._io.layout.output_channels == self.output_channels, (
+      f"shared block carries {self._io.layout.output_channels}, "
+      f"but this action consumes {self.output_channels}"
     )
     self._previous_control = {
       c: torch.zeros(self.num_envs, self._num_targets, device=self.device)
