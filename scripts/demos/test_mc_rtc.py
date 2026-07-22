@@ -23,7 +23,7 @@ from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.terrains import TerrainEntityCfg
 from mjlab.viewer import NativeMujocoViewer, ViserPlayViewer
 
-from mc_mjlab.actions.mc_rtc_joint_position_actions import (
+from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionActionCfg,
 )
 from mc_mjlab.robots.HRP5P import hrp5p_constants
