@@ -1,8 +1,7 @@
-"""First-use symlinks into the ROS workspace's mc_mujoco share.
+"""First-use symlinks into the mc_rtc workspace's mc_mujoco share.
 
-Robot assets (MJCF, meshes, PD gains) are not tracked in this repo: they are
-byte-identical to the mc_mujoco copies, so each robot package symlinks them
-in on first use.
+Robot assets (MJCF, meshes, PD gains) are not tracked in this repo:
+each robot package symlinks them in on first use.
 """
 
 from pathlib import Path

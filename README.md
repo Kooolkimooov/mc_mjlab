@@ -7,8 +7,11 @@
 
 ```
 src/mc_mjlab/
-  actions/mc_rtc_joint_position_actions.py  # McRtcResidualJointPositionAction(Cfg)
-  actions/mc_rtc_host.py      # worker-process controller host (shared-memory I/O)
+  actions/mc_rtc_residual_joint_position_actions.py  # McRtcResidualJointPositionAction(Cfg)
+  actions/mc_rtc_residual_action.py        # residual action base (interpolation, async dispatch)
+  actions/mc_rtc_controller_pool.py        # worker processes, pipes, shared-memory blocks
+  actions/mc_rtc_controller_io_binding.py  # sim <-> mc_rtc I/O wiring (IoLayout, input assembly)
+  actions/mc_rtc_controller_host.py        # worker-side per-env controller host
   robots/                     # constants (assets are dynamically symlinked from mc_rtc install path)
 etc/
   mc_rtc.yaml                 # mc_rtc controller config
