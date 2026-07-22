@@ -24,7 +24,7 @@ import torch
 from mjlab.envs.mdp.actions.actions import BaseAction, BaseActionCfg
 from mjlab.utils.lab_api.string import resolve_matching_names
 
-from mc_mjlab.actions.mc_rtc_host import (
+from mc_mjlab.actions.mc_rtc_controller_host import (
   ControllerHost,
   HostMetadata,
   IoLayout,
