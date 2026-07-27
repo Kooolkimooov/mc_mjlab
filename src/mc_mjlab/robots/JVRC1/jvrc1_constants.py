@@ -1,231 +1,130 @@
 """JVRC1 constants and helpers."""
 
-import math
 from pathlib import Path
 
 import mujoco
-from mjlab.actuator import IdealPdActuatorCfg
 from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
 
-from mc_mjlab.robots.workspace_assets import MC_MUJOCO_SHARE, ensure_workspace_link
+from mc_mjlab.robots import mc_rtc_robot_configuration as mc_rtc
+from mc_mjlab.robots.additional_sensors_configuration import add_locomotion_sensors
+from mc_mjlab.robots.collision_configuration import (
+  get_collision_presets,
+  group_and_disable_collision_geoms,
+  name_foot_collision_geoms,
+  name_remaining_collision_geoms,
+)
+from mc_mjlab.robots.mc_mujoco_assets import (
+  MC_MUJOCO_SHARE_DIR,
+  ensure_asset_symlink,
+)
+from mc_mjlab.robots.pd_actuator_configuration import (
+  get_armature_from_spec,
+  get_pd_actuator_cfgs,
+)
 
 ##
 # MJCF and assets.
 ##
 
-_WORKSPACE_JVRC1 = MC_MUJOCO_SHARE / "JVRC1"
+JVRC1_MC_RTC_MODULE_NAME = "JVRC1"
+JVRC1_MC_RTC_ASSETS_DIR = MC_MUJOCO_SHARE_DIR / "JVRC1"
 JVRC1_XML: Path = Path(__file__).parent / "xmls" / "JVRC1.xml"
-MESH_DIR: Path = Path(__file__).parent / "meshes"
-PD_GAINS_DIR: Path = Path(__file__).parent / "pdgains"
-# The real robot PD gains mc_mujoco applies (one `kp kd` row per
-# refJointOrder joint); consumed by McRtcResidualJointPositionActionCfg.
-PD_GAINS_PATH: Path = PD_GAINS_DIR / "PDgains_sim.dat"
+JVRC1_MESH_DIR: Path = Path(__file__).parent / "meshes"
+JVRC1_PD_GAINS_DIR: Path = Path(__file__).parent / "pdgains"
+JVRC1_PD_GAINS_PATH: Path = JVRC1_PD_GAINS_DIR / "PDgains_sim.dat"
 
 
-def _ensure_assets() -> None:
-  ensure_workspace_link(MESH_DIR, _WORKSPACE_JVRC1 / "meshes")
-  ensure_workspace_link(JVRC1_XML, _WORKSPACE_JVRC1 / "xml" / "jvrc1.xml")
-  ensure_workspace_link(PD_GAINS_DIR, _WORKSPACE_JVRC1 / "pdgains")
+def ensure_assets() -> None:
+  ensure_asset_symlink(JVRC1_MESH_DIR, JVRC1_MC_RTC_ASSETS_DIR / "meshes")
+  ensure_asset_symlink(JVRC1_XML, JVRC1_MC_RTC_ASSETS_DIR / "xml" / "jvrc1.xml")
+  ensure_asset_symlink(JVRC1_PD_GAINS_DIR, JVRC1_MC_RTC_ASSETS_DIR / "pdgains")
+
+
+# Root body, for the subtree angular-momentum sensor.
+JVRC1_ROOT_BODY = "PELVIS_S"
+
+# Each foot is one collision mesh on the ankle-pitch link, unnamed like every
+# other collision geom. Name it semantically so the presets can address the
+# feet apart from the body.
+JVRC1_FOOT_BODIES: dict[str, str] = {
+  "L_ANKLE_P_S": "left_foot_collision",
+  "R_ANKLE_P_S": "right_foot_collision",
+}
 
 
 def get_spec() -> mujoco.MjSpec:
   """Load the JVRC1 MJCF."""
-  _ensure_assets()
+  ensure_assets()
 
   spec = mujoco.MjSpec.from_file(str(JVRC1_XML))
-
-  # Grouping convention: visual geoms 2, collision geoms 3, sites 4. The MJCF
-  # defaults (`class="visual"/"collision"`) carry the semantic split.
-  for geom in spec.geoms:
-    if geom.conaffinity == 0 and geom.contype == 0:
-      geom.group = 2
-    else:
-      geom.group = 3
-  for site in spec.sites:
-    site.group = 4
-
-  # Collisions off by default; consumers re-enable selected sets (the geoms
-  # are unnamed, so the name-based presets cannot).
-  for geom in spec.geoms:
-    geom.contype = 0
-    geom.conaffinity = 0
+  name_foot_collision_geoms(spec, JVRC1_FOOT_BODIES)
+  name_remaining_collision_geoms(spec, "jvrc1")
+  add_locomotion_sensors(spec, root_body=JVRC1_ROOT_BODY)
+  group_and_disable_collision_geoms(spec)
   return spec
 
 
 ##
-# Joint tables (from jvrc1.xml / the mc_rtc robot module).
+# Joint tables.
 ##
 
-# Rotor armature per joint, as in the MJCF.
-JVRC1_ARMATURE: dict[str, float] = {
-  "R_HIP_P": 0.1925,
-  "R_HIP_R": 0.1813,
-  "R_HIP_Y": 0.1237,
-  "R_KNEE": 0.1305,
-  "R_ANKLE_R": 0.0653,
-  "R_ANKLE_P": 0.1337,
-  "L_HIP_P": 0.1925,
-  "L_HIP_R": 0.1813,
-  "L_HIP_Y": 0.1237,
-  "L_KNEE": 0.1305,
-  "L_ANKLE_R": 0.0653,
-  "L_ANKLE_P": 0.1337,
-  "WAIST_Y": 0.1221,
-  "WAIST_P": 0.1813,
-  "WAIST_R": 0.1054,
-  "NECK_Y": 0.0567,
-  "NECK_R": 0.0596,
-  "NECK_P": 0.0596,
-  "R_SHOULDER_P": 0.1210,
-  "R_SHOULDER_R": 0.1210,
-  "R_SHOULDER_Y": 0.1231,
-  "R_ELBOW_P": 0.1054,
-  "R_ELBOW_Y": 0.1240,
-  "R_WRIST_R": 0.0876,
-  "R_WRIST_Y": 0.1240,
-  "R_UTHUMB": 0.0130,
-  "R_LTHUMB": 0.0320,
-  "R_UINDEX": 0.0073,
-  "R_LINDEX": 0.0039,
-  "R_ULITTLE": 0.0073,
-  "R_LLITTLE": 0.0039,
-  "L_SHOULDER_P": 0.1210,
-  "L_SHOULDER_R": 0.1210,
-  "L_SHOULDER_Y": 0.1231,
-  "L_ELBOW_P": 0.1054,
-  "L_ELBOW_Y": 0.1240,
-  "L_WRIST_R": 0.0876,
-  "L_WRIST_Y": 0.1240,
-  "L_UTHUMB": 0.0130,
-  "L_LTHUMB": 0.0320,
-  "L_UINDEX": 0.0073,
-  "L_LINDEX": 0.0039,
-  "L_ULITTLE": 0.0073,
-  "L_LLITTLE": 0.0039,
-}
+# Default: every joint in the mc_rtc refJointOrder (all 44, fingers included) is
+# actuated and receives the RL residual. Carve joints out with:
+#   - JVRC1_NON_ACTUATED_JOINTS: left fully passive (no actuator, no residual).
+#   - JVRC1_NON_RESIDUAL_JOINTS: actuated (tracks the controller) but no residual
+#     -- e.g. add the finger joints here to keep them out of the policy's action.
+JVRC1_NON_ACTUATED_JOINTS: frozenset[str] = frozenset()
+JVRC1_NON_RESIDUAL_JOINTS: frozenset[str] = frozenset()
 
-# The joints mc_mujoco motorizes (all but the lower-finger joints); the rest
-# stay passive, matching its dynamics.
-JVRC1_MOTORIZED_JOINTS: tuple[str, ...] = (
-  "R_HIP_P",
-  "R_HIP_R",
-  "R_HIP_Y",
-  "R_KNEE",
-  "R_ANKLE_R",
-  "R_ANKLE_P",
-  "L_HIP_P",
-  "L_HIP_R",
-  "L_HIP_Y",
-  "L_KNEE",
-  "L_ANKLE_R",
-  "L_ANKLE_P",
-  "WAIST_Y",
-  "WAIST_P",
-  "WAIST_R",
-  "NECK_Y",
-  "NECK_R",
-  "NECK_P",
-  "R_SHOULDER_P",
-  "R_SHOULDER_R",
-  "R_SHOULDER_Y",
-  "R_ELBOW_P",
-  "R_ELBOW_Y",
-  "R_WRIST_R",
-  "R_WRIST_Y",
-  "R_UTHUMB",
-  "L_SHOULDER_P",
-  "L_SHOULDER_R",
-  "L_SHOULDER_Y",
-  "L_ELBOW_P",
-  "L_ELBOW_Y",
-  "L_WRIST_R",
-  "L_WRIST_Y",
-  "L_UTHUMB",
-)
 
-# Motorized joints that receive the RL residual (no fingers).
-JVRC1_RESIDUAL_JOINTS: tuple[str, ...] = tuple(
-  n for n in JVRC1_MOTORIZED_JOINTS if not n.endswith("THUMB")
-)
-
-##
-# Actuator config.
-##
-
-NATURAL_FREQ = 3.0 * 2.0 * math.pi  # rad/s
-DAMPING_RATIO = 1.5
-
-# Unclamped, like mc_mujoco's PD torque (its motors set forcelimited=false);
-# with the real gains nominal limits would saturate constantly and change the
-# stabilizer's behavior. The armature-derived gains are defaults; the demo
-# overrides them with PDgains_sim.dat via pd_gains_path.
-EFFORT_LIMIT = float("inf")
-
-JVRC1_ACTUATORS: tuple[IdealPdActuatorCfg, ...] = tuple(
-  IdealPdActuatorCfg(
-    target_names_expr=(name,),
-    stiffness=JVRC1_ARMATURE[name] * NATURAL_FREQ**2,
-    damping=2 * DAMPING_RATIO * JVRC1_ARMATURE[name] * NATURAL_FREQ,
-    effort_limit=EFFORT_LIMIT,
-    armature=JVRC1_ARMATURE[name],
+def get_residual_joints() -> tuple[str, ...]:
+  return mc_rtc.get_residual_joints(
+    JVRC1_MC_RTC_MODULE_NAME,
+    non_actuated=JVRC1_NON_ACTUATED_JOINTS,
+    non_residual=JVRC1_NON_RESIDUAL_JOINTS,
   )
-  for name in JVRC1_MOTORIZED_JOINTS
-)
+
 
 ##
-# Initial state: half-sitting stance from the mc_rtc robot module.
+# Collision presets. See collision.get_collision_presets for the contact model.
 ##
 
-JVRC1_INIT_STATE = EntityCfg.InitialStateCfg(
-  # z = the module's default attitude; starting higher injects a drop
-  # transient at reset.
-  pos=(0.0, 0.0, 0.8275),
-  joint_pos={
-    "R_HIP_P": -0.38,
-    "R_HIP_R": -0.01,
-    "R_KNEE": 0.72,
-    "R_ANKLE_R": -0.01,
-    "R_ANKLE_P": -0.33,
-    "L_HIP_P": -0.38,
-    "L_HIP_R": 0.02,
-    "L_KNEE": 0.72,
-    "L_ANKLE_R": -0.02,
-    "L_ANKLE_P": -0.33,
-    "WAIST_P": 0.13,
-    "R_SHOULDER_P": -0.052,
-    "R_SHOULDER_R": -0.17,
-    "R_ELBOW_P": -0.52,
-    "L_SHOULDER_P": -0.052,
-    "L_SHOULDER_R": 0.17,
-    "L_ELBOW_P": -0.52,
-  },
-  joint_vel={".*": 0.0},
-)
+JVRC1_FOOT_COLLISION_EXPR = r"^(left|right)_foot_collision$"
 
-##
-# Final config.
-##
+(
+  JVRC1_FEET_ONLY_COLLISION,
+  JVRC1_FULL_COLLISION,
+  JVRC1_FULL_COLLISION_WITHOUT_SELF,
+) = get_collision_presets("jvrc1", JVRC1_FOOT_COLLISION_EXPR)
 
-JVRC1_ARTICULATION = EntityArticulationInfoCfg(
-  actuators=JVRC1_ACTUATORS,
-  soft_joint_pos_limit_factor=0.99,
-)
+JVRC1_COLLISION = JVRC1_FULL_COLLISION
 
 
-def get_jvrc1_robot_cfg() -> EntityCfg:
+def get_robot_cfg() -> EntityCfg:
   """Return a fresh JVRC1 EntityCfg."""
-  return EntityCfg(
-    init_state=JVRC1_INIT_STATE,
-    collisions=(),  # geoms are unnamed; consumers enable them by group
-    spec_fn=get_spec,
-    articulation=JVRC1_ARTICULATION,
+
+  spec = get_spec()
+
+  joints = mc_rtc.get_actuated_joints(
+    JVRC1_MC_RTC_MODULE_NAME, non_actuated=JVRC1_NON_ACTUATED_JOINTS
   )
 
+  simulated = {j.name for j in spec.joints}
 
-if __name__ == "__main__":
-  import mujoco.viewer as viewer
-  from mjlab.entity.entity import Entity
+  init_state = EntityCfg.InitialStateCfg(
+    pos=mc_rtc.get_default_root_position(JVRC1_MC_RTC_MODULE_NAME),
+    joint_pos=mc_rtc.get_default_joint_positions(JVRC1_MC_RTC_MODULE_NAME, simulated),
+    joint_vel={".*": 0.0},
+  )
 
-  robot = Entity(get_jvrc1_robot_cfg())
+  articulation = EntityArticulationInfoCfg(
+    actuators=get_pd_actuator_cfgs(joints, get_armature_from_spec(spec, joints)),
+    soft_joint_pos_limit_factor=0.99,
+  )
 
-  viewer.launch(robot.spec.compile())
+  return EntityCfg(
+    init_state=init_state,
+    collisions=(JVRC1_COLLISION,),
+    spec_fn=get_spec,
+    articulation=articulation,
+  )

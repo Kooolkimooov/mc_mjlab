@@ -10,12 +10,8 @@ Two modes:
 import argparse
 import os
 import time
-from collections.abc import Callable
-from dataclasses import dataclass
-from pathlib import Path
 
 import torch
-from mjlab.entity import EntityCfg
 from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 from mjlab.rl import RslRlVecEnvWrapper
 from mjlab.scene.scene import SceneCfg
@@ -23,81 +19,17 @@ from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.terrains import TerrainEntityCfg
 from mjlab.viewer import NativeMujocoViewer, ViserPlayViewer
 
+from mc_mjlab import MC_RTC_YAML_PATH
 from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionActionCfg,
 )
 from mc_mjlab.actions.mc_rtc_residual_joint_torque_actions import (
   McRtcResidualJointTorqueActionCfg,
 )
-from mc_mjlab.robots.HRP5P import hrp5p_constants
-from mc_mjlab.robots.JVRC1 import jvrc1_constants
-from mc_mjlab.robots.RHPS1 import rhps1_constants
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-MC_RTC_YAML = REPO_ROOT / "etc" / "mc_rtc.yaml"
-
-
-@dataclass(frozen=True)
-class RobotSpec:
-  """Per-robot wiring for the mc_rtc coupling."""
-
-  cfg_fn: Callable[[], EntityCfg]
-  residual_joints: tuple[str, ...]
-  pd_gains_path: Path
-
-
-ROBOTS = {
-  "HRP5P": RobotSpec(
-    cfg_fn=hrp5p_constants.get_hrp5p_robot_cfg,
-    residual_joints=tuple(hrp5p_constants.HRP5P_NOMINAL_EFFORT_LIMITS),
-    pd_gains_path=hrp5p_constants.PD_GAINS_PATH,
-  ),
-  "JVRC1": RobotSpec(
-    cfg_fn=jvrc1_constants.get_jvrc1_robot_cfg,
-    residual_joints=jvrc1_constants.JVRC1_RESIDUAL_JOINTS,
-    pd_gains_path=jvrc1_constants.PD_GAINS_PATH,
-  ),
-  "RHPS1_MuJoCo": RobotSpec(
-    cfg_fn=rhps1_constants.get_rhps1_robot_cfg,
-    residual_joints=rhps1_constants.RHPS1_RESIDUAL_JOINTS,
-    pd_gains_path=rhps1_constants.PD_GAINS_PATH,
-  ),
-}
-
-
-def read_main_robot(path: Path) -> str:
-  """The config's MainRobot; it selects the mjlab entity, keeping the two
-  sides of the coupling on the same robot."""
-  for line in path.read_text().splitlines():
-    line = line.split("#", 1)[0].strip()
-    if line.startswith("MainRobot:"):
-      return line.split(":", 1)[1].strip()
-  raise ValueError(f"No MainRobot key found in {path}")
-
-
-def prep_cfg_for_mc_rtc(robot_cfg):
-  """Prepare a robot cfg for the mc_rtc coupling.
-
-  Re-enables the collision geoms (the geoms are unnamed, so the name-based
-  presets match nothing and the robot would fall through the ground) and
-  deletes the XML's own motors (mjlab adds its own; keeping both doubles
-  ``nu`` with dead actuators).
-  """
-  base_spec_fn = robot_cfg.spec_fn
-
-  def spec_fn():
-    spec = base_spec_fn()
-    for geom in spec.geoms:
-      if geom.group == 3:  # collision geoms, disabled by get_spec
-        geom.contype = 1
-        geom.conaffinity = 1
-    for act in list(spec.actuators):
-      spec.delete(act)
-    return spec
-
-  robot_cfg.spec_fn = spec_fn
-  robot_cfg.collisions = ()  # skip the name-based preset (matches nothing here)
-  return robot_cfg
+from mc_mjlab.robots.robots_registry import (
+  get_main_robot_spec,
+  prepare_cfg_for_mc_rtc,
+)
 
 
 def print_root_positions(env, step: int) -> None:
@@ -201,15 +133,11 @@ def main():
   if args.device is None:
     args.device = "cuda" if benchmark else "cpu"
 
-  robot_name = read_main_robot(MC_RTC_YAML)
-  if robot_name not in ROBOTS:
-    raise SystemExit(
-      f"MainRobot '{robot_name}' in {MC_RTC_YAML} has no RobotSpec "
-      f"(known: {', '.join(sorted(ROBOTS))})."
-    )
+  robot_name, robot = get_main_robot_spec(MC_RTC_YAML_PATH)
   print(f"[mc_rtc] MainRobot: {robot_name}")
-  robot = ROBOTS[robot_name]
-  robot_cfg = prep_cfg_for_mc_rtc(robot.cfg_fn())
+  robot_cfg = prepare_cfg_for_mc_rtc(
+    robot.cfg_fn(), names_collision_geoms=robot.names_collision_geoms
+  )
 
   # A terrain is required for a ground plane; it also spreads the env origins.
   scene_cfg = SceneCfg(
@@ -229,8 +157,8 @@ def main():
   action_cfg = action_cls(
     entity_name="robot",
     actuator_names=(".*",),
-    residual_actuator_names=robot.residual_joints,
-    mc_rtc_config_path=str(MC_RTC_YAML),
+    residual_actuator_names=robot.get_residual_joints(),
+    mc_rtc_config_path=str(MC_RTC_YAML_PATH),
     mc_rtc_robot_name=robot_name,
     frameskip=2,
     num_workers=args.num_workers,

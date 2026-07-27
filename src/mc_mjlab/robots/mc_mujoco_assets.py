@@ -6,10 +6,10 @@ each robot package symlinks them in on first use.
 
 from pathlib import Path
 
-MC_MUJOCO_SHARE = Path.home() / "workspace/install/share/mc_mujoco"
+MC_MUJOCO_SHARE_DIR = Path.home() / "workspace/install/share/mc_mujoco"
 
 
-def ensure_workspace_link(link: Path, target: Path) -> None:
+def ensure_asset_symlink(link: Path, target: Path) -> None:
   if link.exists():
     return
   if link.is_symlink():  # dangling: workspace moved/removed
