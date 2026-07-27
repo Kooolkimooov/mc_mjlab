@@ -55,6 +55,28 @@ uv sync
 
 Refer to the superbuild tutorial
 
+### ROS plugin: keep autoload disabled
+
+mc_rtc autoloads its ROS plugin into every process that constructs an
+`MCGlobalController` — here, every controller worker. The plugin's background
+threads (an rclcpp node plus DDS discovery) corrupt the process heap: in a
+controlled test, 15/15 short-lived controller processes crashed at teardown
+with the plugin loaded (SIGSEGV, or `munmap_chunk(): invalid pointer` after
+resets) and 0/15 without it, matching a week of kernel-log segfaults across
+python3 and mc_mujoco. With dozens of workers this surfaced as workers dying
+or wedging mid-training.
+
+Autoload is disabled machine-side by removing the marker directory:
+
+```sh
+cd ~/workspace/install/lib/mc_plugins && mv autoload autoload.old
+```
+
+A workspace rebuild/reinstall can recreate it — if controller workers start
+dying again, check this first. The plugins a controller itself requests (e.g.
+`footsteps_planner_plugin` for LogisticController_ismpc) still load on demand;
+only the unconditional autoload is affected.
+
 ## Running the demo
 
 The mc_rtc Python bindings and controller libraries come from the sourced
