@@ -14,12 +14,17 @@ src/mc_mjlab/
   actions/mc_rtc_controller_io_binding.py  # sim <-> mc_rtc I/O wiring (IoLayout, input assembly)
   actions/mc_rtc_controller_host.py        # worker-side per-env controller host
   robots/                     # constants (assets are dynamically symlinked from mc_rtc install path)
+  tasks/__init__.py           # imports every task sub-package (mjlab.tasks entry point)
+  tasks/residual_balance/     # the RL task: __init__ registers the ids, env cfg + PPO cfg alongside
 etc/
   mc_rtc.yaml                 # mc_rtc controller config
 scripts/demos/
   test_mc_rtc.py              # benchmark / viewer demo
   run_test_mc_rtc.sh          # launcher (uv run + viser viewer by default)
 ```
+
+Training and playing use mjlab's own `train`/`play` scripts — see
+[Training and playing](#training-and-playing).
 
 ## Setup
 
@@ -91,6 +96,59 @@ scripts/demos/run_test_mc_rtc.sh --viewer none  # throughput benchmark (420 envs
 ```
 
 This loads the config from `etc/mc_rtc.yaml`.
+
+## Training and playing
+
+This repo ships no train/play scripts. It registers its tasks with mjlab the
+same way mjlab registers its own — a task package whose `__init__.py` calls
+`register_mjlab_task`, found by a walk over `src/mc_mjlab/tasks/` — reached
+through the `mjlab.tasks` entry point in `pyproject.toml`. mjlab's own `train`
+and `play` console scripts then drive them:
+
+```sh
+uv run list-envs                                  # the two ids below, plus mjlab's
+uv run train Mjlab-McRtc-Residual-Balance-Position
+uv run play  Mjlab-McRtc-Residual-Balance-Position --checkpoint-file <model_*.pt>
+```
+
+One id per control mode (`-Position` / `-Torque`): the mode selects a different
+action *class*, so it cannot be a CLI override. Everything else is reachable
+through tyro's generated overrides — mjlab builds them from the cfg dataclasses,
+which is why there is nothing here to keep in sync:
+
+```sh
+uv run train Mjlab-McRtc-Residual-Balance-Position \
+  --env.scene.num-envs 128 \
+  --env.episode-length-s 20.0 \
+  --agent.max-iterations 500
+uv run train Mjlab-McRtc-Residual-Balance-Position --help   # the full list
+```
+
+`play` needs no `--num-envs`: each task registers a separate play cfg (two envs,
+effectively unbounded episodes, observation noise off, pushes kept), the same
+train/play split mjlab's own tasks use.
+
+Two knobs are worth knowing about:
+
+- **Worker count** is `--env.actions.mc-rtc-residual.num-workers`; it defaults
+  to `cpu_count - 2`.
+- **Push strength** — the task's difficulty dial — lives inside an event
+  term's `velocity_range` dict, which tyro does not flatten into a flag. Edit
+  `PUSH_VELOCITY` / `PUSH_ANGULAR_VELOCITY` in `residual_balance_env_cfg.py` to
+  sweep it.
+
+To add a task, drop a package under `src/mc_mjlab/tasks/` whose `__init__.py`
+calls `register_mjlab_task`; the walk picks it up with no wiring. It has to be
+a directory — a bare module beside `tasks/__init__.py` is never imported and
+would silently never register.
+
+### Debugging a wedged run
+
+`kill -USR1 <pid>` dumps every thread's stack to stderr; the controller pool
+arms this whenever it spawns workers, whatever launched the run. For the worker
+side, set `MC_MJLAB_WORKER_LOG_DIR=<dir>` and each worker writes its own log
+with faulthandler enabled, so a crash leaves its stack and mc_rtc's last words
+on disk.
 
 ### External paths
 
