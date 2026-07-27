@@ -198,6 +198,11 @@ class McRtcResidualActionBase(BaseAction):
     self._has_staged_control = torch.zeros(
       self.num_envs, dtype=torch.bool, device=self.device
     )
+    # Latched per env until reset; read by the `controller_failed` termination
+    # term so a QP giving up ends that episode instead of the whole run.
+    self.controller_failed = torch.zeros(
+      self.num_envs, dtype=torch.bool, device=self.device
+    )
 
   # ---- Pipeline. ----
 
@@ -216,6 +221,11 @@ class McRtcResidualActionBase(BaseAction):
     for c in self.output_channels:
       self._staged_control[c][env_indices_t] = new_output[c]
     self._has_staged_control[env_indices_t] = True
+    # Latch (not assign): the flag must survive until this env is reset, even
+    # though the substeps in between keep collecting.
+    self.controller_failed[env_indices_t] |= self._io.read_controller_failed(
+      self._out_np, env_indices
+    )
 
   # ---- Subclass hooks. ----
 
@@ -269,6 +279,9 @@ class McRtcResidualActionBase(BaseAction):
     env_indices_t = torch.tensor(env_indices, device=self.device, dtype=torch.long)
     self._seed_interpolation(env_indices_t)
     self._has_staged_control[env_indices_t] = False
+    # The pool has re-initialized these controllers, so clear the latch too.
+    self.controller_failed[env_indices_t] = False
+    self._out_np[env_indices, self._io.layout.status_off] = 0.0
 
   def apply_actions(self) -> None:
     substep_in_period = self._steps_since_run % self.cfg.frameskip

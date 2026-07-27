@@ -40,6 +40,30 @@ from mc_mjlab.actions.mc_rtc_controller_host import (
   worker_main,
 )
 
+_forensics_armed = False
+
+
+def _arm_freeze_forensics() -> None:
+  """Make a wedged run diagnosable from outside: ``kill -USR1 <pid>`` dumps
+  every thread's stack to stderr (no ptrace, no root).
+
+  Armed here rather than in a launcher script because the thing that wedges is
+  the worker pool, so this holds for whichever script started the run --
+  mjlab's ``train``/``play``, the demo, or a bare interpreter. The worker side
+  of the same story stays opt-in via ``MC_MJLAB_WORKER_LOG_DIR``; see
+  ``ControllerHost``.
+  """
+  global _forensics_armed
+  if _forensics_armed:
+    return
+  import faulthandler
+  import signal
+
+  faulthandler.enable()
+  if hasattr(signal, "SIGUSR1"):  # POSIX only
+    faulthandler.register(signal.SIGUSR1, all_threads=True)
+  _forensics_armed = True
+
 
 def _shutdown_workers(
   procs: list[mp.process.BaseProcess],
@@ -84,6 +108,12 @@ class ControllerPool:
   "none" silences everything, "single" lets only env 0 print (it gets a
   dedicated worker so every other worker is silenced wholesale at startup)
   and "all" suppresses nothing.
+
+  A worker that dies or goes unresponsive mid-run (mc_rtc can wedge inside
+  ``reset()`` of a controller whose MPC has collapsed) is quarantined rather
+  than fatal: its process is killed and respawned, its controllers rebuilt,
+  and its envs reported failed via the status column so the trainer ends
+  those episodes and re-inits the fresh controllers on reset.
   """
 
   # Assigned in `configure`; the action reads/writes these on the hot path.
@@ -98,6 +128,7 @@ class ControllerPool:
     num_workers: int | None = None,
     use_worker_processes: bool = True,
     console_output: Literal["none", "single", "all"] = "none",
+    timeout_s: float = 60.0,
   ):
     if console_output not in ("none", "single", "all"):
       raise ValueError(
@@ -108,6 +139,10 @@ class ControllerPool:
     self._target_names = list(target_names)
     self._use_worker_processes = use_worker_processes
     self._console_output = console_output
+    # Per-command budget. A step is milliseconds and a reset not much more, so
+    # this only fires on a genuinely stuck worker; construction gets its own,
+    # much larger budget in `await_ready`.
+    self.timeout_s = timeout_s
 
     self._procs: list[mp.process.BaseProcess] = []
     self._conns: list[Connection] = []
@@ -117,12 +152,19 @@ class ControllerPool:
     self._host: ControllerHost | None = None
     self._thread_pool: ThreadPoolExecutor | None = None
     self._t0 = 0.0
+    # Respawn state: the forkserver context, per-worker suppress flags and the
+    # configure payload, so _revive_worker can rebuild a worker from scratch.
+    self._mp_ctx: mp.context.ForkServerContext | None = None
+    self._suppress_of: list[bool] = []
+    self._layout: IoLayout | None = None
+    self._configure_payload: tuple | None = None
 
     # The single outstanding async step (worker path).
     self._inflight_workers: list[int] = []
     self._dispatched_indices: list[int] = []
 
     if use_worker_processes:
+      _arm_freeze_forensics()
       self._start_workers(num_workers)
     else:
       n = max(1, num_workers or 1)
@@ -155,35 +197,100 @@ class ControllerPool:
     # numpy or the bindings, since a forked server must stay single-threaded
     # and numpy's import starts OpenBLAS threads. The env var makes worker
     # numpy skip its thread pool too (workers do no BLAS).
-    ctx = mp.get_context("forkserver")
-    ctx.set_forkserver_preload(["mc_mjlab"])
+    self._mp_ctx = mp.get_context("forkserver")
+    self._mp_ctx.set_forkserver_preload(["mc_mjlab"])
+    self._suppress_of = [
+      self._console_output == "none"
+      or (self._console_output == "single" and 0 not in env_ids)
+      for env_ids in self._worker_env_ids
+    ]
+    # The env var must be set before the first start(): that launches the
+    # forkserver, whose environment every worker (respawns included) inherits.
     saved_blas = os.environ.get("OPENBLAS_NUM_THREADS")
     os.environ["OPENBLAS_NUM_THREADS"] = "1"
     try:
       for w, env_ids in enumerate(self._worker_env_ids):
         self._worker_of[env_ids] = w
-        suppress = self._console_output == "none" or (
-          self._console_output == "single" and 0 not in env_ids
-        )
-        parent, child = ctx.Pipe()
-        proc = ctx.Process(
-          target=worker_main,
-          args=(child, self._config_path, env_ids, self._target_names, suppress),
-          daemon=True,
-        )
-        proc.start()
-        child.close()
-        self._procs.append(proc)
-        self._conns.append(parent)
+        self._spawn_worker(w)
     finally:
       if saved_blas is None:
         del os.environ["OPENBLAS_NUM_THREADS"]
       else:
         os.environ["OPENBLAS_NUM_THREADS"] = saved_blas
     # Registered here so cleanup runs even if the owner's construction raises;
-    # the lists are captured by reference, covering the shm blocks below.
+    # the lists are captured by reference, covering the shm blocks below and
+    # any respawned workers (revival mutates the list slots in place).
     self._finalizer = weakref.finalize(
       self, _shutdown_workers, self._procs, self._conns, self._shms
+    )
+
+  def _spawn_worker(self, w: int) -> None:
+    """Start worker ``w``'s process and pipe, filling its slot in place."""
+    ctx = self._mp_ctx
+    assert ctx is not None
+    parent, child = ctx.Pipe()
+    proc = ctx.Process(
+      target=worker_main,
+      args=(
+        child,
+        self._config_path,
+        self._worker_env_ids[w],
+        self._target_names,
+        self._suppress_of[w],
+        # Workers are forked from the forkserver, not from us, so the
+        # daemon flag alone cannot reap them if we die abruptly.
+        os.getpid(),
+      ),
+      daemon=True,
+    )
+    proc.start()
+    child.close()
+    if w < len(self._procs):
+      self._procs[w] = proc
+      self._conns[w] = parent
+    else:
+      self._procs.append(proc)
+      self._conns.append(parent)
+
+  def _revive_worker(self, w: int, why: str) -> None:
+    """Replace a dead or wedged worker with a fresh process.
+
+    A wedged mc_rtc call cannot be interrupted, so the old process is killed
+    outright. The new worker's controllers are rebuilt from scratch and stay
+    uninitialized (the host reports their envs failed) until those envs are
+    reset, which takes the ``init()`` path.
+    """
+    env_ids = self._worker_env_ids[w]
+    print(
+      f"[mc_rtc] worker {w} (envs {env_ids[0]}..{env_ids[-1]}) {why}; "
+      f"respawning it and rebuilding its controllers...",
+      flush=True,
+    )
+    t0 = time.perf_counter()
+    proc = self._procs[w]
+    if proc.is_alive():
+      proc.terminate()
+      proc.join(timeout=2.0)
+      if proc.is_alive():
+        proc.kill()
+        proc.join(timeout=2.0)
+    try:
+      self._conns[w].close()
+    except OSError:
+      pass
+    self._spawn_worker(w)
+    tag, payload = self._recv(
+      w, timeout=max(300.0, 30.0 * len(env_ids)), what="respawn"
+    )
+    if tag == "error":
+      raise RuntimeError(f"mc_rtc worker {w} failed to respawn:\n{payload}")
+    if self._configure_payload is not None:
+      self._conns[w].send(("configure", self._configure_payload))
+      tag, payload = self._recv(w, timeout=self.timeout_s, what="respawn configure")
+      if tag != "ok":
+        raise RuntimeError(f"mc_rtc worker {w} failed to reconfigure:\n{payload}")
+    print(
+      f"[mc_rtc] worker {w} respawned in {time.perf_counter() - t0:.1f}s", flush=True
     )
 
   def _allowed_output_envs(self) -> tuple[int, ...] | None:
@@ -203,8 +310,12 @@ class ControllerPool:
       )
       return self._host.metadata()
     metadata: HostMetadata | None = None
+    # Construction is ~570 ms per controller and serial within a worker, so it
+    # needs a far larger budget than a step; scale it with the biggest share.
+    biggest_share = max(len(ids) for ids in self._worker_env_ids)
+    build_timeout = max(300.0, 30.0 * biggest_share)
     for w in range(len(self._conns)):
-      tag, payload = self._recv(w)
+      tag, payload = self._recv(w, timeout=build_timeout)
       if tag == "error":
         self.close()
         if "ImportError" in payload:
@@ -228,15 +339,19 @@ class ControllerPool:
       self.out_np = np.ndarray(out_shape, dtype=np.float64, buffer=out_shm.buf)
       self.in_np[:] = 0.0
       self.out_np[:] = 0.0
+      # Kept named (unlinked in close/finalize, resource_tracker as backstop):
+      # a respawned worker must be able to re-attach by name.
+      self._layout = layout
+      self._configure_payload = (
+        layout,
+        in_shm.name,
+        out_shm.name,
+        in_shape,
+        out_shape,
+      )
       for conn in self._conns:
-        conn.send(
-          ("configure", (layout, in_shm.name, out_shm.name, in_shape, out_shape))
-        )
+        conn.send(("configure", self._configure_payload))
       self._await_ok("configure")
-      # All workers attached: unlink now. POSIX keeps the memory alive until
-      # the last mapping closes, so nothing leaks even on SIGKILL.
-      in_shm.unlink()
-      out_shm.unlink()
     else:
       self.in_np = np.zeros(in_shape, dtype=np.float64)
       self.out_np = np.zeros(out_shape, dtype=np.float64)
@@ -246,19 +361,34 @@ class ControllerPool:
   # ---- Dispatch. ----
 
   def reset_envs(self, env_indices: list[int]) -> None:
-    """Reset the given envs' controllers and wait for completion."""
+    """Reset the given envs' controllers and wait for completion.
+
+    A worker that wedges or dies during the reset is revived and the reset
+    re-sent once (the fresh controllers take the ``init()`` path); a second
+    failure is raised, since a wedge that survives a rebuild is systemic.
+    """
     if not env_indices:
       return
     if self._host is not None:
       self._host.reset_envs(env_indices, self.in_np)
       return
     workers = self._worker_of[env_indices]
-    active_workers = []
+    by_worker: dict[int, list[int]] = {}
     for w in np.unique(workers):
-      worker_env_indices = [env_indices[k] for k in np.flatnonzero(workers == w)]
-      self._conns[w].send(("reset", worker_env_indices))
-      active_workers.append(int(w))
-    self._await_ok("reset", active_workers)
+      by_worker[int(w)] = [env_indices[k] for k in np.flatnonzero(workers == w)]
+    active_workers = []
+    for w, ids in by_worker.items():
+      try:
+        self._conns[w].send(("reset", ids))
+      except (BrokenPipeError, OSError):
+        self._revive_worker(w, "died (pipe closed) before reset")
+        self._conns[w].send(("reset", ids))
+      active_workers.append(w)
+    revived = self._await_ok("reset", active_workers, revive=True)
+    if revived:
+      for w in revived:
+        self._conns[w].send(("reset", by_worker[w]))
+      self._await_ok("reset retry", revived)
 
   def dispatch_controller_step(self, run_indices: list[int]) -> None:
     """Issue a controller step for ``run_indices`` without blocking.
@@ -294,7 +424,12 @@ class ControllerPool:
     workers = self._worker_of[run_indices]
     for w in np.unique(workers):
       worker_env_indices = [run_indices[k] for k in np.flatnonzero(workers == w)]
-      self._conns[w].send(("step", worker_env_indices))
+      try:
+        self._conns[w].send(("step", worker_env_indices))
+      except (BrokenPipeError, OSError):
+        self._revive_worker(int(w), "died (pipe closed) before step")
+        self._mark_failed(worker_env_indices)
+        continue
       self._inflight_workers.append(int(w))
     self._dispatched_indices = run_indices
 
@@ -308,11 +443,19 @@ class ControllerPool:
     if not self._dispatched_indices:
       return None
     if self._inflight_workers:
-      self._await_ok("step", self._inflight_workers)
+      revived = self._await_ok("step", self._inflight_workers, revive=True)
       self._inflight_workers = []
+      for w in revived:
+        self._mark_failed(self._worker_env_ids[w])
     env_indices = self._dispatched_indices
     self._dispatched_indices = []
     return env_indices
+
+  def _mark_failed(self, env_indices: list[int]) -> None:
+    """Report the given envs failed via the output status column, as a worker
+    would; the action term latches it and the trainer ends those episodes."""
+    assert self._layout is not None
+    self.out_np[np.asarray(env_indices, dtype=np.intp), self._layout.status_off] = 1.0
 
   def close(self) -> None:
     """Stop the workers and release the shared blocks."""
@@ -321,25 +464,71 @@ class ControllerPool:
 
   # ---- Pipe helpers. ----
 
-  def _recv(self, w: int) -> tuple[str, object]:
-    """Receive one message from worker ``w``, watching for a dead process."""
+  def _recv(
+    self, w: int, timeout: float | None = None, what: str = "startup"
+  ) -> tuple[str, object]:
+    """Receive one message from worker ``w``, watching for a dead or wedged one.
+
+    Without a deadline a worker that is alive but stuck inside mc_rtc's
+    ``run()`` or ``reset()`` parks the trainer here forever, with no error and
+    no output -- so ``timeout`` turns that into a raise naming the envs and the
+    command (``what``) involved, which is what says whether stepping or
+    resetting is the culprit.
+    """
     conn, proc = self._conns[w], self._procs[w]
+    deadline = None if timeout is None else time.monotonic() + timeout
+    timed_out = False
     try:
       while not conn.poll(timeout=1.0):
         if not proc.is_alive():
+          break
+        if deadline is not None and time.monotonic() >= deadline:
+          timed_out = True
           break
       else:
         return conn.recv()
     except (EOFError, ConnectionResetError, BrokenPipeError):
       pass
+    env_ids = self._worker_env_ids[w]
+    if timed_out:
+      raise TimeoutError(
+        f"mc_rtc worker {w} went unresponsive for {timeout:.0f}s during {what}; "
+        f"it hosts envs {env_ids[0]}..{env_ids[-1]}. The controller is most "
+        f"likely wedged inside mc_rtc ({what}). Re-run with "
+        f"MC_MJLAB_WORKER_LOG_DIR=<dir> for per-worker logs with faulthandler "
+        f"enabled."
+      )
     raise RuntimeError(
-      f"mc_rtc worker {w} died (exit code {proc.exitcode}); it hosts envs "
-      f"{self._worker_env_ids[w][0]}..{self._worker_env_ids[w][-1]}"
+      f"mc_rtc worker {w} died (exit code {proc.exitcode}) during {what}; it "
+      f"hosts envs {env_ids[0]}..{env_ids[-1]}"
     )
 
-  def _await_ok(self, what: str, workers: list[int] | None = None) -> None:
-    """Collect one reply per worker; raise with the worker traceback on error."""
+  def _await_ok(
+    self,
+    what: str,
+    workers: list[int] | None = None,
+    timeout: float | None = None,
+    revive: bool = False,
+  ) -> list[int]:
+    """Collect one reply per worker; raise with the worker traceback on error.
+
+    With ``revive``, a dead or wedged worker is respawned instead of raising
+    and returned so the caller can mark its envs failed / re-send its command.
+    Error *replies* still raise either way: the worker is alive and talking,
+    so they indicate a bug, not a casualty.
+    """
+    revived: list[int] = []
     for w in workers if workers is not None else range(len(self._conns)):
-      tag, payload = self._recv(w)
+      try:
+        tag, payload = self._recv(
+          w, timeout=timeout if timeout is not None else self.timeout_s, what=what
+        )
+      except (TimeoutError, RuntimeError) as exc:
+        if not revive:
+          raise
+        self._revive_worker(w, str(exc).split(". ")[0].splitlines()[0])
+        revived.append(w)
+        continue
       if tag != "ok":
         raise RuntimeError(f"mc_rtc worker {w} failed during {what}:\n{payload}")
+    return revived

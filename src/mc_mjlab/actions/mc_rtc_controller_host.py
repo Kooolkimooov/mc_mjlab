@@ -15,6 +15,7 @@ import os
 import signal
 import sys
 import tempfile
+import threading
 import time
 import traceback
 from collections.abc import Iterator, Sequence
@@ -139,7 +140,9 @@ class IoLayout:
 
   Output row: one T-wide block per entry of ``output_channels``, in order --
   e.g. the default ``("q", "alpha")`` gives q in ``[0, T)`` and alpha in
-  ``[T, 2T)``, for the target joints.
+  ``[T, 2T)``, for the target joints -- followed by a single status column at
+  ``status_off`` carrying 1.0 once the controller has failed (see
+  ``ControllerHost.step_env``).
   """
 
   num_targets: int
@@ -173,8 +176,12 @@ class IoLayout:
     return self.wrench_off + 6 * len(self.wrenches)
 
   @property
-  def out_width(self) -> int:
+  def status_off(self) -> int:
     return len(self.output_channels) * self.num_targets
+
+  @property
+  def out_width(self) -> int:
+    return self.status_off + 1
 
 
 @dataclass
@@ -231,6 +238,9 @@ class ControllerHost:
     # mc_mujoco calls init() exactly once per controller; later resets go
     # through MCGlobalController::reset().
     self._initialized = [False] * len(self._controllers)
+    # Set when run() reports failure (the QP gives up once the robot is far
+    # enough gone). Latches until the env is reset; see step_env.
+    self._failed = [False] * len(self._controllers)
 
     robot = self._controllers[0].robot()
     rn = robot.name()
@@ -390,15 +400,29 @@ class ControllerHost:
           self._initialized[local] = True
 
         controller.running = True
+        # Whatever made the QP give up is gone with the new state.
+        self._failed[local] = False
 
   def step_env(self, env_id: int, in_arr: np.ndarray, out_arr: np.ndarray) -> None:
-    """Feed one env's input row to its controller, run it, write q/alpha out."""
+    """Feed one env's input row to its controller, run it, write q/alpha out.
+
+    A controller whose QP has given up stays failed until its env is reset:
+    the status column reports it so the trainer can end that episode, and the
+    controller is left untouched rather than driven further in a broken state.
+    """
     layout = self._layout
     assert layout is not None
     T = layout.num_targets
     ro = layout.root_off
-    controller = self._controllers[self._local_of[env_id]]
+    local = self._local_of[env_id]
+    controller = self._controllers[local]
     row = in_arr[env_id]
+
+    # Uninitialized covers a respawned worker's rebuilt controllers: their
+    # envs read as failed until their next reset takes the init() path.
+    if self._failed[local] or not self._initialized[local]:
+      out_arr[env_id][layout.status_off] = 1.0
+      return
 
     controller.setEncoderValues(self._expand(row[0:T], self._default_encoders))
     controller.setEncoderVelocities(self._expand(row[T : 2 * T], self._zero_base))
@@ -489,10 +513,16 @@ class ControllerHost:
 
     controller.setJointTorques(self._expand(row[2 * T : 3 * T], self._zero_base))
 
-    controller.run()
+    # mc_mujoco stops the whole sim when run() reports failure. A trainer
+    # cannot: the QP giving up is the normal end of a fall, and it must cost
+    # one episode, not the run. Latch it and let the trainer terminate the env
+    # (the last good outputs stay in the block for the substeps still to come).
+    ok = controller.run()
+    self._failed[local] = not ok
 
     mbc = controller.robot().mbc
     out_row = out_arr[env_id]
+    out_row[layout.status_off] = 0.0 if ok else 1.0
     for c, attr in enumerate(self._output_attrs):
       values = getattr(mbc, attr)
       base = c * T
@@ -513,12 +543,36 @@ class ControllerHost:
         self.step_env(env_id, in_arr, out_arr)
 
 
+def _start_orphan_watchdog(trainer_pid: int, poll_s: float = 2.0) -> None:
+  """Exit the worker once the trainer process is gone.
+
+  The pipe-EOF and daemon-flag routes both need the command loop to run again,
+  which never happens if mc_rtc wedges inside ``run()``: such a worker outlives
+  the trainer holding its controllers and their solver threads. ``os._exit`` is
+  deliberate -- the wedged thread makes an orderly interpreter shutdown
+  impossible.
+  """
+
+  def watch() -> None:
+    while True:
+      time.sleep(poll_s)
+      try:
+        os.kill(trainer_pid, 0)
+      except ProcessLookupError:
+        os._exit(1)
+      except OSError:
+        pass  # e.g. EPERM: the pid exists, so the trainer is alive
+
+  threading.Thread(target=watch, name="mc_rtc_orphan_watchdog", daemon=True).start()
+
+
 def worker_main(
   conn: Connection,
   config_path: str,
   env_ids: Sequence[int],
   target_names: Sequence[str],
   suppress_output: bool = False,
+  trainer_pid: int | None = None,
 ) -> None:
   """Entry point of a controller worker process.
 
@@ -531,11 +585,13 @@ def worker_main(
   capture file once at startup (zero per-step cost); error replies carry the
   captured tail so mc_rtc's own error text is not lost. The
   ``MC_MJLAB_WORKER_LOG_DIR`` debug hook takes precedence: output then goes
-  to a per-worker log file instead.
+  to a per-worker log file instead. ``trainer_pid`` arms the orphan watchdog.
   """
   # Ctrl+C hits the whole foreground process group; shutdown is coordinated by
-  # the trainer instead ("stop", pipe EOF, or the daemon flag).
+  # the trainer instead ("stop", pipe EOF, the watchdog, or the daemon flag).
   signal.signal(signal.SIGINT, signal.SIG_IGN)
+  if trainer_pid is not None:
+    _start_orphan_watchdog(trainer_pid)
   capture = None
   log_dir = os.environ.get("MC_MJLAB_WORKER_LOG_DIR")
   if log_dir:

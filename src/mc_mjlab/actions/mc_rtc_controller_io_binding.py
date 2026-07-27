@@ -321,6 +321,13 @@ class ControllerIoBinding:
       for i, c in enumerate(self._output_channels)
     }
 
+  def read_controller_failed(
+    self, out_np: np.ndarray, env_indices: list[int]
+  ) -> torch.Tensor:
+    """Bool per env: did that controller's QP give up on the last step?"""
+    failed = out_np[env_indices, self.layout.status_off] != 0.0
+    return torch.tensor(failed, dtype=torch.bool, device=self._device)
+
   def _fill_joint_columns(self, in_np: np.ndarray) -> None:
     """Write encoder/velocity/torque columns of the input block (all envs)."""
     T = self.layout.num_targets
