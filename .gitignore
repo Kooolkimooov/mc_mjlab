@@ -6,6 +6,8 @@ __pycache__/
 .pytest_cache/
 build/
 dist/
+logs/
+wandb/
 MUJOCO_LOG.TXT
 # Symlinked to the ROS workspace's mc_mujoco copies on first use
 # (see robots/HRP5P/hrp5p_constants.py).
