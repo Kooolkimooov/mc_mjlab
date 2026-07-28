@@ -16,11 +16,11 @@ src/mc_mjlab/
   robots/                     # constants (assets are dynamically symlinked from mc_rtc install path)
   tasks/__init__.py           # imports every task sub-package (mjlab.tasks entry point)
   tasks/residual_balance/     # the RL task: __init__ registers the ids, env cfg + PPO cfg alongside
+  tasks/zero_residual/        # the demo task: mc_rtc alone, RL residual left at zero
 etc/
   mc_rtc.yaml                 # mc_rtc controller config
 scripts/demos/
-  test_mc_rtc.py              # benchmark / viewer demo
-  run_test_mc_rtc.sh          # launcher (uv run + viser viewer by default)
+  run_test_mc_rtc.sh          # launcher: play --agent zero on the zero-residual task
 ```
 
 Training and playing use mjlab's own `train`/`play` scripts — see
@@ -91,22 +91,39 @@ only the unconditional autoload is affected.
 
 ## Running the demo
 
-The demo runs the controller specified in the config `etc/mc_rtc.yaml` along
-with a blank residual policy.
+The demo runs the controller specified in `etc/mc_rtc.yaml` with the RL
+residual left at zero, so the robot tracks raw mc_rtc output — a healthy run
+holds a steady root height. It is a registered task (`Mc-Mjlab-Zero-Residual-*`)
+driven by mjlab's `play --agent zero`; the script only resolves the id and
+opens the viewer.
 
 ```sh
-scripts/demos/run_test_mc_rtc.sh                # viser viewer (2 envs, cpu)
-scripts/demos/run_test_mc_rtc.sh --viewer none  # throughput benchmark (420 envs, cuda)
+scripts/demos/run_test_mc_rtc.sh                    # viser viewer, 2 envs
+scripts/demos/run_test_mc_rtc.sh --num-envs 8       # extra args go to `play`
+scripts/demos/run_test_mc_rtc.sh --viewer native    # native viewer instead
+MC_MJLAB_CONTROL=torque scripts/demos/run_test_mc_rtc.sh   # torque control mode
 ```
+
+> [!NOTE]
+> `Mc-Mjlab-Zero-Residual-*` is a play task; `train` on it is not supported.
+> It has no reward to optimise, and it is built for a zero action — a policy
+> sampling every 2 ms with nothing to terminate a wrecked robot overruns the
+> contact budget and faults in the physics. Train the balance task instead.
 
 ## Training and playing
 
 Use existing `train` and `play` scripts:
 
+A task id is `Mc-Mjlab-<task dir>-<Enabled>-<MainRobot>-<Position|Torque>`, the
+controller and robot read from `etc/mc_rtc.yaml`, so editing that file changes
+the ids — which is the point, since it also changes what a checkpoint is valid
+against. `list-envs` prints the ids for your config; these are for the config
+as committed (`MainRobot: JVRC1`, `Enabled: Posture`):
+
 ```sh
 uv run list-envs   # this repo's ids, plus mjlab's
-uv run train Mc-Mjlab-Residual-Balance-Position-JVRC1-Posture
-uv run play  Mc-Mjlab-Residual-Balance-Position-JVRC1-Posture \
+uv run train Mc-Mjlab-Residual-Balance-Posture-Jvrc1-Position
+uv run play  Mc-Mjlab-Residual-Balance-Posture-Jvrc1-Position \
   --checkpoint-file <path/to/model_*.pt>
 ```
 
