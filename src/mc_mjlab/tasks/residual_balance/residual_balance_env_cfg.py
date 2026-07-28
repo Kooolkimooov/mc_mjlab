@@ -61,7 +61,7 @@ PUSH_ANGULAR_VELOCITY = 0.5
 # A viewer default, not a training one: every env is its own mc_rtc controller
 # (~70 MB, ~570 ms to construct, built serially), so replaying at the training
 # env count would spend minutes and gigabytes before the first frame.
-PLAY_NUM_ENVS = 2
+PLAY_NUM_ENVS = 1
 
 
 def _make_env_cfg(

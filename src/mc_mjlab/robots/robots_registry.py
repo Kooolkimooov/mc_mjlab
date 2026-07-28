@@ -69,7 +69,7 @@ def get_main_robot_spec(mc_rtc_yaml: Path) -> tuple[str, RobotSpec]:
   """``(name, spec)`` for the config's MainRobot, or a clear error."""
   name = get_main_robot_name(mc_rtc_yaml)
   if name not in ROBOTS:
-    raise SystemExit(
+    raise ValueError(
       f"MainRobot '{name}' in {mc_rtc_yaml} has no RobotSpec "
       f"(known: {', '.join(sorted(ROBOTS))})."
     )

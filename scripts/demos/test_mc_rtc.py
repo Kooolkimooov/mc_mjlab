@@ -79,7 +79,7 @@ def main():
     type=int,
     default=None,
     help="Number of parallel environments (one mc_rtc controller each). "
-    "Default: 512 for the benchmark (controllers cost ~70 MB each, so this "
+    "Default: 420 for the benchmark (controllers cost ~70 MB each, so this "
     "is memory-bound), 2 with a viewer (construction must be quick and "
     "stepping must keep the real-time pace).",
   )

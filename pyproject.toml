@@ -13,25 +13,25 @@ authors = [{ name = "Martin Filliung" }]
 # interpreter the ROS workspace built them for (see README), and moves with it.
 requires-python = ">=3.14,<3.15"
 dependencies = [
-  # Where mjlab comes from (PyPI, local checkout, git) is a per-machine
-  # choice: see "mjlab dependency" in the README.
-  "mjlab",
-  # Imported directly by this package; versions are constrained by mjlab.
-  "mujoco",
-  "torch",
+    # Where mjlab comes from (PyPI, local checkout, git) is a per-machine
+    # choice: see "mjlab dependency" in the README.
+    "mjlab",
+    # Imported directly by this package; versions are constrained by mjlab.
+    "mujoco",
+    "torch",
 ]
 
 [dependency-groups]
-dev = [
-  "ruff>=0.14.14",
-  "ty>=0.0.14",
-]
+dev = ["ruff>=0.14.14", "ty>=0.0.14"]
 
 [tool.uv]
 # This package is developed on a single Linux/CUDA box; resolve for it only.
 required-environments = [
-  "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
+
+[project.entry-points."mjlab.tasks"]
+mc_mjlab = "mc_mjlab.tasks"
 
 [tool.ruff]
 src = ["src"]
