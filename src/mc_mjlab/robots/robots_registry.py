@@ -79,21 +79,7 @@ def get_main_robot_spec(mc_rtc_yaml: Path) -> tuple[str, RobotSpec]:
 def prepare_cfg_for_mc_rtc(
   robot_cfg: EntityCfg, *, names_collision_geoms: bool = False
 ) -> EntityCfg:
-  """Prepare a robot cfg for the mc_rtc coupling.
-
-  Always deletes the XML's own motors (mjlab adds its own; keeping both
-  doubles ``nu`` with dead actuators).
-
-  Collisions take one of two paths, per ``RobotSpec.names_collision_geoms``.
-  A robot that names its collision geoms -- all three do today -- keeps its
-  ``CollisionCfg`` presets and mjlab applies them normally. A robot whose geoms
-  are still unnamed has no preset that can match, so its presets are dropped
-  and the collision geoms re-enabled wholesale by group instead -- without that
-  fallback it stands on nothing and sinks through the floor.
-
-  The default is the fallback, so a robot that has not declared itself keeps
-  the behaviour it had before presets existed.
-  """
+  """Prepare a robot cfg for the mc_rtc coupling."""
   base_spec_fn = robot_cfg.spec_fn
 
   def spec_fn():

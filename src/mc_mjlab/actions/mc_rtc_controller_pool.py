@@ -44,15 +44,7 @@ _forensics_armed = False
 
 
 def _arm_freeze_forensics() -> None:
-  """Make a wedged run diagnosable from outside: ``kill -USR1 <pid>`` dumps
-  every thread's stack to stderr (no ptrace, no root).
-
-  Armed here rather than in a launcher script because the thing that wedges is
-  the worker pool, so this holds for whichever script started the run --
-  mjlab's ``train``/``play``, the demo, or a bare interpreter. The worker side
-  of the same story stays opt-in via ``MC_MJLAB_WORKER_LOG_DIR``; see
-  ``ControllerHost``.
-  """
+  """Make a wedged run diagnosable: ``kill -USR1 <pid>`` dumps thread stacks."""
   global _forensics_armed
   if _forensics_armed:
     return
@@ -70,10 +62,7 @@ def _shutdown_workers(
   conns: list[Connection],
   shms: list[SharedMemory],
 ) -> None:
-  """Stop workers and release shared blocks (best-effort).
-
-  Runs via ``weakref.finalize``; must not reference the pool.
-  """
+  """Stop workers and release shared blocks (best-effort)."""
   for proc, conn in zip(procs, conns, strict=True):
     try:
       if proc.is_alive():
@@ -253,13 +242,7 @@ class ControllerPool:
       self._conns.append(parent)
 
   def _revive_worker(self, w: int, why: str) -> None:
-    """Replace a dead or wedged worker with a fresh process.
-
-    A wedged mc_rtc call cannot be interrupted, so the old process is killed
-    outright. The new worker's controllers are rebuilt from scratch and stay
-    uninitialized (the host reports their envs failed) until those envs are
-    reset, which takes the ``init()`` path.
-    """
+    """Replace a dead or wedged worker with a fresh process."""
     env_ids = self._worker_env_ids[w]
     print(
       f"[mc_rtc] worker {w} (envs {env_ids[0]}..{env_ids[-1]}) {why}; "
@@ -361,12 +344,7 @@ class ControllerPool:
   # ---- Dispatch. ----
 
   def reset_envs(self, env_indices: list[int]) -> None:
-    """Reset the given envs' controllers and wait for completion.
-
-    A worker that wedges or dies during the reset is revived and the reset
-    re-sent once (the fresh controllers take the ``init()`` path); a second
-    failure is raised, since a wedge that survives a rebuild is systemic.
-    """
+    """Reset the given envs' controllers and wait for completion."""
     if not env_indices:
       return
     if self._host is not None:
@@ -391,13 +369,7 @@ class ControllerPool:
       self._await_ok("reset retry", revived)
 
   def dispatch_controller_step(self, run_indices: list[int]) -> None:
-    """Issue a controller step for ``run_indices`` without blocking.
-
-    Worker path: send the per-worker batches and return; the replies are
-    awaited by ``collect``. In-process path: no async is possible, so step now
-    (results land in ``out_np``) and let ``collect`` read them next period,
-    keeping the one-period-behind timing identical to the worker path.
-    """
+    """Issue a controller step for ``run_indices`` without blocking."""
     if not run_indices:
       return
     if self._host is not None:
@@ -434,12 +406,7 @@ class ControllerPool:
     self._dispatched_indices = run_indices
 
   def collect(self) -> list[int] | None:
-    """Await the outstanding step; return its env indices (outputs now in
-    ``out_np``), or ``None`` if nothing was in flight.
-
-    The await guarantees the workers have finished reading ``in_np`` and writing
-    ``out_np``, so it must run before either block is reused.
-    """
+    """Await the outstanding step; return its env indices, or ``None`` if idle."""
     if not self._dispatched_indices:
       return None
     if self._inflight_workers:
@@ -452,8 +419,7 @@ class ControllerPool:
     return env_indices
 
   def _mark_failed(self, env_indices: list[int]) -> None:
-    """Report the given envs failed via the output status column, as a worker
-    would; the action term latches it and the trainer ends those episodes."""
+    """Report the given envs failed via the output status column."""
     assert self._layout is not None
     self.out_np[np.asarray(env_indices, dtype=np.intp), self._layout.status_off] = 1.0
 
@@ -467,14 +433,7 @@ class ControllerPool:
   def _recv(
     self, w: int, timeout: float | None = None, what: str = "startup"
   ) -> tuple[str, object]:
-    """Receive one message from worker ``w``, watching for a dead or wedged one.
-
-    Without a deadline a worker that is alive but stuck inside mc_rtc's
-    ``run()`` or ``reset()`` parks the trainer here forever, with no error and
-    no output -- so ``timeout`` turns that into a raise naming the envs and the
-    command (``what``) involved, which is what says whether stepping or
-    resetting is the culprit.
-    """
+    """Receive one message from worker ``w``, watching for a dead or wedged one."""
     conn, proc = self._conns[w], self._procs[w]
     deadline = None if timeout is None else time.monotonic() + timeout
     timed_out = False
@@ -510,13 +469,7 @@ class ControllerPool:
     timeout: float | None = None,
     revive: bool = False,
   ) -> list[int]:
-    """Collect one reply per worker; raise with the worker traceback on error.
-
-    With ``revive``, a dead or wedged worker is respawned instead of raising
-    and returned so the caller can mark its envs failed / re-send its command.
-    Error *replies* still raise either way: the worker is alive and talking,
-    so they indicate a bug, not a casualty.
-    """
+    """Collect one reply per worker; raise with the worker traceback on error."""
     revived: list[int] = []
     for w in workers if workers is not None else range(len(self._conns)):
       try:

@@ -149,11 +149,7 @@ class McRtcResidualActionBase(BaseAction):
   # ---- Construction helpers. ----
 
   def _setup_residual(self, cfg: McRtcResidualActionCfg) -> None:
-    """Slice scale/offset/clip down to the residual actuator subset.
-
-    The base class resolved them against the full target list; when only a
-    subset receives the residual, the columns must match.
-    """
+    """Slice scale/offset/clip down to the residual actuator subset."""
     self._residual_ids: torch.Tensor | None = None
     if cfg.residual_actuator_names is None:
       return
@@ -173,12 +169,7 @@ class McRtcResidualActionBase(BaseAction):
     )
 
   def _alloc_interpolation_buffers(self) -> None:
-    """Per-channel ramp endpoints plus the one-period-behind staging buffer.
-
-    Each channel is sized to the full controlled-joint set (not the residual
-    subset) and laid out in the output block in ``output_channels`` order -- the
-    same order the host writes.
-    """
+    """Per-channel ramp endpoints plus the one-period-behind staging buffer."""
     assert self._io.layout.output_channels == self.output_channels, (
       f"shared block carries {self._io.layout.output_channels}, "
       f"but this action consumes {self.output_channels}"
@@ -207,12 +198,7 @@ class McRtcResidualActionBase(BaseAction):
   # ---- Pipeline. ----
 
   def _collect_controller_output(self) -> None:
-    """Await the outstanding async step (if any) and stage its outputs.
-
-    Results move into the ``staged_control`` buffers; each env promotes them to
-    ``next`` at its own next period start, so the ramp stays period-aligned.
-    A no-op when nothing is in flight.
-    """
+    """Await the outstanding async step (if any) and stage its outputs."""
     env_indices = self._pool.collect()
     if env_indices is None:
       return
@@ -231,24 +217,14 @@ class McRtcResidualActionBase(BaseAction):
 
   @abc.abstractmethod
   def _seed_interpolation(self, env_ids: torch.Tensor) -> None:
-    """Seed the interpolation endpoints for the given (reset) envs.
-
-    Called from ``reset`` after the controller has been reset. Set
-    ``_previous_control[c]``/``_next_control[c]`` for each channel at ``env_ids`` to a sensible rest
-    value so the first control period does not ramp from zero.
-    """
+    """Seed the interpolation endpoints for the given (reset) envs."""
     raise NotImplementedError
 
   @abc.abstractmethod
   def _apply_control(
     self, interpolated_control: dict[str, torch.Tensor], residual: torch.Tensor
   ) -> None:
-    """Write actuator targets from the interpolated controller outputs.
-
-    ``interpolated_control`` maps each channel in ``output_channels`` to its
-    per-substep interpolated value (num_envs x num_targets). ``residual`` is the
-    processed RL residual, scattered to full target width.
-    """
+    """Write actuator targets from the interpolated controller outputs."""
     raise NotImplementedError
 
   # ---- ActionTerm API. ----

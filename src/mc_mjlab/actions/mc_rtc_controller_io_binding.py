@@ -29,11 +29,7 @@ def apply_reference_pd_gains(
   target_names: Sequence[str],
   path: str,
 ) -> None:
-  """Set the entity's PD gains from an mc_mujoco ``PDgains_sim.dat``.
-
-  Rows pair with ``ref_joint_order``; joints missing from the file or the reduced
-  model keep their configured gains.
-  """
+  """Set the entity's PD gains from an mc_mujoco ``PDgains_sim.dat``."""
   with open(path) as f:
     rows = [line.split() for line in f if line.strip()]
   gains = {
@@ -63,11 +59,7 @@ def apply_reference_pd_gains(
 def _actuator_gain_columns(
   entity, target_names: Sequence[str]
 ) -> list[tuple[int, torch.Tensor, torch.Tensor, int]]:
-  """``(target index, stiffness, damping, column)`` per PD-driven target joint.
-
-  The gain tensors are the actuators' own, so writing through them retunes the
-  entity in place.
-  """
+  """``(target index, stiffness, damping, column)`` per PD-driven target joint."""
   index_of = {name: i for i, name in enumerate(target_names)}
   columns: list[tuple[int, torch.Tensor, torch.Tensor, int]] = []
   for act in entity.actuators:
@@ -85,11 +77,7 @@ def _actuator_gain_columns(
 def read_pd_gains(
   entity, target_names: Sequence[str], num_envs: int, device
 ) -> tuple[torch.Tensor, torch.Tensor]:
-  """``(kp, kd)`` copies, each ``(num_envs, num_targets)`` in target order.
-
-  Targets driven by an actuator without PD gains read zero, so a PD law built
-  on these tensors contributes nothing for them.
-  """
+  """``(kp, kd)`` copies, each ``(num_envs, num_targets)`` in target order."""
   kp = torch.zeros(num_envs, len(target_names), device=device)
   kd = torch.zeros_like(kp)
   for i, stiffness, damping, j in _actuator_gain_columns(entity, target_names):
@@ -99,13 +87,7 @@ def read_pd_gains(
 
 
 def zero_pd_gains(entity, target_names: Sequence[str]) -> int:
-  """Zero the entity's PD gains for the target joints; returns the count.
-
-  Turns mjlab's PD actuators into pass-through motors (their control law is
-  ``kp * pos_err + kd * vel_err + effort_target``), leaving the action term as
-  the only source of joint torque. Take a copy with ``read_pd_gains`` first if
-  the term still needs the gains.
-  """
+  """Zero the entity's PD gains for the target joints; returns the count."""
   columns = _actuator_gain_columns(entity, target_names)
   for _, stiffness, damping, j in columns:
     stiffness[:, j] = 0.0
@@ -262,11 +244,7 @@ class ControllerIoBinding:
 
   @staticmethod
   def _ang_vel_world_to_body(quat_wxyz: np.ndarray, omega_w: np.ndarray) -> np.ndarray:
-    """Rotate world-frame angular velocities into the base (gyro) frame, batched.
-
-    mc_rtc's BodySensor expects body-frame angular velocity; mjlab measures it
-    in world. ``omega_body = R(q)^T omega_w``.
-    """
+    """Rotate world-frame angular velocities into the base (gyro) frame, batched."""
     w, x, y, z = quat_wxyz[:, 0], quat_wxyz[:, 1], quat_wxyz[:, 2], quat_wxyz[:, 3]
     rt = np.stack(
       [
@@ -290,8 +268,7 @@ class ControllerIoBinding:
     self._fill_root_and_sensor_columns(in_np)
 
   def reset_controller_input(self, in_np: np.ndarray) -> None:
-    """Write the encoder columns and the first 7 root columns (pos + quat wxyz,
-    same prefix in both routing modes) that the hosts read on reset/init."""
+    """Write the encoder and root columns the hosts read on reset/init."""
     T = self.layout.num_targets
     ro = self.layout.root_off
     in_np[:, 0:T] = self._entity.data.joint_pos.cpu().numpy()[:, self._target_ids_np]
@@ -306,13 +283,7 @@ class ControllerIoBinding:
   def read_controller_output(
     self, out_np: np.ndarray, env_indices: list[int]
   ) -> dict[str, torch.Tensor]:
-    """Unpack the controller outputs for ``env_indices`` into sim-ready tensors.
-
-    Slices the output block per channel (``output_channels`` order) and moves
-    each to the sim device, ready to feed the interpolation buffers -- the
-    mc_rtc -> sim counterpart of ``fill_controller_input``. The default dtype matches
-    the action's interpolation buffers (both created without an explicit dtype).
-    """
+    """Unpack the controller outputs for ``env_indices`` into sim-ready tensors."""
     T = self._num_targets
     rows = out_np[env_indices]
     dtype = torch.get_default_dtype()

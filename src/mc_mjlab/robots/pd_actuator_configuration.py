@@ -29,12 +29,7 @@ EFFORT_LIMIT = float("inf")
 def get_armature_from_spec(
   spec: mujoco.MjSpec, joints: Iterable[str]
 ) -> dict[str, float]:
-  """Per-joint reflected rotor inertia, as authored in the MJCF.
-
-  The mc_rtc module does not expose armature; it is a sim property and belongs
-  to the MJCF. Reading it here lets the actuator configs derive gains from the
-  same value MuJoCo simulates, with no hand-copied duplicate.
-  """
+  """Per-joint reflected rotor inertia, as authored in the MJCF."""
   keep = set(joints)
   return {j.name: float(j.armature) for j in spec.joints if j.name in keep}
 
@@ -47,14 +42,7 @@ def get_pd_actuator_cfgs(
   damping_ratio: float = DAMPING_RATIO,
   effort_limit: float = EFFORT_LIMIT,
 ) -> tuple[IdealPdActuatorCfg, ...]:
-  """One ``IdealPdActuatorCfg`` per joint, gains from the natural-frequency model.
-
-  ``armature`` is a single value or a ``{joint: value}`` map. ``cfg.armature``
-  is left ``None`` so MuJoCo keeps the MJCF's own value -- the very number these
-  gains are derived from -- rather than overriding it. The demo/task overwrite
-  stiffness/damping from ``PDgains_sim.dat`` at action-term init; these are the
-  defaults until then.
-  """
+  """One ``IdealPdActuatorCfg`` per joint, gains from the natural-frequency model."""
 
   def armature_of(name: str) -> float:
     return armature[name] if isinstance(armature, dict) else armature

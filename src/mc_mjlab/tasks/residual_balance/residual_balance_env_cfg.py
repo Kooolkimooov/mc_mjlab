@@ -253,11 +253,7 @@ def _make_env_cfg(
 
 
 def _apply_play_overrides(cfg: ManagerBasedRlEnvCfg) -> ManagerBasedRlEnvCfg:
-  """Retune a training cfg for a viewer session.
-
-  Pushes are kept: watching the residual catch a shove is the point of playing
-  this task, where mjlab's locomotion tasks drop them to show clean tracking.
-  """
+  """Retune a training cfg for a viewer session."""
   cfg.scene.num_envs = PLAY_NUM_ENVS
   cfg.episode_length_s = 1e10  # only a fall should end an episode
   cfg.observations["actor"].enable_corruption = False

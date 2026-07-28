@@ -38,14 +38,7 @@ except ImportError:
 
 @contextlib.contextmanager
 def suppress_mc_rtc_output() -> Iterator[None]:
-  """Silence mc_rtc's terminal logging for the duration of the block.
-
-  The spdlog loggers write from C++ and have no config switch, so fds 1/2
-  themselves must be redirected (a ``sys.stdout`` swap catches nothing). On
-  error the captured text is replayed to the real stderr. The trailing
-  flush-drain sleep makes this a cold-path tool (construction, reset); the
-  step path uses ``redirect_output_to_devnull``.
-  """
+  """Silence mc_rtc's terminal logging for the duration of the block."""
   sys.stdout.flush()
   sys.stderr.flush()
   saved_out, saved_err = os.dup(1), os.dup(2)
@@ -74,12 +67,7 @@ def suppress_mc_rtc_output() -> Iterator[None]:
 
 @contextlib.contextmanager
 def redirect_output_to_devnull() -> Iterator[None]:
-  """Discard fds 1/2 for the duration of the block, cheaply.
-
-  No capture, no replay and no flush-drain sleep, so it is safe on the step
-  path; the price is that a line spdlog flushes asynchronously right after
-  the block can slip through.
-  """
+  """Discard fds 1/2 for the duration of the block, cheaply."""
   sys.stdout.flush()
   sys.stderr.flush()
   saved_out, saved_err = os.dup(1), os.dup(2)
@@ -197,8 +185,7 @@ class _ShmHandle:
 
 
 def attach_shm(name: str, shape: tuple[int, int]) -> _ShmHandle:
-  """Attach to an existing shared block. ``track=False``: the trainer owns and
-  unlinks it; tracking here would double-unlink."""
+  """Attach to an existing shared block, untracked: the trainer unlinks it."""
   shm = SharedMemory(name=name, track=False)
   arr = np.ndarray(shape, dtype=np.float64, buffer=shm.buf)
   return _ShmHandle(shm, arr)
@@ -338,13 +325,7 @@ class ControllerHost:
   def _output_guard(
     self, env_id: int, hot: bool = False
   ) -> contextlib.AbstractContextManager[None]:
-    """Suppression wrapper for one env's controller call.
-
-    A no-op when the env may print; otherwise capture-and-replay on cold
-    paths and a plain fd discard on the step path (``hot``). ``step_env``
-    itself stays guard-free: fd redirection is process-global, so the
-    threaded in-process pool must guard whole batches instead.
-    """
+    """Suppression wrapper for one env's controller call."""
     if self._allowed_output is None or env_id in self._allowed_output:
       return contextlib.nullcontext()
     return redirect_output_to_devnull() if hot else suppress_mc_rtc_output()
@@ -356,11 +337,7 @@ class ControllerHost:
     return full.tolist()
 
   def reset_envs(self, env_ids: Sequence[int], in_arr: np.ndarray) -> None:
-    """init() (first time) or reset() the controllers for the given envs.
-
-    Reads the encoder columns and the first 7 root columns (pos + quat wxyz)
-    of each env's input row.
-    """
+    """init() (first time) or reset() the controllers for the given envs."""
     layout = self._layout
     assert layout is not None
     T = layout.num_targets
@@ -404,12 +381,7 @@ class ControllerHost:
         self._failed[local] = False
 
   def step_env(self, env_id: int, in_arr: np.ndarray, out_arr: np.ndarray) -> None:
-    """Feed one env's input row to its controller, run it, write q/alpha out.
-
-    A controller whose QP has given up stays failed until its env is reset:
-    the status column reports it so the trainer can end that episode, and the
-    controller is left untouched rather than driven further in a broken state.
-    """
+    """Feed one env's input row to its controller, run it, write q/alpha out."""
     layout = self._layout
     assert layout is not None
     T = layout.num_targets
@@ -544,14 +516,7 @@ class ControllerHost:
 
 
 def _start_orphan_watchdog(trainer_pid: int, poll_s: float = 2.0) -> None:
-  """Exit the worker once the trainer process is gone.
-
-  The pipe-EOF and daemon-flag routes both need the command loop to run again,
-  which never happens if mc_rtc wedges inside ``run()``: such a worker outlives
-  the trainer holding its controllers and their solver threads. ``os._exit`` is
-  deliberate -- the wedged thread makes an orderly interpreter shutdown
-  impossible.
-  """
+  """Exit the worker once the trainer process is gone."""
 
   def watch() -> None:
     while True:
@@ -574,19 +539,7 @@ def worker_main(
   suppress_output: bool = False,
   trainer_pid: int | None = None,
 ) -> None:
-  """Entry point of a controller worker process.
-
-  Messages are ``(tag, payload)`` tuples. Startup sends ``("meta",
-  HostMetadata)`` or ``("error", tb)``; then ``configure``/``step``/``reset``
-  commands each reply ``("ok", None)`` or ``("error", tb)`` (the worker stays
-  alive); ``stop`` replies and exits.
-
-  ``suppress_output`` silences the whole process by pointing fds 1/2 at a
-  capture file once at startup (zero per-step cost); error replies carry the
-  captured tail so mc_rtc's own error text is not lost. The
-  ``MC_MJLAB_WORKER_LOG_DIR`` debug hook takes precedence: output then goes
-  to a per-worker log file instead. ``trainer_pid`` arms the orphan watchdog.
-  """
+  """Entry point of a controller worker process."""
   # Ctrl+C hits the whole foreground process group; shutdown is coordinated by
   # the trainer instead ("stop", pipe EOF, the watchdog, or the daemon flag).
   signal.signal(signal.SIGINT, signal.SIG_IGN)

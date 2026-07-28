@@ -18,12 +18,7 @@ from pathlib import Path
 
 
 def read_config_key(path: Path, key: str) -> str:
-  """The value of top-level ``key``, comments stripped.
-
-  Raises if the key is absent: every caller here needs a real value, and a
-  silent default would put the two sides of the coupling on different robots
-  or controllers.
-  """
+  """The value of top-level ``key``, comments stripped."""
   for raw in path.read_text().splitlines():
     if raw[:1].isspace():  # nested: not the top-level key we were asked for
       continue
@@ -34,19 +29,12 @@ def read_config_key(path: Path, key: str) -> str:
 
 
 def get_main_robot_name(path: Path) -> str:
-  """The config's ``MainRobot``; it selects the mjlab entity, keeping the two
-  sides of the coupling on the same robot."""
+  """The config's ``MainRobot``, which selects the matching mjlab entity."""
   return read_config_key(path, "MainRobot")
 
 
 def get_controller_name(path: Path) -> str:
-  """The config's ``Enabled`` controller -- the base policy the residual rides.
-
-  mc_rtc also accepts a list here, and runs the first entry as the initial
-  controller; the inline form is unwrapped to that entry. The block form
-  (``- name`` on following lines) is not read, since this scanner does not
-  descend -- inline it if you need it.
-  """
+  """The config's ``Enabled`` controller -- the base policy the residual rides."""
   value = read_config_key(path, "Enabled")
   if value.startswith("["):
     first = value.strip("[]").split(",")[0].strip().strip("\"'")

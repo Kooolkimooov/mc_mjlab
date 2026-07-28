@@ -31,11 +31,7 @@ from mjlab.utils.spec_config import CollisionCfg
 
 
 def is_collision_geom(geom: mujoco.MjsGeom) -> bool:
-  """Whether the geom takes part in contacts *as authored in the MJCF*.
-
-  Only meaningful before ``group_and_disable_collision_geoms`` blanks
-  ``contype``/``conaffinity``; call the namers ahead of that.
-  """
+  """Whether the geom takes part in contacts *as authored in the MJCF*."""
   return bool(geom.contype or geom.conaffinity)
 
 
@@ -53,19 +49,7 @@ def _geom_name_stem(geom: mujoco.MjsGeom) -> str:
 
 
 def name_foot_collision_geoms(spec: mujoco.MjSpec, foot_bodies: dict[str, str]) -> None:
-  """Give each foot's collision geom a semantic name.
-
-  ``foot_bodies`` maps a foot body name to the name to assign its collision
-  geom, e.g. ``{"L_ANKLE_P_LINK": "left_foot_collision"}``. Run this *before*
-  ``name_remaining_collision_geoms`` so the feet land in the foot bucket: a
-  mesh/body derived name would match the body regex instead, and the feet would
-  then get body contact params. The assigned name also encodes left/right, which
-  no derived name could.
-
-  Raises if a foot body does not hold exactly one unnamed collision geom -- a
-  silently unnamed sole makes the foot preset match nothing, and the robot then
-  walks on whatever the fallback happens to enable.
-  """
+  """Give each foot's collision geom a semantic name."""
   found: dict[str, list[mujoco.MjsGeom]] = {body: [] for body in foot_bodies}
   for geom in spec.geoms:
     body = geom.parent
@@ -85,12 +69,7 @@ def name_foot_collision_geoms(spec: mujoco.MjSpec, foot_bodies: dict[str, str]) 
 
 
 def name_remaining_collision_geoms(spec: mujoco.MjSpec, prefix: str) -> tuple[str, ...]:
-  """Name every unnamed collision geom ``<prefix>_collision_<stem>``.
-
-  Already-named geoms are left alone, so a caller can name the few geoms it
-  wants to address semantically (feet) before handing the rest over here.
-  Returns the names assigned, in spec order.
-  """
+  """Name every unnamed collision geom ``<prefix>_collision_<stem>``."""
   assigned: list[str] = []
   taken = {geom.name for geom in spec.geoms if geom.name}
   for geom in spec.geoms:
@@ -119,13 +98,7 @@ COLLISION_GROUP = 3
 
 
 def group_and_disable_collision_geoms(spec: mujoco.MjSpec) -> None:
-  """Apply the geom-group convention, then turn all collisions off.
-
-  Visual geoms -> group 2, collision geoms -> ``COLLISION_GROUP`` (3), sites ->
-  group 4, read from the MJCF's ``class="visual"/"collision"`` split (which
-  sets contype/conaffinity). Collisions are then disabled so consumers
-  re-enable a chosen set: named-geom presets, or ``enable_all_collision_geoms``.
-  """
+  """Apply the geom-group convention, then turn all collisions off."""
   for geom in spec.geoms:
     geom.group = 2 if (geom.contype == 0 and geom.conaffinity == 0) else COLLISION_GROUP
   for site in spec.sites:
@@ -136,12 +109,7 @@ def group_and_disable_collision_geoms(spec: mujoco.MjSpec) -> None:
 
 
 def enable_all_collision_geoms(spec: mujoco.MjSpec) -> None:
-  """Re-enable every collision geom wholesale, by group.
-
-  The fallback for a robot whose geoms are unnamed: name-based presets match
-  nothing, so without this the robot has no collisions and sinks through the
-  floor. Keyed on the group-3 mark ``group_and_disable_collision_geoms`` left.
-  """
+  """Re-enable every collision geom wholesale, by group."""
   for geom in spec.geoms:
     if geom.group == COLLISION_GROUP:
       geom.contype = 1
@@ -156,19 +124,7 @@ def enable_all_collision_geoms(spec: mujoco.MjSpec) -> None:
 def get_collision_presets(
   prefix: str, foot_expr: str
 ) -> tuple[CollisionCfg, CollisionCfg, CollisionCfg]:
-  """``(feet_only, full, full_without_self)`` for a robot whose feet match
-  ``foot_expr`` and whose other collision geoms are named ``<prefix>_collision_*``.
-
-  Contact parameters follow mc_mujoco (condim 3, MuJoCo's default friction),
-  since the stabilizer is a force-feedback loop tuned against it; ``priority=1``
-  on the feet keeps the foot/floor mix from depending on the terrain's friction.
-
-  - ``feet_only``: only the feet touch anything; the body passes through.
-  - ``full``: every named geom live, self-collisions included (contype 1 /
-    conaffinity 1) -- the safe default, matching the XML authors.
-  - ``full_without_self``: contype 0 so body geoms never initiate a pair, while
-    the terrain's own contype still finds them, so a fallen robot lands.
-  """
+  """``(feet_only, full, full_without_self)`` presets for a named-geom robot."""
   core = foot_expr.removeprefix("^").removesuffix("$")
   all_expr = rf"^({core}|{prefix}_collision_.*)$"
   feet_only = CollisionCfg(

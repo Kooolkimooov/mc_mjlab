@@ -19,16 +19,7 @@ def add_locomotion_sensors(
   left_foot_site: str = "lf_force",
   right_foot_site: str = "rf_force",
 ) -> None:
-  """Add sole velocimeters and a root subtree-angular-momentum sensor.
-
-  - ``left_foot_lin_vel`` / ``right_foot_lin_vel``: sole linear velocity, for
-    impact-velocity rewards. The force-sensor sites already sit at the soles, so
-    this needs no new sites -- and those frames are the ones mc_rtc's wrenches
-    are expressed in.
-  - ``root_angmom``: subtree angular momentum about the floating-base body.
-
-  Idempotent: any sensor name already present is left as-is.
-  """
+  """Add sole velocimeters and a root subtree-angular-momentum sensor."""
   existing = {sensor.name for sensor in spec.sensors}
   for name, site in (
     ("left_foot_lin_vel", left_foot_site),
