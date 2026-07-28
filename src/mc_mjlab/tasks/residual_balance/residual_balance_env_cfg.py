@@ -84,6 +84,16 @@ def _make_env_cfg(
   # so the reward target and the base policy cannot drift apart.
   nominal_height = mc_rtc.get_default_root_position(robot_name)[2]
 
+  # The residual acts on the legs only: balancing is what this task rewards, and
+  # the upper body does not hold the robot up. This is the task's opinion, so it
+  # lives here -- a locomotion or manipulation task would want the arms, and the
+  # robot's own `get_residual_joints` stays the place for exclusions that hold
+  # whatever the task is (a joint mc_rtc models as fixed can carry no residual
+  # anywhere, and is dropped there). Filtering that set rather than taking the
+  # legs directly keeps the robot's carve-outs and refJointOrder ordering.
+  upper_body = set(mc_rtc.get_upper_body_joints(robot_name))
+  residual_joints = tuple(j for j in robot.get_residual_joints() if j not in upper_body)
+
   ##
   # Actions: the residual on top of mc_rtc.
   ##
@@ -97,7 +107,7 @@ def _make_env_cfg(
     "mc_rtc_residual": action_cls(
       entity_name="robot",
       actuator_names=(".*",),
-      residual_actuator_names=robot.get_residual_joints(),
+      residual_actuator_names=residual_joints,
       mc_rtc_config_path=str(mc_rtc_yaml),
       mc_rtc_robot_name=robot_name,
       frameskip=2,
