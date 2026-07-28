@@ -1,5 +1,6 @@
 """JVRC1 constants and helpers."""
 
+import functools
 from pathlib import Path
 
 import mujoco
@@ -52,7 +53,42 @@ JVRC1_FOOT_BODIES: dict[str, str] = {
 }
 
 
-def get_spec() -> mujoco.MjSpec:
+# JVRC1's hands are an underactuated grasp: five finger joints per side follow
+# ``<side>_UTHUMB`` through active mjEQ_JOINT equalities with fixed gear ratios
+# (+/-1, +/-3). That leaves two coherent configurations, and the spec and the
+# actuator set have to pick the same one:
+#
+#   True  (default) -- keep the couplings and leave the five slaves per hand
+#     unactuated. One commanded grasp DoF per hand, the fingers following it;
+#     this is the joint set mc_mujoco motorizes.
+#   False -- delete the couplings and actuate all 44, giving mc_rtc the
+#     per-finger control its refJointOrder and its 44 gain rows imply. Pick
+#     this for a task that actually manipulates something.
+#
+# Actuating a slave while its equality is live puts the PD and the constraint
+# solver on one DoF, pulling against each other. The whole finger stance is
+# zero and zero satisfies every ratio, so that conflict stays invisible until
+# something commands a finger away from zero -- which is why it can hide.
+JVRC1_COUPLED_FINGERS = True
+
+
+def _coupled_joints(spec: mujoco.MjSpec) -> tuple[str, ...]:
+  """The slaved side of every active ``mjEQ_JOINT`` equality in ``spec``"""
+  return tuple(
+    eq.name1
+    for eq in spec.equalities
+    if eq.type == mujoco.mjtEq.mjEQ_JOINT and eq.active and eq.name1
+  )
+
+
+def _delete_couplings(spec: mujoco.MjSpec) -> None:
+  """Drop the joint couplings, making the slaved fingers independent DoFs."""
+  for eq in list(spec.equalities):
+    if eq.type == mujoco.mjtEq.mjEQ_JOINT:
+      spec.delete(eq)
+
+
+def get_spec(coupled_fingers: bool = JVRC1_COUPLED_FINGERS) -> mujoco.MjSpec:
   """Load the JVRC1 MJCF."""
   ensure_assets()
 
@@ -61,27 +97,39 @@ def get_spec() -> mujoco.MjSpec:
   name_remaining_collision_geoms(spec, "jvrc1")
   add_locomotion_sensors(spec, root_body=JVRC1_ROOT_BODY)
   group_and_disable_collision_geoms(spec)
+  if not coupled_fingers:
+    _delete_couplings(spec)
   return spec
+
+
+@functools.lru_cache(maxsize=None)
+def _coupled_finger_names() -> frozenset[str]:
+  """The slaved finger joints, resolved once"""
+  return frozenset(_coupled_joints(get_spec(coupled_fingers=True)))
+
+
+def get_non_actuated_joints(
+  coupled_fingers: bool = JVRC1_COUPLED_FINGERS,
+) -> frozenset[str]:
+  """The joints to leave without an actuator, for the chosen hand mode"""
+  if not coupled_fingers:
+    return frozenset()
+  return _coupled_finger_names()
 
 
 ##
 # Joint tables.
 ##
 
-# Default: every joint in the mc_rtc refJointOrder (all 44, fingers included) is
-# actuated and receives the RL residual. Carve joints out with:
-#   - JVRC1_NON_ACTUATED_JOINTS: left fully passive (no actuator, no residual).
-#   - JVRC1_NON_RESIDUAL_JOINTS: actuated (tracks the controller) but no residual
-#     -- e.g. add the finger joints here to keep them out of the policy's action.
-JVRC1_NON_ACTUATED_JOINTS: frozenset[str] = frozenset()
-JVRC1_NON_RESIDUAL_JOINTS: frozenset[str] = frozenset()
 
-
-def get_residual_joints() -> tuple[str, ...]:
+def get_residual_joints(
+  coupled_fingers: bool = JVRC1_COUPLED_FINGERS,
+) -> tuple[str, ...]:
+  """The joints a residual may act on: refJointOrder minus the carve-outs"""
   return mc_rtc.get_residual_joints(
     JVRC1_MC_RTC_MODULE_NAME,
-    non_actuated=JVRC1_NON_ACTUATED_JOINTS,
-    non_residual=JVRC1_NON_RESIDUAL_JOINTS,
+    non_actuated=get_non_actuated_joints(coupled_fingers),
+    non_residual=mc_rtc.get_fixed_joints(JVRC1_MC_RTC_MODULE_NAME),
   )
 
 
@@ -100,13 +148,13 @@ JVRC1_FOOT_COLLISION_EXPR = r"^(left|right)_foot_collision$"
 JVRC1_COLLISION = JVRC1_FULL_COLLISION
 
 
-def get_robot_cfg() -> EntityCfg:
+def get_robot_cfg(coupled_fingers: bool = JVRC1_COUPLED_FINGERS) -> EntityCfg:
   """Return a fresh JVRC1 EntityCfg."""
 
-  spec = get_spec()
+  spec = get_spec(coupled_fingers)
 
   joints = mc_rtc.get_actuated_joints(
-    JVRC1_MC_RTC_MODULE_NAME, non_actuated=JVRC1_NON_ACTUATED_JOINTS
+    JVRC1_MC_RTC_MODULE_NAME, non_actuated=get_non_actuated_joints(coupled_fingers)
   )
 
   simulated = {j.name for j in spec.joints}
@@ -125,6 +173,6 @@ def get_robot_cfg() -> EntityCfg:
   return EntityCfg(
     init_state=init_state,
     collisions=(JVRC1_COLLISION,),
-    spec_fn=get_spec,
+    spec_fn=functools.partial(get_spec, coupled_fingers),
     articulation=articulation,
   )
