@@ -1,8 +1,23 @@
 #!/usr/bin/env bash
 # mc_rtc demo. Needs the ROS workspace sourced (mc_rtc bindings + libs).
-# Defaults to the viser viewer; pass "--viewer none" for the benchmark.
+#
+# Runs the zero-residual task through mjlab's `play --agent zero`: the robot
+# tracks raw mc_rtc output, so a healthy run holds a steady root height. The
+# task itself lives in src/mc_mjlab/tasks/zero_residual/; everything here is
+# launcher. Extra arguments are forwarded to `play`, e.g.
+#   run_test_mc_rtc.sh --num-envs 8
+#   run_test_mc_rtc.sh --viewer native
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")/../.."
+
+# The id embeds the robot and controller from etc/mc_rtc.yaml. Resolved through
+# mc_mjlab.utils.task_naming, which imports no mjlab, so this costs milliseconds
+# rather than a full torch/warp import.
+control="${MC_MJLAB_CONTROL:-position}"
+task_id="$(uv run python -c "
+from mc_mjlab.utils.task_naming import get_task_name
+print(get_task_name('zero_residual', '$control'))
+")"
 
 # Effective --viewer value ("--viewer X" or "--viewer=X"; viser by default,
 # injected below).
@@ -27,4 +42,5 @@ if [[ "$viewer" == "viser" ]] && command -v xdg-open curl >/dev/null 2>&1; then
   ) &
 fi
 
-exec uv run python scripts/demos/test_mc_rtc.py --viewer viser "$@"
+echo "[mc_rtc] $task_id"
+exec uv run play "$task_id" --agent zero --viewer viser "$@"
