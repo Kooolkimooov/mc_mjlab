@@ -69,22 +69,18 @@ def get_spec() -> mujoco.MjSpec:
 # Joint tables.
 ##
 
-# Default: every joint in the mc_rtc refJointOrder (all 53, fingers included) is
-# actuated and receives the RL residual. Gains come from PDgains_sim.dat at
-# action-term init, so the fingers get their real gains without a special case.
-# Carve joints out with:
-#   - HRP5P_NON_ACTUATED_JOINTS: left fully passive (no actuator, no residual).
-#   - HRP5P_NON_RESIDUAL_JOINTS: actuated (tracks the controller) but no residual
-#     -- e.g. add the finger joints here to keep them out of the policy's action.
-HRP5P_NON_ACTUATED_JOINTS: frozenset[str] = frozenset()
-HRP5P_NON_RESIDUAL_JOINTS: frozenset[str] = frozenset()
+# Every joint in the mc_rtc refJointOrder (all 53, fingers included) is
+# actuated, matching the 53 motors HRP5P's own MJCF declares. Gains come from
+# PDgains_sim.dat at action-term init, so the fingers get their real gains
+# without a special case. To leave a joint fully passive, pass it to
+# ``get_actuated_joints``'s ``non_actuated``; nothing here needs it today.
 
 
 def get_residual_joints() -> tuple[str, ...]:
+  """The joints a residual may act on: refJointOrder minus the carve-outs."""
   return mc_rtc.get_residual_joints(
     HRP5P_MC_RTC_MODULE_NAME,
-    non_actuated=HRP5P_NON_ACTUATED_JOINTS,
-    non_residual=HRP5P_NON_RESIDUAL_JOINTS,
+    non_residual=mc_rtc.get_fixed_joints(HRP5P_MC_RTC_MODULE_NAME),
   )
 
 
@@ -107,9 +103,7 @@ def get_robot_cfg() -> EntityCfg:
   """Return a fresh HRP5P EntityCfg."""
   spec = get_spec()
 
-  joints = mc_rtc.get_actuated_joints(
-    HRP5P_MC_RTC_MODULE_NAME, non_actuated=HRP5P_NON_ACTUATED_JOINTS
-  )
+  joints = mc_rtc.get_actuated_joints(HRP5P_MC_RTC_MODULE_NAME)
 
   simulated = {j.name for j in spec.joints}
 

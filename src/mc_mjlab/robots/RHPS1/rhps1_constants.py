@@ -70,21 +70,18 @@ def get_spec() -> mujoco.MjSpec:
 ##
 
 
-# Default: every joint in the mc_rtc refJointOrder is actuated and receives the
-# RL residual. RHPS1main has no fingers, so this is all 30 rotary joints (the 8
-# passive slide linkages are zero-DoF in the module and excluded). Carve joints
-# out with:
-#   - RHPS1_NON_ACTUATED_JOINTS: left fully passive (no actuator, no residual).
-#   - RHPS1_NON_RESIDUAL_JOINTS: actuated (tracks the controller) but no residual.
-RHPS1_NON_ACTUATED_JOINTS: frozenset[str] = frozenset()
-RHPS1_NON_RESIDUAL_JOINTS: frozenset[str] = frozenset()
+# Every joint in the mc_rtc refJointOrder is actuated and receives the RL
+# residual. RHPS1main has no fingers, so this is all 30 rotary joints (the 8
+# passive slide linkages are zero-DoF in the module and excluded), matching the
+# 30 motors the MJCF declares. To leave a joint fully passive, pass it to
+# ``get_actuated_joints``'s ``non_actuated``; nothing here needs it today.
 
 
 def get_residual_joints() -> tuple[str, ...]:
+  """The joints a residual may act on: refJointOrder minus the carve-outs."""
   return mc_rtc.get_residual_joints(
     RHPS1_MC_RTC_MODULE_NAME,
-    non_actuated=RHPS1_NON_ACTUATED_JOINTS,
-    non_residual=RHPS1_NON_RESIDUAL_JOINTS,
+    non_residual=mc_rtc.get_fixed_joints(RHPS1_MC_RTC_MODULE_NAME),
   )
 
 
@@ -112,9 +109,7 @@ def get_robot_cfg() -> EntityCfg:
 
   spec = get_spec()
 
-  joints = mc_rtc.get_actuated_joints(
-    RHPS1_MC_RTC_MODULE_NAME, non_actuated=RHPS1_NON_ACTUATED_JOINTS
-  )
+  joints = mc_rtc.get_actuated_joints(RHPS1_MC_RTC_MODULE_NAME)
 
   simulated = {j.name for j in spec.joints}
 
