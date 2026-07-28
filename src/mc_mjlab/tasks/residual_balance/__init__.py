@@ -11,30 +11,28 @@ nothing under a different base controller either. Both come from
 point, since it also changes what a checkpoint is valid against.
 """
 
+from pathlib import Path
+
 from mjlab.tasks.registry import register_mjlab_task
 
-from mc_mjlab import MC_RTC_YAML_PATH
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   residual_balance_position_env_cfg,
   residual_balance_ppo_cfg,
   residual_balance_torque_env_cfg,
 )
-from mc_mjlab.utils.mc_rtc_config import get_controller_name, get_main_robot_name
+from mc_mjlab.utils.task_naming import get_task_name
 
-_BASE = "Mc-Mjlab-Residual-Balance"
-_SUFFIX = (
-  f"{get_main_robot_name(MC_RTC_YAML_PATH)}-{get_controller_name(MC_RTC_YAML_PATH)}"
-)
+TASK_DIR = Path(__file__).resolve().parent.name
 
 register_mjlab_task(
-  task_id=f"{_BASE}-Position-{_SUFFIX}",
+  task_id=get_task_name(TASK_DIR, "position"),
   env_cfg=residual_balance_position_env_cfg(),
   play_env_cfg=residual_balance_position_env_cfg(play=True),
   rl_cfg=residual_balance_ppo_cfg(),
 )
 
 register_mjlab_task(
-  task_id=f"{_BASE}-Torque-{_SUFFIX}",
+  task_id=get_task_name(TASK_DIR, "torque"),
   env_cfg=residual_balance_torque_env_cfg(),
   play_env_cfg=residual_balance_torque_env_cfg(play=True),
   rl_cfg=residual_balance_ppo_cfg(),
