@@ -7,6 +7,16 @@ from it (``action_l2``), what it is asking for versus what it got
 is still generating a gait (``controller_reference_motion``) and whether it has
 given up (``controller_failed``). What they compare against is the raw
 controller output with the residual excluded, read off the action term.
+
+A note on what is *not* here, because it looks like it should be. A term
+comparing commanded joint positions against measured ones does not measure
+"is the controller's plan being executed" under this coupling: the joints are
+position-controlled with stiff PD, so the measured angle follows the commanded
+one to within 0.04 rad even while the robot topples (measured), and since the
+command is reference-plus-residual such a term reduces to a second penalty on
+the residual. Whole-body failure shows up in the base -- attitude, height,
+travel -- which is what the task's terminations and ``base_progress_tanh``
+read instead.
 """
 
 from __future__ import annotations
@@ -20,8 +30,6 @@ from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
-
-_DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
 
 
 def _residual_term(env: ManagerBasedRlEnv, action_name: str) -> McRtcResidualActionBase:
@@ -70,12 +78,18 @@ def controller_reference_velocity(
   return _restrict(term, term.controller_reference("alpha"))
 
 
-def root_height_l2(
-  env: ManagerBasedRlEnv,
-  target_height: float,
-  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+def base_progress_tanh(
+  env: ManagerBasedRlEnv, speed: float = 0.1, asset_cfg: SceneEntityCfg | None = None
 ) -> torch.Tensor:
-  """Squared root-height error against the controller's stance height."""
-  asset = env.scene[asset_cfg.name]
-  height = asset.data.root_link_pos_w[:, 2] - env.scene.env_origins[:, 2]
-  return torch.square(height - target_height)
+  """Reward the robot actually travelling forward, saturating at ``speed``."""
+  asset = env.scene[(asset_cfg or SceneEntityCfg("robot")).name]
+  forward = asset.data.root_link_lin_vel_b[:, 0].clamp(min=0.0)
+  return torch.tanh(forward / speed)
+
+
+def controller_reference_motion(
+  env: ManagerBasedRlEnv, scale: float = 1.0, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """Reward the controller still generating a gait, bounded by tanh."""
+  alpha = controller_reference_velocity(env, action_name)
+  return torch.tanh(torch.linalg.vector_norm(alpha, dim=1) / scale)

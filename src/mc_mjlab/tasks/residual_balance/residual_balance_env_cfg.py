@@ -17,6 +17,13 @@ initializes against that posture and its FSM never reaches the walking state.
 The robot then stands still for the whole episode no matter what the residual
 does, which reads exactly like a policy that has learned to freeze the gait.
 
+*The reward must pay for walking, not merely for surviving.* Walking is the
+risky activity, so an alive-only reward prefers a policy that stops the gait.
+Payment is therefore mostly for the controller still generating a gait and the
+robot still covering ground -- measured on both sides, since the controller's
+intent and the robot's motion can be frozen independently -- and the residual
+is hard-clipped to an authority that cannot cancel a swing trajectory.
+
 Rates: the sim runs at 1 kHz and the controller at 500 Hz (``frameskip=2``, the
 mc_mujoco pairing), while the policy acts at 50 Hz (``decimation=20``); the
 residual is therefore held across 10 controller periods.
@@ -59,13 +66,28 @@ from mc_mjlab.tasks import mdp
 # How hard the robot is shoved: the task's difficulty dial. Both directions
 # ruin training -- too gentle and mc_rtc never falls, so the best residual is
 # no residual; too hard and the robot falls whatever the residual does, which
-# plateaus the policy at a fraction of an episode. These match mjlab's own
-# velocity task (+/-0.5 m/s, +/-0.5 rad/s): treat them as the calibrated
-# starting point and raise them only as far as the baseline still survives most
-# episodes. They live here rather than as CLI flags because they sit inside an
-# event term's ``velocity_range`` dict, which tyro does not flatten.
-PUSH_VELOCITY = 0.5
-PUSH_ANGULAR_VELOCITY = 0.5
+# plateaus the policy at a fraction of an episode.
+#
+# 0.1 m/s reads timid next to mjlab's velocity task (+/-0.5), but a *walking*
+# robot is far easier to topple than a standing one: measured over 65 s x 16
+# envs, the zero-residual baseline already loses about half its episodes here
+# (fell_over + collapsed vs time_out). That is the headroom the residual is
+# meant to recover, so re-measure before raising this -- the number to keep an
+# eye on is the baseline's survival rate, not the push magnitude. They live
+# here rather than as CLI flags because they sit inside an event term's
+# ``velocity_range`` dict, which tyro does not flatten.
+PUSH_VELOCITY = 0.1
+PUSH_ANGULAR_VELOCITY = 0.0
+
+# How long the base controller actually walks, and therefore how long an
+# episode is worth running. With the *installed* LogisticController_ismpc
+# config the FSM settles the posture for ~4 s, walks 1 m in ~12 s and then
+# stands still for good (its remaining transitions are commented out), so
+# everything past ~16 s would train the residual on a stationary robot -- the
+# opposite of this task. Enabling the endless-walk override shipped in
+# `etc/mc_rtc_controllers/` removes that ceiling; raise this with
+# `--env.episode-length-s` when you do. Measured with a zero residual.
+WALK_WINDOW_S = 16.0
 
 # A viewer default, not a training one: every env is its own mc_rtc controller
 # (~70 MB, ~570 ms to construct, built serially), so replaying at the training
@@ -78,7 +100,7 @@ def _make_env_cfg(
   num_envs: int = 128,
   num_workers: int | None = None,
   residual_scale: float = 0.1,
-  episode_length_s: float = 10.0,
+  episode_length_s: float = WALK_WINDOW_S,
   push_velocity: float = PUSH_VELOCITY,
   push_angular_velocity: float = PUSH_ANGULAR_VELOCITY,
   mc_rtc_yaml: Path = MC_RTC_YAML_PATH,
@@ -174,19 +196,38 @@ def _make_env_cfg(
 
   ##
   # Rewards. Weights are per second: the manager scales them by step_dt.
+  #
+  # Structured so that full payment requires walking: `alive` alone pays less
+  # than `tracking` + `plan_motion`, both of which a frozen robot (or a
+  # controller disturbed into standing) forfeits. The residual penalties only
+  # break ties toward minimal intervention; the action term's hard clip is
+  # what actually bounds the residual.
   ##
 
   rewards = {
-    "alive": RewardTermCfg(func=envs_mdp.is_alive, weight=2.0),
-    "upright": RewardTermCfg(func=envs_mdp.flat_orientation_l2, weight=-2.0),
-    "stance_height": RewardTermCfg(
-      func=mdp.root_height_l2,
-      weight=-20.0,
-      params={"target_height": nominal_height},
+    "alive": RewardTermCfg(func=envs_mdp.is_alive, weight=1.0),
+    # The two halves of "it is still walking", and together the bulk of the
+    # payment: the controller is still generating a gait, and the robot is
+    # really covering ground. A policy that stops either one keeps only
+    # `alive`, which on its own is worth less than what it gave up.
+    #
+    # `scale`/`speed` are set from the zero-residual baseline so both read as
+    # switches rather than gradients: its reference velocity sits at 0.43 rad/s
+    # median while walking against 0.003 rad/s standing, and it travels at
+    # ~0.09 m/s. Saturating there pays for walking at all, not for shaking the
+    # controller harder or outrunning its gait.
+    "plan_motion": RewardTermCfg(
+      func=mdp.controller_reference_motion, weight=1.5, params={"scale": 0.5}
     ),
-    # Keep the policy near mc_rtc: pay for the residual and for jerk in it.
-    "residual_magnitude": RewardTermCfg(func=mdp.action_l2, weight=-0.01),
-    "residual_rate": RewardTermCfg(func=envs_mdp.action_rate_l2, weight=-0.005),
+    "progress": RewardTermCfg(
+      func=mdp.base_progress_tanh, weight=1.5, params={"speed": 0.1}
+    ),
+    # There is deliberately no root-height term next to this one: the
+    # controller dips to z~0.75 while walking (stance is 0.79), so a fixed
+    # height target would pay the policy to stand tall -- i.e. to stop the gait.
+    "upright": RewardTermCfg(func=envs_mdp.flat_orientation_l2, weight=-2.0),
+    "residual_magnitude": RewardTermCfg(func=mdp.action_l2, weight=-0.1),
+    "residual_rate": RewardTermCfg(func=envs_mdp.action_rate_l2, weight=-0.1),
   }
 
   ##
@@ -196,11 +237,14 @@ def _make_env_cfg(
   terminations = {
     "time_out": TerminationTermCfg(func=envs_mdp.time_out, time_out=True),
     "fell_over": TerminationTermCfg(
-      func=envs_mdp.bad_orientation, params={"limit_angle": math.radians(60.0)}
+      func=envs_mdp.bad_orientation, params={"limit_angle": math.radians(45.0)}
     ),
-    "dropped": TerminationTermCfg(
+    # Crouch-collapse keeps the trunk upright, so `fell_over` misses it. This
+    # is the termination that actually fires most (27 of 37 baseline failures
+    # over 65 s x 16 envs); walking dips to z~0.75, so the threshold has room.
+    "collapsed": TerminationTermCfg(
       func=envs_mdp.root_height_below_minimum,
-      params={"minimum_height": nominal_height - 0.25},
+      params={"minimum_height": 0.7 * nominal_height},
     ),
     "controller_failed": TerminationTermCfg(
       func=mdp.controller_failed, params={"action_name": "mc_rtc_residual"}
