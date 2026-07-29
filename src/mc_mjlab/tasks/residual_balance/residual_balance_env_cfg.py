@@ -139,7 +139,7 @@ def _make_env_cfg(
   # the gait instead of stabilizing it (a swing trajectory is ~0.5 rad;
   # rejecting a push needs far less).
   if residual_scale is None:
-    residual_scale = 0.1 if control == "position" else 10.0
+    residual_scale = 0.01 if control == "position" else 10.0
 
   action_cls = (
     McRtcResidualJointPositionActionCfg
