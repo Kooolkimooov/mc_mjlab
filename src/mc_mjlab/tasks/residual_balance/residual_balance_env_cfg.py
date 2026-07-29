@@ -166,12 +166,23 @@ def _make_env_cfg(
   # Observations.
   ##
 
+  # Noise is scaled to what this robot's signals actually are, measured over a
+  # 32 s x 16 env zero-residual walk, not to mjlab's locomotion defaults: those
+  # assume ~1 m/s travel, and this base controller walks at 0.09 m/s, so the
+  # same absolute corruption buries the signal. RMS per channel was base_lin_vel
+  # 0.110, base_ang_vel 0.121, joint_pos 0.085, joint_vel 0.125,
+  # projected_gravity 0.577; the levels below keep noise near a tenth to a
+  # quarter of that. `joint_vel` in particular carried noise 12x its own signal.
   actor_terms = {
     "base_lin_vel": ObservationTermCfg(
-      func=envs_mdp.base_lin_vel, noise=Unoise(n_min=-0.1, n_max=0.1), history_length=5
+      func=envs_mdp.base_lin_vel,
+      noise=Unoise(n_min=-0.02, n_max=0.02),
+      history_length=5,
     ),
     "base_ang_vel": ObservationTermCfg(
-      func=envs_mdp.base_ang_vel, noise=Unoise(n_min=-0.2, n_max=0.2), history_length=5
+      func=envs_mdp.base_ang_vel,
+      noise=Unoise(n_min=-0.03, n_max=0.03),
+      history_length=5,
     ),
     "projected_gravity": ObservationTermCfg(
       func=envs_mdp.projected_gravity, noise=Unoise(n_min=-0.05, n_max=0.05)
@@ -180,7 +191,7 @@ def _make_env_cfg(
       func=envs_mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01)
     ),
     "joint_vel": ObservationTermCfg(
-      func=envs_mdp.joint_vel_rel, noise=Unoise(n_min=-1.5, n_max=1.5)
+      func=envs_mdp.joint_vel_rel, noise=Unoise(n_min=-0.05, n_max=0.05)
     ),
     "actions": ObservationTermCfg(func=envs_mdp.last_action, history_length=5),
     # What the controller wants vs. reality, and where its gait is headed:
