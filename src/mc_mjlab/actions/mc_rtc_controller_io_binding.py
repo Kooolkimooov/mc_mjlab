@@ -270,7 +270,9 @@ class ControllerIoBinding:
     """Write the encoder and root columns the hosts read on reset/init."""
     T = self.layout.num_targets
     ro = self.layout.root_off
-    in_np[:, 0:T] = self._entity.data.joint_pos.cpu().numpy()[:, self._target_ids_np]
+    in_np[:, 0:T] = self._entity.data.joint_pos_biased.cpu().numpy()[
+      :, self._target_ids_np
+    ]
     if self._root_qpos_adr >= 0:
       adr = self._root_qpos_adr
       in_np[:, ro : ro + 7] = self._env.sim.data.qpos.cpu().numpy()[:, adr : adr + 7]
@@ -301,7 +303,10 @@ class ControllerIoBinding:
   def _fill_joint_columns(self, in_np: np.ndarray) -> None:
     """Write encoder/velocity/torque columns of the input block (all envs)."""
     T = self.layout.num_targets
-    current_pos = self._entity.data.joint_pos.cpu().numpy()
+    # Biased: these are the robot's *encoders*, so the controller's own state
+    # estimate should carry the same calibration error the policy observes,
+    # rather than being handed the ground truth the real one never sees.
+    current_pos = self._entity.data.joint_pos_biased.cpu().numpy()
     current_vel = self._entity.data.joint_vel.cpu().numpy()
     in_np[:, 0:T] = current_pos[:, self._target_ids_np]
     in_np[:, T : 2 * T] = current_vel[:, self._target_ids_np]

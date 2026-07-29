@@ -187,8 +187,12 @@ def _make_env_cfg(
     "projected_gravity": ObservationTermCfg(
       func=envs_mdp.projected_gravity, noise=Unoise(n_min=-0.05, n_max=0.05)
     ),
+    # `biased=True` is what makes the `encoder_bias` startup event take effect;
+    # without it the event samples a bias nothing ever reads.
     "joint_pos": ObservationTermCfg(
-      func=envs_mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01)
+      func=envs_mdp.joint_pos_rel,
+      noise=Unoise(n_min=-0.01, n_max=0.01),
+      params={"biased": True},
     ),
     "joint_vel": ObservationTermCfg(
       func=envs_mdp.joint_vel_rel, noise=Unoise(n_min=-0.05, n_max=0.05)
@@ -210,6 +214,10 @@ def _make_env_cfg(
   critic_terms = {
     name: replace(term, params=dict(term.params)) for name, term in actor_terms.items()
   }
+  # The encoder bias goes with the noise: a privileged critic should value states
+  # from the true joint angles, not from the miscalibrated reading the actor has
+  # to live with. mjlab's own tracking task splits the two groups the same way.
+  critic_terms["joint_pos"] = replace(critic_terms["joint_pos"], params={})
 
   observations = {
     "actor": ObservationGroupCfg(
