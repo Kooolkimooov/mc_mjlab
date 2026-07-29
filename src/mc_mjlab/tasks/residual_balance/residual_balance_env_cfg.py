@@ -99,7 +99,7 @@ def _make_env_cfg(
   control: str,
   num_envs: int = 128,
   num_workers: int | None = None,
-  residual_scale: float = 0.1,
+  residual_scale: float | None = None,
   episode_length_s: float = WALK_WINDOW_S,
   push_velocity: float = PUSH_VELOCITY,
   push_angular_velocity: float = PUSH_ANGULAR_VELOCITY,
@@ -129,6 +129,15 @@ def _make_env_cfg(
   # Actions: the residual on top of mc_rtc.
   ##
 
+  # Residual authority, in the control channel's own unit (rad for position,
+  # Nm for torque -- one number cannot serve both). ``scale`` maps the policy's
+  # ~unit output into that authority and ``clip`` makes it a hard bound: a
+  # residual able to outvote the controller is how the policy learns to freeze
+  # the gait instead of stabilizing it (a swing trajectory is ~0.5 rad;
+  # rejecting a push needs far less).
+  if residual_scale is None:
+    residual_scale = 0.1 if control == "position" else 10.0
+
   action_cls = (
     McRtcResidualJointPositionActionCfg
     if control == "position"
@@ -145,6 +154,7 @@ def _make_env_cfg(
       num_workers=num_workers,
       pd_gains_path=str(robot.pd_gains_path),
       scale=residual_scale,
+      clip={".*": (-residual_scale, residual_scale)},
     )
   }
 
