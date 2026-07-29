@@ -142,19 +142,34 @@ def _make_env_cfg(
   )
 
 
+def _apply_play_overrides(cfg: ManagerBasedRlEnvCfg) -> ManagerBasedRlEnvCfg:
+  """Retune a cfg for a viewer session."""
+  cfg.scene.num_envs = PLAY_NUM_ENVS
+  return cfg
+
+
+# A viewer session is one controller, so silencing it hides the only thing worth
+# watching; "single" rather than "all" keeps env 0 readable if `--num-envs` grows.
+PLAY_CONSOLE_OUTPUT = "single"
+
+
 def zero_residual_position_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   """mc_rtc's joint *position* targets, with no residual on top."""
-  cfg = _make_env_cfg(control="position")
+  cfg = _make_env_cfg(
+    control="position", console_output=PLAY_CONSOLE_OUTPUT if play else "none"
+  )
   if play:
-    cfg.scene.num_envs = PLAY_NUM_ENVS
+    _apply_play_overrides(cfg)
   return cfg
 
 
 def zero_residual_torque_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   """mc_rtc's joint *torques*, with no residual on top."""
-  cfg = _make_env_cfg(control="torque")
+  cfg = _make_env_cfg(
+    control="torque", console_output=PLAY_CONSOLE_OUTPUT if play else "none"
+  )
   if play:
-    cfg.scene.num_envs = PLAY_NUM_ENVS
+    _apply_play_overrides(cfg)
   return cfg
 
 

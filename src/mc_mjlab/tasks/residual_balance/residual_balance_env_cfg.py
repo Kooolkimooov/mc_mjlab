@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from typing import Literal
 
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
@@ -103,6 +104,7 @@ def _make_env_cfg(
   episode_length_s: float = WALK_WINDOW_S,
   push_velocity: float = PUSH_VELOCITY,
   push_angular_velocity: float = PUSH_ANGULAR_VELOCITY,
+  console_output: Literal["none", "single", "all"] = "none",
   mc_rtc_yaml: Path = MC_RTC_YAML_PATH,
 ) -> ManagerBasedRlEnvCfg:
   """Build the residual balance env cfg for the config's ``MainRobot``."""
@@ -155,6 +157,7 @@ def _make_env_cfg(
       pd_gains_path=str(robot.pd_gains_path),
       scale=residual_scale,
       clip={".*": (-residual_scale, residual_scale)},
+      console_output=console_output,
     )
   }
 
@@ -353,9 +356,16 @@ def _apply_play_overrides(cfg: ManagerBasedRlEnvCfg) -> ManagerBasedRlEnvCfg:
   return cfg
 
 
+# A viewer session is one controller, so silencing it hides the only thing worth
+# watching; "single" rather than "all" keeps env 0 readable if `--num-envs` grows.
+PLAY_CONSOLE_OUTPUT = "single"
+
+
 def residual_balance_position_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   """Residual on the controller's joint *position* targets."""
-  cfg = _make_env_cfg(control="position")
+  cfg = _make_env_cfg(
+    control="position", console_output=PLAY_CONSOLE_OUTPUT if play else "none"
+  )
   if play:
     _apply_play_overrides(cfg)
   return cfg
@@ -363,7 +373,9 @@ def residual_balance_position_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
 
 def residual_balance_torque_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   """Residual on the controller's joint *torques*."""
-  cfg = _make_env_cfg(control="torque")
+  cfg = _make_env_cfg(
+    control="torque", console_output=PLAY_CONSOLE_OUTPUT if play else "none"
+  )
   if play:
     _apply_play_overrides(cfg)
   return cfg
