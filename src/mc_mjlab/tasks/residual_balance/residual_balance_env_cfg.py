@@ -1,12 +1,21 @@
-"""Residual balance task: keep the mc_rtc controller upright under pushes.
+"""Residual balance task: keep the mc_rtc controller walking under pushes.
 
 The mc_rtc controller is the base policy and is *not* commanded by the RL side
 -- this coupling feeds it state, not velocity references -- so the learnable
-part is a residual that keeps the robot standing when the world disagrees with
-the controller's model: pushes, friction and CoM randomization, reset noise.
-The reward pays for staying alive, upright and at the controller's stance
-height, and charges for the residual itself, so the policy is pushed to depart
-from mc_rtc only where it must.
+part is a residual that keeps reality close to the controller's plan when the
+world disagrees with the controller's model: pushes, friction and CoM
+randomization, reset noise.
+
+Two things this task has to get right, both learned the hard way from a run
+whose robot never walked at all:
+
+*The env must hand mc_rtc a robot it recognizes.* Declaring an ``events`` dict
+replaces mjlab's default, which is where ``reset_scene_to_default`` -- the only
+term that resets joints -- lives. Without it every episode starts from the
+model's qpos0 (legs straight) instead of the half-sitting stance, mc_rtc
+initializes against that posture and its FSM never reaches the walking state.
+The robot then stands still for the whole episode no matter what the residual
+does, which reads exactly like a policy that has learned to freeze the gait.
 
 Rates: the sim runs at 1 kHz and the controller at 500 Hz (``frameskip=2``, the
 mc_mujoco pairing), while the policy acts at 50 Hz (``decimation=20``); the
@@ -194,6 +203,17 @@ def _make_env_cfg(
   ##
 
   events = {
+    # Must come first, and must not be dropped: this is mjlab's default reset
+    # event, and defining an `events` dict at all replaces that default. It is
+    # the only term that resets *joints*; without it every episode starts from
+    # the model's qpos0 (legs straight, z~0.86) rather than the controller's
+    # half-sitting stance, mc_rtc initializes against that posture, and its FSM
+    # never reaches the walking state -- the robot stands still all episode
+    # with no residual able to change it. `reset_base` below then offsets from
+    # the default root state this writes, so the order matters too.
+    "reset_scene_to_default": EventTermCfg(
+      func=envs_mdp.reset_scene_to_default, mode="reset"
+    ),
     "reset_base": EventTermCfg(
       func=envs_mdp.reset_root_state_uniform,
       mode="reset",
