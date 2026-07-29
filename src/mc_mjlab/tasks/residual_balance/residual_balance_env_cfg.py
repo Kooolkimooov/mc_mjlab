@@ -217,26 +217,7 @@ def _make_env_cfg(
   ##
 
   rewards = {
-    "alive": RewardTermCfg(func=envs_mdp.is_alive, weight=1.0),
-    # The two halves of "it is still walking", and together the bulk of the
-    # payment: the controller is still generating a gait, and the robot is
-    # really covering ground. A policy that stops either one keeps only
-    # `alive`, which on its own is worth less than what it gave up.
-    #
-    # `scale`/`speed` are set from the zero-residual baseline so both read as
-    # switches rather than gradients: its reference velocity sits at 0.43 rad/s
-    # median while walking against 0.003 rad/s standing, and it travels at
-    # ~0.09 m/s. Saturating there pays for walking at all, not for shaking the
-    # controller harder or outrunning its gait.
-    "plan_motion": RewardTermCfg(
-      func=mdp.controller_reference_motion, weight=1.5, params={"scale": 0.5}
-    ),
-    "progress": RewardTermCfg(
-      func=mdp.base_progress_tanh, weight=1.5, params={"speed": 0.1}
-    ),
-    # There is deliberately no root-height term next to this one: the
-    # controller dips to z~0.75 while walking (stance is 0.79), so a fixed
-    # height target would pay the policy to stand tall -- i.e. to stop the gait.
+    "termination_penalty": RewardTermCfg(func=envs_mdp.is_terminated, weight=-2000.0),
     "upright": RewardTermCfg(func=envs_mdp.flat_orientation_l2, weight=-2.0),
     "residual_magnitude": RewardTermCfg(func=mdp.action_l2, weight=-0.1),
     "residual_rate": RewardTermCfg(func=envs_mdp.action_rate_l2, weight=-0.1),
