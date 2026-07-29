@@ -34,7 +34,7 @@ def apply_reference_pd_gains(
     rows = [line.split() for line in f if line.strip()]
   gains = {
     name: (float(row[0]), float(row[1]))
-    for name, row in zip(ref_joint_order, rows, strict=False)
+    for name, row in zip(ref_joint_order, rows, strict=True)
     if len(row) >= 2
   }
 
@@ -50,10 +50,9 @@ def apply_reference_pd_gains(
         stiffness[:, j] = kp
         damping[:, j] = kd
         matched += 1
-  print(
-    f"[mc_rtc] applied reference PD gains from {path} to {matched} joints "
-    f"({len(gains)} in file, {len(target_names)} controlled)."
-  )
+        print(
+          f"[mc_rtc] applied reference PD gains {kp=} and {kd=} from {path.split('/')[-1]} to {name}"
+        )
 
 
 def _actuator_gain_columns(
