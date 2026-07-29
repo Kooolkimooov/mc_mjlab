@@ -32,6 +32,7 @@ residual is therefore held across 10 controller periods.
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
@@ -191,10 +192,12 @@ def _make_env_cfg(
     ),
   }
 
-  # The critic sees the same signals without observation noise.
+  # The critic sees the same signals without observation noise. Copy the terms
+  # rather than rebuilding them from `func`/`params`: a rebuild silently leaves
+  # behind every other field, which is how the critic came to lose the actor's
+  # history. The group's `enable_corruption=False` is what drops the noise.
   critic_terms = {
-    name: ObservationTermCfg(func=term.func, params=dict(term.params))
-    for name, term in actor_terms.items()
+    name: replace(term, params=dict(term.params)) for name, term in actor_terms.items()
   }
 
   observations = {
