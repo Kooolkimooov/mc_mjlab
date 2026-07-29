@@ -1,8 +1,12 @@
 """MDP terms specific to residual control on top of an mc_rtc controller.
 
-mjlab's own terms cover the rest; these two exist because a residual task
-needs to talk about the residual itself (how far the policy departs from the
-controller) and about holding the controller's nominal stance height.
+mjlab's own terms cover generic robot state; these exist because a residual
+task needs to talk about the controller itself: how far the policy departs
+from it (``action_l2``), what it is asking for versus what it got
+(``controller_position_error``, ``controller_reference_velocity``), whether it
+is still generating a gait (``controller_reference_motion``) and whether it has
+given up (``controller_failed``). What they compare against is the raw
+controller output with the residual excluded, read off the action term.
 """
 
 from __future__ import annotations
@@ -20,22 +24,50 @@ if TYPE_CHECKING:
 _DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
 
 
+def _residual_term(env: ManagerBasedRlEnv, action_name: str) -> McRtcResidualActionBase:
+  term = env.action_manager.get_term(action_name)
+  if not isinstance(term, McRtcResidualActionBase):
+    raise TypeError(
+      f"action term {action_name!r} is expected to be an mc_rtc residual "
+      f"action, got {type(term).__name__}"
+    )
+  return term
+
+
 def controller_failed(
   env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
 ) -> torch.Tensor:
   """Terminate envs whose mc_rtc controller gave up."""
-  term = env.action_manager.get_term(action_name)
-  if not isinstance(term, McRtcResidualActionBase):
-    raise TypeError(
-      f"termination term 'controller_failed' expects action term "
-      f"'{action_name}' to be an mc_rtc residual action, got {type(term).__name__}"
-    )
-  return term.controller_failed
+  return _residual_term(env, action_name).controller_failed
 
 
 def action_l2(env: ManagerBasedRlEnv) -> torch.Tensor:
   """Squared magnitude of the residual action."""
   return torch.sum(torch.square(env.action_manager.action), dim=1)
+
+
+def _restrict(term: McRtcResidualActionBase, values: torch.Tensor) -> torch.Tensor:
+  """Keep only the columns carrying the residual (see ``residual_ids``)."""
+  ids = term.residual_ids
+  return values if ids is None else values[:, ids]
+
+
+def controller_position_error(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """What the controller asked of the residual joints, minus what it got."""
+  term = _residual_term(env, action_name)
+  asset = env.scene[term.cfg.entity_name]
+  error = term.controller_reference("q") - asset.data.joint_pos[:, term.target_ids]
+  return _restrict(term, error)
+
+
+def controller_reference_velocity(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """The controller's joint-velocity reference: where its gait is headed."""
+  term = _residual_term(env, action_name)
+  return _restrict(term, term.controller_reference("alpha"))
 
 
 def root_height_l2(

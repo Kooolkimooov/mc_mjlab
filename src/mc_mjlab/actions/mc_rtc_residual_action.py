@@ -213,6 +213,17 @@ class McRtcResidualActionBase(BaseAction):
       self._out_np, env_indices
     )
 
+  # ---- Introspection (the task's mdp terms read the reference through this). ----
+
+  def controller_reference(self, channel: str) -> torch.Tensor:
+    """Latest raw controller output for ``channel``, residual excluded."""
+    return self._next_control[channel]
+
+  @property
+  def residual_ids(self) -> torch.Tensor | None:
+    """Columns of the target arrays carrying the residual; ``None`` = all."""
+    return self._residual_ids
+
   # ---- Subclass hooks. ----
 
   @abc.abstractmethod

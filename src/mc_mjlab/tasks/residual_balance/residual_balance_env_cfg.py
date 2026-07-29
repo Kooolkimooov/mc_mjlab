@@ -147,7 +147,16 @@ def _make_env_cfg(
       func=envs_mdp.joint_vel_rel, noise=Unoise(n_min=-1.5, n_max=1.5)
     ),
     "actions": ObservationTermCfg(func=envs_mdp.last_action),
+    # What the controller wants vs. reality, and where its gait is headed:
+    # without these the policy cannot phase its residual with the plan it is
+    # meant to protect. The error sees encoder-level noise; the reference
+    # velocity is controller-internal and known exactly.
+    "controller_error": ObservationTermCfg(
+      func=mdp.controller_position_error, noise=Unoise(n_min=-0.01, n_max=0.01)
+    ),
+    "controller_ref_vel": ObservationTermCfg(func=mdp.controller_reference_velocity),
   }
+
   # The critic sees the same signals without observation noise.
   critic_terms = {
     name: ObservationTermCfg(func=term.func, params=dict(term.params))
