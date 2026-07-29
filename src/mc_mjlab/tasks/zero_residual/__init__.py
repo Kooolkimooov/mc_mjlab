@@ -21,19 +21,7 @@ TASK_DIR: str = Path(__file__).resolve().parent.name
 
 
 def _refuse_to_train() -> None:
-  """Exit now if one of these ids was handed to ``train``.
-
-  Registration runs during ``import mjlab``, before the trainer builds a scene,
-  so this is the last cheap moment to refuse. Past it the user waits out a full
-  controller construction -- ~20 s for the default 420 envs -- only to reach a
-  CUDA fault raised from inside the physics, which says nothing about the cause.
-  See ``zero_residual_env_cfg`` for why the task cannot train.
-
-  ``SystemExit`` is deliberate. mjlab's entry-point loader catches ``Exception``
-  and would turn a refusal into a skipped registration plus a puzzling "task
-  not registered"; ``SystemExit`` carries the message straight out instead.
-  Guarded on the task id so it can never fire for ``play`` or ``list-envs``.
-  """
+  """Exit now if one of these ids was handed to ``train``."""
   if Path(sys.argv[0]).name != "train":
     return
   # Scan every argument rather than argv[1]: `train` with no task id opens an
