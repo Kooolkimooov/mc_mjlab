@@ -198,6 +198,16 @@ def _make_env_cfg(
   # residual able to outvote the controller is how the policy learns to freeze
   # the gait instead of stabilizing it (a swing trajectory is ~0.5 rad;
   # rejecting a push needs far less).
+  #
+  # That bound is set in position units, but the actuators are unlimited on
+  # purpose (mc_mujoco parity, see `pd_actuator_configuration`), so what it
+  # really buys is torque: 0.01 rad through the real PDgains_sim.dat gains is
+  # 22-27% of every leg joint's *hardware* limit. Measured over 64 s x 16 envs
+  # that is affordable -- mc_rtc alone asks ~5% of the budget, and a saturated
+  # residual takes the worst joint (ankle pitch) to 0.64 of its limit without
+  # adding a single over-limit step. Re-measure before raising this: nothing in
+  # the sim clamps, so a residual that outgrows the hardware is invisible here
+  # and divergent on the robot.
   if residual_scale is None:
     residual_scale = 0.01 if control == "position" else 10.0
 
