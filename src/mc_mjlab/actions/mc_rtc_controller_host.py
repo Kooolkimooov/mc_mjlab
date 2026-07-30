@@ -156,6 +156,10 @@ VECTOR_OUTPUTS: dict[str, Callable[[Any], Any]] = {
   # CoM rather than base because the LIPM relation the plan comes from is
   # written on the CoM-to-ZMP offset.
   "control_com": lambda robot: robot.com,
+  # The CoM velocity the QP is commanding. Needs no drift correction at all: the
+  # observers integrate *position* from the anchor frame, so that is what drifts
+  # -- velocity is differential and directly comparable with MuJoCo's.
+  "control_com_vel": lambda robot: robot.comVelocity,
 }
 
 

@@ -4,8 +4,8 @@ mjlab's own terms cover generic robot state; these exist because a residual
 task needs to talk about the controller itself: how far the policy departs
 from it (``action_l2``), what it is asking for versus what it got
 (``controller_position_error``, ``controller_reference_velocity``,
-``zmp_tracking``), whether it is still generating a gait
-(``controller_reference_motion``) and whether it has given up
+``zmp_tracking``, ``com_velocity_tracking``), whether it is still generating a
+gait (``controller_reference_motion``) and whether it has given up
 (``controller_failed``). What they compare against is the raw controller output
 with the residual excluded, read off the action term.
 
@@ -218,3 +218,60 @@ class zmp_tracking:
 
     error = torch.linalg.vector_norm(measured - planned, dim=1)
     return torch.exp(-torch.square(error / std)) * (normal_force >= min_normal_force)
+
+
+class com_velocity_tracking:
+  """Reward the robot's CoM moving the way the controller is commanding.
+
+  The velocity half of the LIPM state, and the complement to ``zmp_tracking``:
+  that term compares the CoM-to-ZMP offset (the forcing), this one the CoM
+  velocity it is supposed to produce. Between them they span the planar state
+  the plan is written on, which is why there is no separate DCM term -- the
+  divergent mode ``com + comVel/omega`` is a linear combination of the two, so
+  any DCM weighting is already reachable by choosing these two weights.
+
+  Unlike the ZMP this needs no drift correction: KinematicInertial integrates
+  *position* from the anchor frame, so position is what drifts away from
+  MuJoCo's truth, while velocity is differential and directly comparable.
+
+  The vertical axis is scored *separately* from the horizontal pair, and that
+  is what makes the term worth having beyond ``zmp_tracking``: a crouch-collapse
+  -- the most common baseline failure -- is the CoM sinking against a plan that
+  holds its height, visible here long before ``collapsed`` fires. It only works
+  split, for two reasons that compound. One exponential over a 3-norm lets the
+  largest axis saturate the kernel and kill the gradient on the others, exactly
+  when the others still matter; and the vertical error is far smaller than the
+  horizontal one (median 0.0010 against 0.0117 m/s over 64 s x 16 envs), so a
+  shared ``std`` makes the vertical channel contribute nothing at all. Two
+  kernels with their own scales, averaged, keeps both channels live.
+
+  Horizontal stays a 2-norm rather than two more kernels: x and y are
+  interchangeable for balance, so the term should not care which way the robot
+  is drifting.
+  """
+
+  def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv) -> None:
+    self._root_body_id = env.scene[cfg.params["asset_cfg"].name].indexing.root_body_id
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    std: float,
+    std_vertical: float,
+    asset_cfg: SceneEntityCfg,
+    action_name: str = "mc_rtc_residual",
+  ) -> torch.Tensor:
+    del asset_cfg  # Resolved at init.
+    term = _residual_term(env, action_name)
+    # subtree_linvel is the subtree CoM's velocity; MuJoCo fills it because the
+    # robots carry a subtree sensor (the RL-only `root_angmom`), which is what
+    # makes mj_subtreeVel run.
+    error = env.sim.data.subtree_linvel[:, self._root_body_id] - term.controller_vector(
+      "control_com_vel"
+    )
+    horizontal = torch.linalg.vector_norm(error[:, :2], dim=1)
+    vertical = error[:, 2].abs()
+    return 0.5 * (
+      torch.exp(-torch.square(horizontal / std))
+      + torch.exp(-torch.square(vertical / std_vertical))
+    )

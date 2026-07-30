@@ -17,12 +17,19 @@ initializes against that posture and its FSM never reaches the walking state.
 The robot then stands still for the whole episode no matter what the residual
 does, which reads exactly like a policy that has learned to freeze the gait.
 
-*The reward must pay for walking, not merely for surviving.* Walking is the
-risky activity, so an alive-only reward prefers a policy that stops the gait.
-Payment is therefore for the residual keeping the sim on the controller's plan
--- ``zmp_tracking``, the only positive term -- rather than for staying upright,
-and the residual is hard-clipped to an authority that cannot cancel a swing
-trajectory.
+*The reward must pay for tracking the controller's plan, not for surviving.*
+With ``gamma=0.99`` the discounted horizon is ~100 steps (2 s), so the -2000
+termination penalty shapes only the last couple of seconds before a fall
+(0.99^400 ~ 0.02) and the dense terms do all the work. Those are
+``zmp_tracking`` and ``com_velocity_tracking``: the CoM-to-ZMP offset and the
+CoM velocity, the two halves of the planar LIPM state the plan is written on.
+There is deliberately no separate DCM term -- the divergent mode
+``com + comVel/omega`` is a linear combination of those two, so any DCM
+weighting is already reachable by choosing their weights.
+
+Both were sized against the zero-residual baseline, and both collapse in the
+run-up to a fall (to 0.12 and 0.10 of a possible 1.0), which is what makes them
+the early warning the sparse penalty cannot be.
 
 Rates: the sim runs at 1 kHz and the controller at 500 Hz (``frameskip=2``, the
 mc_mujoco pairing), while the policy acts at 50 Hz (``decimation=20``); the
@@ -106,6 +113,28 @@ WALK_WINDOW_S = 16.0
 ZMP_TRACKING_STD = 0.05
 ZMP_TRACKING_WEIGHT = 1.0
 
+# CoM-velocity payment, the velocity half of the same LIPM state, sized the same
+# way. Over 96 s x 16 envs (131 episodes, 58 of them falls) the error runs median
+# 1.2 cm/s and mean 3.3 cm/s. It is kept equal in weight to the ZMP term because
+# the two are complementary halves of one state, not two views of the same thing.
+#
+# The reason it is worth having is the second column of that measurement: in the
+# last second before a fall the error is 0.347 m/s against 0.022 m/s before a
+# time-out -- a 16x separation, against 5x for the ZMP error. It is the sharpest
+# early warning of the two.
+#
+# Two scales, not one, because the axes are not comparable: measured per axis the
+# horizontal error runs median 1.17 cm/s and the vertical 0.10 cm/s. Under one
+# shared kernel the vertical channel scores 0.94 and is effectively free -- which
+# silently cost the term its whole reason for existing, since crouch-collapse is
+# a *vertical* failure. At 5 cm/s horizontal and 0.5 cm/s vertical the two
+# channels score 0.79 and 0.81 on the baseline, so both keep comparable headroom
+# and neither saturates the other. The total, 0.80, lands where the old single
+# kernel was (0.785), so the weight carries over unchanged.
+COM_VELOCITY_TRACKING_STD = 0.05
+COM_VELOCITY_TRACKING_STD_VERTICAL = 0.005
+COM_VELOCITY_TRACKING_WEIGHT = 1.0
+
 # A viewer default, not a training one: every env is its own mc_rtc controller
 # (~70 MB, ~570 ms to construct, built serially), so replaying at the training
 # env count would spend minutes and gigabytes before the first frame.
@@ -173,7 +202,7 @@ def _make_env_cfg(
       num_workers=num_workers,
       # What the `zmp_tracking` reward compares the sim's centre of pressure
       # against, collected per controller step (see `mdp.zmp_tracking`).
-      controller_vectors=("planned_zmp", "control_com"),
+      controller_vectors=("planned_zmp", "control_com", "control_com_vel"),
       pd_gains_path=str(robot.pd_gains_path),
       scale=residual_scale,
       clip={".*": (-residual_scale, residual_scale)},
@@ -271,6 +300,16 @@ def _make_env_cfg(
       params={
         "std": ZMP_TRACKING_STD,
         "sensor_names": mdp.GROUND_CONTACT_SENSORS,
+        "asset_cfg": SceneEntityCfg("robot"),
+        "action_name": "mc_rtc_residual",
+      },
+    ),
+    "com_velocity_tracking": RewardTermCfg(
+      func=mdp.com_velocity_tracking,
+      weight=COM_VELOCITY_TRACKING_WEIGHT,
+      params={
+        "std": COM_VELOCITY_TRACKING_STD,
+        "std_vertical": COM_VELOCITY_TRACKING_STD_VERTICAL,
         "asset_cfg": SceneEntityCfg("robot"),
         "action_name": "mc_rtc_residual",
       },
