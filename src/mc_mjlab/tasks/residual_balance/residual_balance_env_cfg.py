@@ -121,6 +121,7 @@ def _make_env_cfg(
   push_velocity: float = PUSH_VELOCITY,
   push_angular_velocity: float = PUSH_ANGULAR_VELOCITY,
   console_output: Literal["none", "single", "all"] = "none",
+  print_residual_every: int = 0,
   mc_rtc_yaml: Path = MC_RTC_YAML_PATH,
 ) -> ManagerBasedRlEnvCfg:
   """Build the residual balance env cfg for the config's ``MainRobot``."""
@@ -177,6 +178,7 @@ def _make_env_cfg(
       scale=residual_scale,
       clip={".*": (-residual_scale, residual_scale)},
       console_output=console_output,
+      print_residual_every=print_residual_every,
     )
   }
 
@@ -392,13 +394,21 @@ def _apply_play_overrides(cfg: ManagerBasedRlEnvCfg) -> ManagerBasedRlEnvCfg:
 
 # A viewer session is one controller, so silencing it hides the only thing worth
 # watching; "single" rather than "all" keeps env 0 readable if `--num-envs` grows.
-PLAY_CONSOLE_OUTPUT = "single"
+PLAY_CONSOLE_OUTPUT = "single"  # "none" #
+
+# The residual is the whole point of watching this task, so print it -- but the
+# policy acts at 50 Hz and no one reads 50 lines a second. Every 10th step is
+# 5 Hz, fast enough to see the residual react to a push. `MC_MJLAB_PRINT_RESIDUAL`
+# retunes it (0 silences) without editing this.
+PLAY_PRINT_RESIDUAL_EVERY = 10
 
 
 def residual_balance_position_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   """Residual on the controller's joint *position* targets."""
   cfg = _make_env_cfg(
-    control="position", console_output=PLAY_CONSOLE_OUTPUT if play else "none"
+    control="position",
+    console_output=PLAY_CONSOLE_OUTPUT if play else "none",
+    print_residual_every=PLAY_PRINT_RESIDUAL_EVERY if play else 0,
   )
   if play:
     _apply_play_overrides(cfg)
@@ -408,7 +418,9 @@ def residual_balance_position_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
 def residual_balance_torque_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   """Residual on the controller's joint *torques*."""
   cfg = _make_env_cfg(
-    control="torque", console_output=PLAY_CONSOLE_OUTPUT if play else "none"
+    control="torque",
+    console_output=PLAY_CONSOLE_OUTPUT if play else "none",
+    print_residual_every=PLAY_PRINT_RESIDUAL_EVERY if play else 0,
   )
   if play:
     _apply_play_overrides(cfg)

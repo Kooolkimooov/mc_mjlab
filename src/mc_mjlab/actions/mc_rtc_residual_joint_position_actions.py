@@ -42,6 +42,7 @@ class McRtcResidualJointPositionAction(McRtcResidualActionBase):
 
   # Controller outputs consumed, in output-block order (host writes q then alpha).
   output_channels = ("q", "alpha")
+  residual_unit = "rad"
 
   def _seed_interpolation(self, env_ids: torch.Tensor) -> None:
     # Position ramps from the current stance; velocity from zero.

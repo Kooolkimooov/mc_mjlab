@@ -51,6 +51,7 @@ class McRtcResidualJointTorqueAction(McRtcResidualActionBase):
   # Consumed in output-block order (host writes q, then alpha, then tau); the
   # PD fallback needs q/alpha alongside the torque.
   output_channels = ("q", "alpha", "tau")
+  residual_unit = "Nm"
 
   def __init__(self, cfg: McRtcResidualJointTorqueActionCfg, env: ManagerBasedRlEnv):
     super().__init__(cfg, env)

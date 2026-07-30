@@ -18,6 +18,7 @@ position/velocity subclass.
 from __future__ import annotations
 
 import abc
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -81,6 +82,16 @@ class McRtcResidualActionCfg(BaseActionCfg):
   the GUI/StateBuilder fix). When False, resets re-run ``init()``, which raises
   for plugins that register datastore entries."""
 
+  print_residual_every: int = 0
+  """Policy steps between printing env 0's residual to the terminal; 0 disables.
+
+  For watching a `play` session: what the policy is actually adding to the
+  controller, per joint, in the control channel's own unit, with a ``*`` on any
+  joint sitting at its clip. Both tasks' play variants switch it on -- `play`
+  exposes no `--env.*` overrides, so the cfg is the only place it can be set --
+  and ``MC_MJLAB_PRINT_RESIDUAL=<n>`` overrides the interval (0 to silence) for
+  a run already going, like ``MC_MJLAB_WORKER_LOG_DIR`` does for worker logs."""
+
   console_output: Literal["none", "single", "all"] = "none"
   """mc_rtc terminal output: "none" silences every controller, "single" lets
   only env 0's controller print (it gets a dedicated worker process), "all"
@@ -103,6 +114,9 @@ class McRtcResidualActionBase(BaseAction):
   """Controller output channels consumed, in output-block order (must match what
   the host writes to ``out_np``). Set by the subclass."""
 
+  residual_unit: str = ""
+  """Unit the residual is expressed in, for the printout. Set by the subclass."""
+
   def __init__(self, cfg: McRtcResidualActionCfg, env: ManagerBasedRlEnv):
     super().__init__(cfg=cfg, env=env)
 
@@ -111,6 +125,7 @@ class McRtcResidualActionBase(BaseAction):
     self._num_targets = len(self._target_names)
 
     self._setup_residual(cfg)
+    self._setup_residual_printing(cfg)
 
     self._steps_since_run = torch.zeros(
       self.num_envs, dtype=torch.long, device=self.device
@@ -174,6 +189,59 @@ class McRtcResidualActionBase(BaseAction):
     self._residual_full = torch.zeros(
       self.num_envs, self._num_targets, device=self.device
     )
+
+  def _setup_residual_printing(self, cfg: McRtcResidualActionCfg) -> None:
+    """Resolve the printout interval and the column labels it prints once."""
+    every = cfg.print_residual_every
+    override = os.environ.get("MC_MJLAB_PRINT_RESIDUAL")
+    if override is not None:
+      every = int(override)
+    self._print_every = max(0, every)
+    self._print_countdown = 0
+    self._print_header_pending = True
+    if not self._print_every:
+      return
+    ids = self._residual_ids
+    self._print_names = (
+      list(self._target_names)
+      if ids is None
+      else [self._target_names[i] for i in ids.tolist()]
+    )
+    # Per-joint clip magnitude, for the saturation marker. The tasks set a
+    # symmetric bound from `residual_scale`, so the upper one describes both.
+    self._print_limit = (
+      self._clip[0, :, 1].abs().cpu().tolist() if cfg.clip is not None else None
+    )
+
+  def _print_residual(self) -> None:
+    """One line of env 0's residual, throttled by ``print_residual_every``."""
+    if self._print_countdown:
+      self._print_countdown -= 1
+      return
+    self._print_countdown = self._print_every - 1
+
+    values = self._processed_actions[0].detach().cpu().tolist()
+    if self._print_header_pending:
+      # Lazily, on the first line: a header printed at construction would be
+      # buried under mc_rtc's own startup logging long before the first frame.
+      unit = f" [{self.residual_unit}]" if self.residual_unit else ""
+      print(
+        f"[residual] env 0, every {self._print_every} policy step(s){unit}; * = clipped"
+      )
+      print("[residual] " + " ".join(f"{n:>6s} " for n in self._print_names) + "   |r|")
+      self._print_header_pending = False
+
+    limit = self._print_limit
+    cells = [
+      f"{v:+.3f}" + ("*" if limit is not None and abs(v) >= 0.999 * limit[j] else " ")
+      for j, v in enumerate(values)
+    ]
+    norm = sum(v * v for v in values) ** 0.5
+    # Flushed: this is meant to be read live next to the viewer, and Python
+    # block-buffers into a pipe while mc_rtc's spdlog writes straight to fd 1 --
+    # unflushed the two interleave wrongly, or vanish entirely if the session is
+    # killed rather than exited.
+    print("[residual] " + " ".join(cells) + f" {norm:6.3f}", flush=True)
 
   def _alloc_interpolation_buffers(self) -> None:
     """Per-channel ramp endpoints plus the one-period-behind staging buffer."""
@@ -265,6 +333,11 @@ class McRtcResidualActionBase(BaseAction):
     raise NotImplementedError
 
   # ---- ActionTerm API. ----
+
+  def process_actions(self, actions: torch.Tensor) -> None:
+    super().process_actions(actions)
+    if self._print_every:
+      self._print_residual()
 
   def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
     super().reset(env_ids=env_ids)
