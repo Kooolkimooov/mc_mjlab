@@ -18,10 +18,11 @@ import tempfile
 import threading
 import time
 import traceback
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from multiprocessing.connection import Connection
 from multiprocessing.shared_memory import SharedMemory
+from typing import Any
 
 import numpy as np
 
@@ -99,6 +100,64 @@ class _IterItemsDict(dict):
 # All are per-joint vectors indexed like mbc.q, so one write loop serves all.
 MBC_ATTR_BY_CHANNEL = {"q": "q", "alpha": "alpha", "tau": "jointTorque"}
 
+# mc_rtc's own gravity constant (mc_rtc::constants::gravity), the one the
+# controller's mbc carries and RBDyn's ZMP formulas divide by.
+GRAVITY = 9.81
+
+
+def _planned_zmp(robot: Any) -> Any:
+  """The ZMP the controller is commanding, from the control robot's centroid.
+
+  ``rbd::computeCentroidalZMP`` (RBDyn/src/RBDyn/ZMP.cpp) with the ground as the
+  ZMP plane, applied to the QP's own solution: ``TasksQPSolver`` runs
+  ``forwardAcceleration`` after every solve, so the control robot's
+  ``comAcceleration`` is the commanded one and inverting the LIPM relation on it
+  recovers the ZMP that motion implies.
+
+  This is the plan as the QP hands it down, not the walking MPC's raw
+  ``zmpTarget``: the two differ by ismpc's ZMP-delay compensation (it builds the
+  stabilizer's CoM-acceleration target from ``admittanceTarget``,
+  Walking_controller.cpp:765-793) and by whatever the QP traded away.
+  ``zmpTarget`` itself is reachable only through the controller's datastore,
+  which the mc_rtc Python bindings do not expose; this one needs nothing beyond
+  stock ``mc_rbdyn.Robot``, and it is arguably the more apt thing to reward --
+  it is what the controller is asking of the world *now*.
+  """
+  com = robot.com
+  com_acc = robot.comAcceleration
+  denom = com_acc.z() + GRAVITY
+  if abs(denom) < 1e-3:  # free fall: the ZMP is not defined
+    return eigen.Vector3d(com.x(), com.y(), 0.0)
+  return eigen.Vector3d(
+    com.x() - com.z() * com_acc.x() / denom,
+    com.y() - com.z() * com_acc.y() / denom,
+    0.0,
+  )
+
+
+# Per-env 3-vector outputs a host can publish; ``IoLayout.output_vectors``
+# names a subset of these and the action term reads them back by the same name.
+#
+# Each reader takes the **control** robot (``MCController.robot()``) and returns
+# an ``eigen.Vector3d`` in the controller's own world frame. Not
+# ``MCGlobalController.robot()``, which every other read here goes through: that
+# one is the *canonical output* robot (`MAKE_ROBOTS_ACCESSOR(robot,
+# outputRobot)`), which `RobotConverter` fills by copying q/alpha/alphaD across
+# and nothing else -- it never runs forwardVelocity/forwardAcceleration, so its
+# `comVelocity`/`comAcceleration` read exactly zero and anything derived from
+# them is silently wrong rather than absent.
+VECTOR_OUTPUTS: dict[str, Callable[[Any], Any]] = {
+  "planned_zmp": _planned_zmp,
+  # The control robot's CoM, in that same frame. The planned ZMP is only
+  # comparable with the sim's once this is subtracted from both sides: the
+  # controller places its plan against the *estimated* state (the
+  # KinematicInertial observer's legged odometry), which drifts from MuJoCo's
+  # ground truth, and that drift would otherwise read as a tracking error.
+  # CoM rather than base because the LIPM relation the plan comes from is
+  # written on the CoM-to-ZMP offset.
+  "control_com": lambda robot: robot.com,
+}
+
 
 @dataclass(frozen=True)
 class HostMetadata:
@@ -130,7 +189,8 @@ class IoLayout:
   e.g. the default ``("q", "alpha")`` gives q in ``[0, T)`` and alpha in
   ``[T, 2T)``, for the target joints -- followed by a single status column at
   ``status_off`` carrying 1.0 once the controller has failed (see
-  ``ControllerHost.step_env``).
+  ``ControllerHost.step_env``), then 3 columns per entry of ``output_vectors``
+  from ``vector_off``.
   """
 
   num_targets: int
@@ -146,6 +206,10 @@ class IoLayout:
   # Controller outputs written per env, in output-block order. Keys of
   # MBC_ATTR_BY_CHANNEL; the action term's `output_channels` must match.
   output_channels: tuple[str, ...] = ("q", "alpha")
+  # Whole-controller 3-vectors written per env, after the status column. Keys
+  # of VECTOR_OUTPUTS; unlike the channels above these are not per-joint and
+  # are not interpolated across substeps.
+  output_vectors: tuple[str, ...] = ()
 
   @property
   def root_off(self) -> int:
@@ -168,8 +232,12 @@ class IoLayout:
     return len(self.output_channels) * self.num_targets
 
   @property
-  def out_width(self) -> int:
+  def vector_off(self) -> int:
     return self.status_off + 1
+
+  @property
+  def out_width(self) -> int:
+    return self.vector_off + 3 * len(self.output_vectors)
 
 
 @dataclass
@@ -317,8 +385,15 @@ class ControllerHost:
         f"unknown controller output channel(s) {sorted(unknown)}; "
         f"known: {sorted(MBC_ATTR_BY_CHANNEL)}"
       )
+    unknown = set(layout.output_vectors) - set(VECTOR_OUTPUTS)
+    if unknown:
+      raise ValueError(
+        f"unknown controller vector output(s) {sorted(unknown)}; "
+        f"known: {sorted(VECTOR_OUTPUTS)}"
+      )
     self._layout = layout
     self._output_attrs = [MBC_ATTR_BY_CHANNEL[c] for c in layout.output_channels]
+    self._vector_readers = [VECTOR_OUTPUTS[v] for v in layout.output_vectors]
     self._imu_keys = [name.encode() for name, _, _ in layout.imu]
     self._wrench_keys = [name.encode() for name in layout.wrenches]
 
@@ -502,6 +577,21 @@ class ControllerHost:
         # A joint the controller does not drive (or, for tau, one the QP left
         # unset) reads 0.0; consumers treat that as "no command".
         out_row[base + k] = values[j][0] if j != -1 and len(values[j]) > 0 else 0.0
+
+    if self._vector_readers:
+      # See VECTOR_OUTPUTS: these read the *control* robot, not the canonical
+      # one `controller.robot()` above hands out. Re-resolved every step and
+      # never cached: MCGlobalController::reset() erases the controller and
+      # builds a new one, so any handle into it dies at the next env reset --
+      # caching one segfaults the worker a reset later, not here.
+      control_robot = controller.controller().robot()
+      base = layout.vector_off
+      for reader in self._vector_readers:
+        v = reader(control_robot)
+        out_row[base] = v.x()
+        out_row[base + 1] = v.y()
+        out_row[base + 2] = v.z()
+        base += 3
 
   def step_envs(
     self, env_ids: Sequence[int], in_arr: np.ndarray, out_arr: np.ndarray

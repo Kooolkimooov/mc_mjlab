@@ -111,6 +111,7 @@ class ControllerIoBinding:
     metadata: HostMetadata,
     use_controller_reset: bool,
     output_channels: Sequence[str],
+    output_vectors: Sequence[str] = (),
   ):
     self._env = env
     self._entity = entity
@@ -118,6 +119,7 @@ class ControllerIoBinding:
     self._target_ids_np = target_ids.cpu().numpy()
     self._device = target_ids.device
     self._output_channels = tuple(output_channels)
+    self._output_vectors = tuple(output_vectors)
     self._num_targets = len(self._target_names)
 
     mj_model = env.sim.mj_model
@@ -212,6 +214,7 @@ class ControllerIoBinding:
       imu=tuple((n, g >= 0, a >= 0) for n, g, a in imu_sensors),
       wrenches=tuple(n for n, _, _ in wrench_sensors),
       output_channels=self._output_channels,
+      output_vectors=self._output_vectors,
     )
 
     # Gather columns for a single fancy-indexed sensordata copy per step;
@@ -291,6 +294,20 @@ class ControllerIoBinding:
     return {
       c: torch.tensor(rows[:, i * T : (i + 1) * T], dtype=dtype, device=self._device)
       for i, c in enumerate(self._output_channels)
+    }
+
+  def read_controller_vectors(
+    self, out_np: np.ndarray, env_indices: list[int]
+  ) -> dict[str, torch.Tensor]:
+    """Unpack the per-env 3-vector outputs for ``env_indices``."""
+    off = self.layout.vector_off
+    rows = out_np[env_indices]
+    dtype = torch.get_default_dtype()
+    return {
+      name: torch.tensor(
+        rows[:, off + 3 * i : off + 3 * i + 3], dtype=dtype, device=self._device
+      )
+      for i, name in enumerate(self._output_vectors)
     }
 
   def read_controller_failed(

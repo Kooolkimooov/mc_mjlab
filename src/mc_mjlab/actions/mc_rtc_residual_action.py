@@ -69,6 +69,12 @@ class McRtcResidualActionCfg(BaseActionCfg):
   """Actuator names (regex) receiving the RL residual; ``None`` = all controlled
   joints. Non-matched joints track the raw mc_rtc output."""
 
+  controller_vectors: tuple[str, ...] = ()
+  """Whole-controller 3-vectors to read off every controller step, named after
+  ``mc_rtc_controller_host.VECTOR_OUTPUTS`` (e.g. ``"planned_zmp"``). Unlike the
+  joint channels these are not per-joint and are not interpolated across
+  substeps; mdp terms read the latest value through ``controller_vector``."""
+
   use_controller_reset: bool = True
   """Reset via ``MCGlobalController.reset()`` (mc_mujoco parity). Requires the
   locally patched mc_rtc (stock fsm::Controller segfaults on destruction, see
@@ -132,6 +138,7 @@ class McRtcResidualActionBase(BaseAction):
       metadata,
       cfg.use_controller_reset,
       self.output_channels,
+      cfg.controller_vectors,
     )
     # refJointOrder is only known now, so the gain override is applied here.
     if cfg.pd_gains_path is not None:
@@ -189,6 +196,11 @@ class McRtcResidualActionBase(BaseAction):
     self._has_staged_control = torch.zeros(
       self.num_envs, dtype=torch.bool, device=self.device
     )
+    # Whole-controller vectors: latched as collected, no ramp (see the cfg).
+    self._controller_vectors = {
+      v: torch.zeros(self.num_envs, 3, device=self.device)
+      for v in self.cfg.controller_vectors
+    }
     # Latched per env until reset; read by the `controller_failed` termination
     # term so a QP giving up ends that episode instead of the whole run.
     self.controller_failed = torch.zeros(
@@ -207,6 +219,10 @@ class McRtcResidualActionBase(BaseAction):
     for c in self.output_channels:
       self._staged_control[c][env_indices_t] = new_output[c]
     self._has_staged_control[env_indices_t] = True
+    if self._controller_vectors:
+      new_vectors = self._io.read_controller_vectors(self._out_np, env_indices)
+      for v, values in new_vectors.items():
+        self._controller_vectors[v][env_indices_t] = values
     # Latch (not assign): the flag must survive until this env is reset, even
     # though the substeps in between keep collecting.
     self.controller_failed[env_indices_t] |= self._io.read_controller_failed(
@@ -218,6 +234,16 @@ class McRtcResidualActionBase(BaseAction):
   def controller_reference(self, channel: str) -> torch.Tensor:
     """Latest raw controller output for ``channel``, residual excluded."""
     return self._next_control[channel]
+
+  def controller_vector(self, name: str) -> torch.Tensor:
+    """Latest ``(num_envs, 3)`` value of the ``controller_vectors`` entry."""
+    try:
+      return self._controller_vectors[name]
+    except KeyError:
+      raise KeyError(
+        f"controller vector {name!r} is not collected; add it to the action "
+        f"term's `controller_vectors` (have: {sorted(self._controller_vectors)})"
+      ) from None
 
   @property
   def residual_ids(self) -> torch.Tensor | None:
@@ -266,6 +292,8 @@ class McRtcResidualActionBase(BaseAction):
     env_indices_t = torch.tensor(env_indices, device=self.device, dtype=torch.long)
     self._seed_interpolation(env_indices_t)
     self._has_staged_control[env_indices_t] = False
+    for values in self._controller_vectors.values():
+      values[env_indices_t] = 0.0
     # The pool has re-initialized these controllers, so clear the latch too.
     self.controller_failed[env_indices_t] = False
     self._out_np[env_indices, self._io.layout.status_off] = 0.0
