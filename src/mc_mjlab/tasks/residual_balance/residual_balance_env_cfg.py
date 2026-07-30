@@ -19,10 +19,10 @@ does, which reads exactly like a policy that has learned to freeze the gait.
 
 *The reward must pay for walking, not merely for surviving.* Walking is the
 risky activity, so an alive-only reward prefers a policy that stops the gait.
-Payment is therefore mostly for the controller still generating a gait and the
-robot still covering ground -- measured on both sides, since the controller's
-intent and the robot's motion can be frozen independently -- and the residual
-is hard-clipped to an authority that cannot cancel a swing trajectory.
+Payment is therefore for the residual keeping the sim on the controller's plan
+-- ``zmp_tracking``, the only positive term -- rather than for staying upright,
+and the residual is hard-clipped to an authority that cannot cancel a swing
+trajectory.
 
 Rates: the sim runs at 1 kHz and the controller at 500 Hz (``frameskip=2``, the
 mc_mujoco pairing), while the policy acts at 50 Hz (``decimation=20``); the
@@ -91,6 +91,21 @@ PUSH_ANGULAR_VELOCITY = 0.0
 # `--env.episode-length-s` when you do. Measured with a zero residual.
 WALK_WINDOW_S = 16.0
 
+# ZMP tracking payment, sized off the zero-residual baseline rather than picked:
+# measured over 64 s x 16 envs, the CoM-to-ZMP offset error runs median 2.1 cm,
+# p75 4.4 cm, p90 9.0 cm. `std` is where the exponential has fallen to 1/e, so
+# 5 cm scores that baseline 0.68 on average -- ordinary walking is well paid,
+# a push landing (p90) drops payment to 0.02, and there is a third of the term
+# left for the residual to earn. Tighten it and the signal is mostly noise
+# (0.02 scores 0.41); loosen it and it saturates (0.10 scores 0.84).
+#
+# The weight is per second like every other one here, so a perfectly tracking
+# episode earns 16 over the walk window and the baseline ~11, against the -40 a
+# fall costs (the -2000 termination penalty lands on one 20 ms step). Dense
+# shaping that ranks good balance without ever out-paying survival.
+ZMP_TRACKING_STD = 0.05
+ZMP_TRACKING_WEIGHT = 1.0
+
 # A viewer default, not a training one: every env is its own mc_rtc controller
 # (~70 MB, ~570 ms to construct, built serially), so replaying at the training
 # env count would spend minutes and gigabytes before the first frame.
@@ -155,6 +170,9 @@ def _make_env_cfg(
       mc_rtc_robot_name=robot_name,
       frameskip=2,
       num_workers=num_workers,
+      # What the `zmp_tracking` reward compares the sim's centre of pressure
+      # against, collected per controller step (see `mdp.zmp_tracking`).
+      controller_vectors=("planned_zmp", "control_com"),
       pd_gains_path=str(robot.pd_gains_path),
       scale=residual_scale,
       clip={".*": (-residual_scale, residual_scale)},
@@ -241,6 +259,20 @@ def _make_env_cfg(
   rewards = {
     "termination_penalty": RewardTermCfg(func=envs_mdp.is_terminated, weight=-2000.0),
     "upright": RewardTermCfg(func=envs_mdp.flat_orientation_l2, weight=-2.0),
+    # The one term that pays for the residual doing its job rather than for
+    # merely not falling: the controller plans a ZMP every period, and a push
+    # it cannot absorb shows up here -- as the centre of pressure running away
+    # from that plan -- well before the base tips far enough to terminate.
+    "zmp_tracking": RewardTermCfg(
+      func=mdp.zmp_tracking,
+      weight=ZMP_TRACKING_WEIGHT,
+      params={
+        "std": ZMP_TRACKING_STD,
+        "sensor_names": mdp.GROUND_CONTACT_SENSORS,
+        "asset_cfg": SceneEntityCfg("robot"),
+        "action_name": "mc_rtc_residual",
+      },
+    ),
     "residual_magnitude": RewardTermCfg(func=mdp.action_l2, weight=-0.1),
     "residual_rate": RewardTermCfg(func=envs_mdp.action_rate_l2, weight=-0.1),
   }
