@@ -9,6 +9,12 @@ gait (``controller_reference_motion``) and whether it has given up
 (``controller_failed``). What they compare against is the raw controller output
 with the residual excluded, read off the action term.
 
+``controller_reference_motion`` is here but is *not* wired into the residual
+balance task, and should not be without re-measuring: the controller's
+joint-velocity reference is larger in the run-up to a fall than in normal
+walking (1.78 vs 0.64 rad/s over 96 s x 16 envs), because a falling robot's
+controller thrashes, so paying for it pays for the fall.
+
 A note on what is *not* here, because it looks like it should be. A term
 comparing commanded joint positions against measured ones does not measure
 "is the controller's plan being executed" under this coupling: the joints are

@@ -31,6 +31,21 @@ Both were sized against the zero-residual baseline, and both collapse in the
 run-up to a fall (to 0.12 and 0.10 of a possible 1.0), which is what makes them
 the early warning the sparse penalty cannot be.
 
+*Two shaping ideas that measurement rejected*, recorded so they are not
+reinvented. Paying for the controller still generating a gait
+(``mdp.controller_reference_motion``, tanh of the joint-velocity reference) is
+anti-correlated with what we want: over 96 s x 16 envs the reference norm runs
+1.78 rad/s in the second before a fall against 0.64 overall, because a falling
+robot's controller thrashes -- the term would pay *more* for the run-up to a
+fall. And a support-region margin on the *measured* ZMP is close to a
+tautology, since a centre of pressure lies inside the contact hull by
+construction; only the *commanded* ZMP can leave it.
+
+Both tracking terms do score a standing robot slightly above a walking one
+(0.75 vs 0.66 for the ZMP term), which is the wrong sign for this task. It
+stays theoretical only because the residual is hard-clipped to an authority
+that cannot cancel a swing trajectory -- revisit it if ``residual_scale`` grows.
+
 Rates: the sim runs at 1 kHz and the controller at 500 Hz (``frameskip=2``, the
 mc_mujoco pairing), while the policy acts at 50 Hz (``decimation=20``); the
 residual is therefore held across 10 controller periods.
