@@ -100,7 +100,7 @@ from mc_mjlab.tasks import mdp
 # eye on is the baseline's survival rate, not the push magnitude. They live
 # here rather than as CLI flags because they sit inside an event term's
 # ``velocity_range`` dict, which tyro does not flatten.
-PUSH_VELOCITY = 0.1
+PUSH_VELOCITY = 0.4
 PUSH_ANGULAR_VELOCITY = 0.0
 
 # How long the base controller actually walks, and therefore how long an
@@ -111,7 +111,7 @@ PUSH_ANGULAR_VELOCITY = 0.0
 # opposite of this task. Enabling the endless-walk override shipped in
 # `etc/mc_rtc_controllers/` removes that ceiling; raise this with
 # `--env.episode-length-s` when you do. Measured with a zero residual.
-WALK_WINDOW_S = 16.0
+WALK_WINDOW_S = 60.0 # 16.0
 
 # ZMP tracking payment, sized off the zero-residual baseline rather than picked:
 # measured over 64 s x 16 envs, the CoM-to-ZMP offset error runs median 2.1 cm,
@@ -393,7 +393,7 @@ def _make_env_cfg(
     "push_robot": EventTermCfg(
       func=envs_mdp.push_by_setting_velocity,
       mode="interval",
-      interval_range_s=(2.0, 5.0),
+      interval_range_s=(5.0, 7.0),
       params={
         "velocity_range": {
           "x": (-push_velocity, push_velocity),
