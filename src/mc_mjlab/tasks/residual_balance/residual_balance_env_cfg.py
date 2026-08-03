@@ -209,7 +209,7 @@ def _make_env_cfg(
   # the sim clamps, so a residual that outgrows the hardware is invisible here
   # and divergent on the robot.
   if residual_scale is None:
-    residual_scale = 0.01 if control == "position" else 10.0
+    residual_scale = 0.1 if control == "position" else 10.0
 
   action_cls = (
     McRtcResidualJointPositionActionCfg
