@@ -18,7 +18,7 @@ The robot then stands still for the whole episode no matter what the residual
 does, which reads exactly like a policy that has learned to freeze the gait.
 
 *The reward must pay for tracking the controller's plan, not for surviving.*
-With ``gamma=0.99`` the discounted horizon is ~100 steps (2 s), so the -2000
+With ``gamma=0.99`` the discounted horizon is ~100 steps (2 s), so the -200
 termination penalty shapes only the last couple of seconds before a fall
 (0.99^400 ~ 0.02) and the dense terms do all the work. Those are
 ``zmp_tracking`` and ``com_velocity_tracking``: the CoM-to-ZMP offset and the
@@ -93,26 +93,58 @@ from mc_mjlab.tasks import mdp
 # no residual; too hard and the robot falls whatever the residual does, which
 # plateaus the policy at a fraction of an episode.
 #
-# 0.1 m/s reads timid next to mjlab's velocity task (+/-0.5), but a *walking*
-# robot is far easier to topple than a standing one: measured over 65 s x 16
-# envs, the zero-residual baseline already loses about half its episodes here
-# (fell_over + collapsed vs time_out). That is the headroom the residual is
-# meant to recover, so re-measure before raising this -- the number to keep an
-# eye on is the baseline's survival rate, not the push magnitude. They live
-# here rather than as CLI flags because they sit inside an event term's
-# ``velocity_range`` dict, which tyro does not flatten.
+# 0.1 m/s already lost the zero-residual baseline about half its episodes
+# (fell_over + collapsed vs time_out, over 65 s x 16 envs) -- a *walking* robot
+# is far easier to topple than a standing one, which is why that reads timid
+# next to mjlab's velocity task (+/-0.5). 0.4 is deliberately past that: the
+# point of the dial is a baseline that *almost always* fails, so that the
+# residual's contribution to the overall control is measurable as survival
+# rather than hidden inside a controller that would have coped anyway.
+#
+# One caveat on the number itself. It was calibrated during the 2026-07-31 runs,
+# whose working tree had ``"x": (push_velocity, push_velocity)`` -- a degenerate
+# range, so every push was exactly +0.4 in x *and* +0.4 in y: a constant
+# 0.566 m/s shove, same direction every time. Sampled symmetrically as below the
+# same 0.4 is much gentler (mean |v| ~ 0.31 m/s, random direction, sometimes
+# ~0), so the baseline failure rate that 0.4 was chosen for does not carry over.
+# Re-measure it -- the number to keep an eye on is the baseline's survival rate,
+# not the push magnitude, and the ceiling is where the robot falls whatever the
+# residual does, which plateaus the policy at a fraction of an episode.
+#
+# They live here rather than as CLI flags because they sit inside an event
+# term's ``velocity_range`` dict, which tyro does not flatten.
 PUSH_VELOCITY = 0.4
 PUSH_ANGULAR_VELOCITY = 0.0
 
 # How long the base controller actually walks, and therefore how long an
-# episode is worth running. With the *installed* LogisticController_ismpc
-# config the FSM settles the posture for ~4 s, walks 1 m in ~12 s and then
-# stands still for good (its remaining transitions are commented out), so
-# everything past ~16 s would train the residual on a stationary robot -- the
-# opposite of this task. Enabling the endless-walk override shipped in
-# `etc/mc_rtc_controllers/` removes that ceiling; raise this with
-# `--env.episode-length-s` when you do. Measured with a zero residual.
-WALK_WINDOW_S = 60.0 # 16.0
+# episode is worth running. This tracks the *installed* controller's FSM and
+# has to be revisited whenever that changes, because an episode running past
+# the walk trains the residual on a stationary robot -- the opposite of this
+# task, and doubly so since a standing robot outscores a walking one on both
+# tracking terms (0.75 vs 0.66 for ZMP).
+#
+# The FSM currently walks indefinitely, so the ceiling is ours to pick:
+# `Logistic::FSMMoveBoxTableToLeftShelf` now begins with
+# `Walking::WalkCmdVelImpl` (`targetCmdVel: [0.1, 0, 0]`, `timeout: 1000.0`)
+# rather than `Logistic::GoToTable`, which is commented out. 60 s is ~4 s of
+# posture settling then ~6 m of walking. Note the top-level `transitions:` map
+# alone does not show this -- it ends at `Logistic::Demo`, and the walk is
+# inside that Meta state's own transitions. It was not always so: the stock
+# config walked 1 m to the table and then stood for good, which is what the
+# earlier `WALK_WINDOW_S = 16.0` was sized for.
+#
+# 60 -> 90 when `PUSH_WARMUP_S` arrived, and the two have to move together. The
+# warm-up removes the first-push massacre, which on its own would have lifted
+# survival from ~20% to ~39% and given away the headroom `PUSH_VELOCITY = 0.4`
+# was deliberately calibrated for. At the measured post-warm-up hazard of
+# ~0.019/s, exp(-0.019 * (T - 10)) puts 90 s back at ~22%: the same difficulty as
+# before, with the mortality spread across steady walking instead of piled onto
+# one startup event. It also buys 13.3 pushes per episode against 10, and a third
+# fewer resets per hour -- worth real throughput, since an env reset destroys and
+# rebuilds its mc_rtc controller.
+#
+# Survival numbers from before this change are not comparable to ones after it.
+WALK_WINDOW_S = 90.0
 
 # ZMP tracking payment, sized off the zero-residual baseline rather than picked:
 # measured over 64 s x 16 envs, the CoM-to-ZMP offset error runs median 2.1 cm,
@@ -161,7 +193,7 @@ def _make_env_cfg(
   control: str,
   num_envs: int = 128,
   num_workers: int | None = None,
-  residual_scale: float | None = None,
+  residual_scale: float | dict[str, float] | None = None,
   episode_length_s: float = WALK_WINDOW_S,
   push_velocity: float = PUSH_VELOCITY,
   push_angular_velocity: float = PUSH_ANGULAR_VELOCITY,
@@ -208,9 +240,42 @@ def _make_env_cfg(
   # residual takes the worst joint (ankle pitch) to 0.64 of its limit without
   # adding a single over-limit step. Re-measure before raising this: nothing in
   # the sim clamps, so a residual that outgrows the hardware is invisible here
-  # and divergent on the robot.
+  # and divergent on the robot. That warning was then ignored: a run at 0.1
+  # (20899 iterations, 2026-07-31) put a saturated residual at 220-270% of the
+  # hardware limit, and -- because ``scale`` multiplies the *exploration* noise
+  # too -- left the policy's own dither at 115-140% of it once `mean_std` had
+  # grown to 0.52. Both tracking terms read ~0.008 of a possible 1.0 for the
+  # whole run, against 0.68/0.80 for the zero-residual baseline, from the first
+  # iteration onward and with a near-zero mean residual: the environment was
+  # broken before the policy did anything. Hence back to 0.01.
   if residual_scale is None:
-    residual_scale = 0.1 if control == "position" else 10.0
+    residual_scale = 0.01 if control == "position" else 10.0
+
+  # Per-joint authority, expressed once and used for both the scale and the clip
+  # so the two cannot disagree. `processed = raw * scale` is clipped afterwards,
+  # so a clip left at the old scalar would silently cap any joint given a larger
+  # scale -- the reason these are derived from one dict rather than set apart.
+  #
+  # The patterns must **partition every actuator**, and only half of that is
+  # enforced. mjlab's `resolve_matching_names_values` raises if a joint matches
+  # two keys and if a key matches nothing, so a specific entry cannot sit
+  # alongside a `".*"` catch-all -- write it as
+  # ``{"[LR]_ANKLE_.*": 0.03, "^(?![LR]_ANKLE_).*": 0.005}``. What it does *not*
+  # raise on is a joint matching no key at all: `BaseAction.__init__` seeds
+  # `scale` to ones and `clip` to +/-inf, so a residual joint left out silently
+  # gets scale 1.0 -- 100x the intended authority -- with no clip, which is the
+  # failure the paragraph above measured at 220-270% of the hardware limit.
+  # Note the resolution is against every actuator matched by `actuator_names`,
+  # not just `residual_joints`; the residual subset is sliced out afterwards.
+  #
+  # Uniform for now: this is exactly the previous scalar behaviour, written in
+  # the form that lets the ankles (which is what actually moves the centre of
+  # pressure) be raised without also loosening the hips, once the authority probe
+  # says which joints are worth it.
+  residual_scales: dict[str, float] = (
+    residual_scale if isinstance(residual_scale, dict) else {".*": residual_scale}
+  )
+  residual_clip = {pattern: (-v, v) for pattern, v in residual_scales.items()}
 
   action_cls = (
     McRtcResidualJointPositionActionCfg
@@ -230,8 +295,8 @@ def _make_env_cfg(
       # against, collected per controller step (see `mdp.zmp_tracking`).
       controller_vectors=("planned_zmp", "control_com", "control_com_vel"),
       pd_gains_path=str(robot.pd_gains_path),
-      scale=residual_scale,
-      clip={".*": (-residual_scale, residual_scale)},
+      scale=residual_scales,
+      clip=residual_clip,
       console_output=console_output,
       print_residual_every=print_residual_every,
     )
@@ -331,7 +396,17 @@ def _make_env_cfg(
   ##
 
   rewards = {
-    "termination_penalty": RewardTermCfg(func=envs_mdp.is_terminated, weight=-2000.0),
+    # Sized by *gradient* scale, not just by discounted horizon. The manager
+    # multiplies every weight by `step_dt`, so a fall lands as one step of
+    # `weight * 0.02` against dense steps of ~0.03: at -2000 that is a single
+    # -40 sample among -0.03 ones, a 1000x outlier inside a minibatch that then
+    # gets advantage-normalized. Measured across every run to 2026-07-31 the
+    # cost was total: `Loss/value` never converged (0.7-5.5) and the adaptive
+    # KL schedule pinned the learning rate to rsl_rl's 1e-5 floor from
+    # iteration 0 and never left it -- 20899 iterations of no learning. -200
+    # keeps a fall worth ~4, a couple of seconds of dense reward, which is all
+    # the 2 s discounted horizon can see anyway.
+    "termination_penalty": RewardTermCfg(func=envs_mdp.is_terminated, weight=-200.0),
     "upright": RewardTermCfg(func=envs_mdp.flat_orientation_l2, weight=-2.0),
     # The one term that pays for the residual doing its job rather than for
     # merely not falling: the controller plans a ZMP every period, and a push
@@ -574,9 +649,29 @@ def residual_balance_ppo_cfg(
       distribution_cfg={
         "class_name": "GaussianDistribution",
         # The residual should start near zero: a unit init_std would hand the
-        # controller a huge random offset on step one and knock it over.
-        "init_std": 0.2,
+        # controller a huge random offset on step one and knock it over. 0.2 is
+        # still too much of one. Measured against the zero-residual baseline
+        # through `scripts/compare_to_baseline.py`, a 500-iteration
+        # policy scored 18.6% survival against the baseline's 26.5% and was
+        # below it on both tracking terms -- it spends the whole run climbing
+        # back out of the hole its own random initialization dug, and reached
+        # only 1238 steps against 1330. A residual policy should start
+        # indistinguishable from the controller it wraps and improve from
+        # there, never much worse.
+        "init_std": 0.1,
         "std_type": "scalar",
+        # A floor, and it is aimed at the learning rate as much as at
+        # exploration. The adaptive schedule halves the rate whenever measured
+        # KL exceeds 2x `desired_kl`, and for Gaussians KL ~ dmu^2 / (2 sigma^2)
+        # -- so a shrinking sigma inflates KL for an unchanged weight step. Over
+        # the 2026-08-12_18-30-10 run `Policy/mean_std` fell 0.0999 -> 0.0440,
+        # a 5x inflation on its own, and the rate sat pinned at its 1e-5 floor
+        # for 54% of the last 500 iterations. Clamping sigma at roughly half
+        # `init_std` addresses the collapse and the pinning together.
+        #
+        # The upper bound is the old worry, not the current one: at 0.005
+        # entropy the std used to climb 0.2 -> 0.52 unchecked.
+        "std_range": (0.05, 0.30),
       },
     ),
     critic=RslRlModelCfg(
@@ -586,19 +681,55 @@ def residual_balance_ppo_cfg(
       value_loss_coef=1.0,
       use_clipped_value_loss=True,
       clip_param=0.2,
-      entropy_coef=0.005,
+      # An order of magnitude below mjlab's locomotion configs (0.005), because
+      # on a *residual* task the exploration noise is itself a disturbance: it
+      # goes through the real PD gains onto the joints the controller is
+      # balancing on. At 0.005 nothing pushed back -- `Policy/mean_std` climbed
+      # 0.2 -> 0.52 over 20899 iterations, and 0.2 -> 0.62 over the 14417 before
+      # that. That was ruinous only in combination with `residual_scale = 0.1`,
+      # where it left the dither at 115-140% of the hardware torque limit; back
+      # at 0.01 the same std costs ~13-16%, which is untidy rather than fatal.
+      #
+      # Hence reduced, not zeroed. Zero does not remove the noise -- `std` stays
+      # learnable and starts at `init_std` either way -- it removes the pressure
+      # to *grow* it, and the opposite failure (std collapsing early onto a
+      # brittle local optimum) is the more expensive one to discover late. The
+      # `std_range` clamp above now bounds the inflation from both ends anyway.
+      entropy_coef=0.0005,
       num_learning_epochs=5,
       num_mini_batches=4,
       learning_rate=1.0e-3,
       schedule="adaptive",
       gamma=0.99,
       lam=0.95,
-      desired_kl=0.01,
+      # The one parameter with authority over the learning rate on this task.
+      # rsl_rl's adaptive schedule halves the rate whenever the measured KL
+      # exceeds 2x this, clamped to a 1e-5 floor -- and at 0.01 it hit that
+      # floor in the first iteration of *every* run so far and never left it
+      # (8% of iterations above it across 500, peaking at 5e-5). The policy
+      # still learns, but at a crawl: it was still climbing toward the
+      # zero-residual baseline from below when the 500-iteration run ended.
+      #
+      # 0.02 is the conservative first step. If the rate still pins, the next
+      # move is 0.03, and the suspect after that is `obs_normalization`: the
+      # running normalizer shifts between when `old_actions_log_prob` is stored
+      # at collection and when the update runs, which inflates *measured* KL
+      # with no weight change at all. rsl_rl logs no KL scalar to confirm that
+      # from the outside.
+      desired_kl=0.02,
       max_grad_norm=1.0,
     ),
     experiment_name=experiment_name,
     save_interval=50,
-    num_steps_per_env=24,
+    # Longer rollouts than mjlab's locomotion default (24), because collection
+    # here is ~99% mc_rtc: at 128 envs the measured split is 2.9 s collecting
+    # against 0.03 s learning, so a longer rollout is nearly free per sample.
+    # 24 steps is 0.48 s against episodes of 10-30 s, which leaves GAE almost
+    # pure bootstrap off a critic that was not converging; 48 halves the number
+    # of updates and doubles the horizon each advantage is estimated over,
+    # which is also the cheapest relief for the KL blowups that floored the
+    # learning rate.
+    num_steps_per_env=48,
     max_iterations=max_iterations,
     logger="wandb",
   )
