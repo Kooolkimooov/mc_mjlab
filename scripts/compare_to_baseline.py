@@ -254,6 +254,30 @@ def _report(base: Arm, pol: Arm, env, cfg, term_names, reward_terms) -> None:
     "\n  reward delta that tracks the length delta is not independent evidence."
   )
 
+  # The statistic that actually resolves the question, so it is printed last and
+  # read first. docs/evaluation.md#per-step-rates-beat-survival
+  print("\n  reward per step (episode length divided out)")
+  print(f"    {'term':<22} {'baseline':>10} {'policy':>10} {'delta':>10} {'p':>10}")
+  print("    " + "-" * 66)
+  for n in rows:
+    if n == "TOTAL":
+      bv = [sum(e.rewards.values()) / e.length for e in b_eps]
+      pv = [sum(e.rewards.values()) / e.length for e in p_eps]
+    else:
+      bv = [e.rewards[n] / e.length for e in b_eps]
+      pv = [e.rewards[n] / e.length for e in p_eps]
+    b, p = _describe(bv), _describe(pv)
+    # A relative delta is undefined against a zero baseline -- the residual
+    # penalties, which the baseline never pays.
+    rel = f"{(p['mean'] - b['mean']) / b['mean']:+9.1%}" if b["mean"] else "        --"
+    print(
+      f"    {n:<22} {b['mean']:10.5f} {p['mean']:10.5f} {rel} {_welch_p(b, p):10.2e}"
+    )
+  print(
+    "\n  Survival is the headline but the weakest test here: it needs n~150 per"
+    "\n  arm to resolve 5pp. Read the per-step rates first."
+  )
+
 
 def main() -> None:
   p = argparse.ArgumentParser(

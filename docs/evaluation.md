@@ -79,6 +79,32 @@ episode the other way. From the next step on the histories are exactly what
 training produces — the reset zeroed those rows, so the next append backfills all
 five slots with the fresh frame.
 
+### Per-step rates beat survival
+
+**Divide episode length out and read that first.** Survival to the cap is the
+headline number but it is a badly underpowered one: at ~20% it needs roughly
+n = 150 per arm to resolve a 5pp difference. The per-step tracking rates resolved
+a 10% deficit at n = 50 with p < 0.001, on the same data where survival came back
+p = 0.70.
+
+Measured the hard way on 2026-08-14. Three comparisons of the same training run:
+
+| checkpoint | n/arm | survival verdict | per-step verdict |
+| --- | --- | --- | --- |
+| `model_1499` (previous run) | 48 | -2.1pp, p = 0.80 | not computed |
+| `model_1050` | 18/24 | +0.0pp, p = 1.00 | not computed |
+| `model_3050` | 48/54 | +3.2pp, p = 0.70 | **-10%, p < 0.001** |
+
+The first two said "no detectable difference" and were read as parity. The third,
+with barely more data, showed the policy was significantly *worse* all along —
+the survival statistic simply could not see it. An underpowered null is not
+evidence of equivalence, and this task's survival rate is underpowered at any
+sample size a 20-minute run can reach.
+
+The episode-sum rewards do not substitute: they correlate with episode length at
+r = +0.98, so a policy with shorter episodes shows lower sums whether or not it
+tracks worse. Only the length-normalised rate separates the two.
+
 ### Reading the output
 
 `auto_reset = False` is essential: `step()` otherwise resets terminated envs *in
