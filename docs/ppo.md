@@ -77,6 +77,34 @@ confirm that from the outside.
   policy still learns, but at a crawl: it was still climbing toward the
   zero-residual baseline from below when the 500-iteration run ended.
 
+## gamma
+
+**Current:** `0.997`, against mjlab's locomotion default of 0.99.
+
+At `step_dt = 0.02` the credit horizon is `1/(1-gamma)` steps: 0.99 gives 100
+steps, **2 s**, against episodes of ~50 s. 0.997 gives 333 steps, **6.7 s**.
+
+**Why it moved.** The 2026-08-14 run produced a residual that improved the ZMP
+match while *increasing* topples and tracking ~10% worse per step overall — see
+[reward-shaping.md](reward-shaping.md#residual-harm-at-gamma099). A residual can
+pull the centre of pressure toward the plan now and destabilise the gait several
+seconds later, and at a 2 s horizon the discounting never presents that bill. The
+signature fits: `zmp_error` fell monotonically while `fell_over` rose 0.19 -> 0.23
+and survival did not improve.
+
+**Why it is affordable now.** A longer horizon leans harder on the critic, and
+until the -200 termination penalty landed the critic was not converging
+(`Loss/value` 0.7-5.5). It now sits at ~0.02 for a whole run.
+`num_steps_per_env` doubled alongside for the same reason — 1 s of rollout cannot
+support a 6.7 s horizon without GAE becoming almost pure bootstrap.
+
+**Re-measure if:** episode length changes a lot, or `Loss/value` stops
+converging. The horizon should stay well inside the episode but comfortably
+longer than the delay between a residual acting and the fall it causes.
+
+**Falsifiable.** If `residual_magnitude` still climbs and the per-step tracking
+deficit is still ~10% at iteration 1000, the horizon was not the constraint.
+
 ## num_steps_per_env
 
 **Current:** `48`, against mjlab's locomotion default of 24.

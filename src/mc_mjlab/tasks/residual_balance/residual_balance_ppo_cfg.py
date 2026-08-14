@@ -35,14 +35,17 @@ def residual_balance_ppo_cfg(
       num_mini_batches=4,
       learning_rate=1.0e-3,
       schedule="adaptive",
-      gamma=0.99,
+      # 333 steps (6.7 s), not 100 (2 s): the topple a residual causes lands
+      # outside a 2 s horizon. docs/ppo.md#gamma
+      gamma=0.997,
       lam=0.95,
       desired_kl=0.02,
       max_grad_norm=1.0,
     ),
     experiment_name=experiment_name,
     save_interval=50,
-    num_steps_per_env=48,
+    # 1 s of rollout cannot support a 6.7 s horizon.
+    num_steps_per_env=96,
     max_iterations=max_iterations,
     logger="wandb",
   )

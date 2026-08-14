@@ -82,9 +82,11 @@ def _make_env_cfg(
   upper_body = set(mc_rtc.get_upper_body_joints(robot_name))
   residual_joints = tuple(j for j in robot.get_residual_joints() if j not in upper_body)
 
-  # rad for position, Nm for torque. docs/residual-authority.md#residual_scale
+  # rad for position, Nm for torque. 0.01 measured only 28% of the authority
+  # criterion; 0.03 is the last value inside the hardware torque limit.
+  # docs/residual-authority.md#residual_scale
   if residual_scale is None:
-    residual_scale = 0.01 if control == "position" else 10.0
+    residual_scale = 0.03 if control == "position" else 10.0
 
   # Must partition *every* actuator: an unmatched joint silently gets scale 1.0
   # and no clip -- 100x the intended authority. docs/residual-authority.md#residual_scales
