@@ -63,6 +63,7 @@ from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp import dr
 from mjlab.managers.action_manager import ActionTermCfg
 from mjlab.managers.event_manager import EventTermCfg
+from mjlab.managers.metrics_manager import MetricsTermCfg
 from mjlab.managers.observation_manager import ObservationGroupCfg, ObservationTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
@@ -435,6 +436,30 @@ def _make_env_cfg(
     ),
   }
 
+  # Metrics are per-step averages (sum / step_count), with no weight and no dt
+  # scaling -- which is the whole point of logging the ZMP error here as well as
+  # paying for it in the rewards. Every `Episode_Reward/*` curve is an episode
+  # *sum*, and those turned out to correlate with episode length at r = +0.98:
+  # they move when the robot survives longer, not when it tracks better, so they
+  # could not answer "is the control improving". This one is in metres and is
+  # length-independent, so it can.
+  #
+  # The two go together: that average runs over *every* step, and a step with
+  # the feet unloaded contributes 0 m (there is no centre of pressure to place),
+  # so `zmp_error` alone drops when the robot spends more time off the ground --
+  # backwards for a tracking error. `MetricsTermCfg.reduce` has no masked mean,
+  # so the denominator is published instead. Read the tracking quality as
+  # `zmp_error / zmp_grounded`, and `zmp_grounded` on its own as a health curve.
+  metric_params = {
+    "sensor_names": mdp.GROUND_CONTACT_SENSORS,
+    "asset_cfg": SceneEntityCfg("robot"),
+    "action_name": "mc_rtc_residual",
+  }
+  metrics = {
+    "zmp_error": MetricsTermCfg(func=mdp.zmp_error, params=dict(metric_params)),
+    "zmp_grounded": MetricsTermCfg(func=mdp.zmp_grounded, params=dict(metric_params)),
+  }
+
   ##
   # Assemble. Solver settings follow mc_mujoco's HRP5Pmain.xml, as in the demo.
   ##
@@ -450,6 +475,7 @@ def _make_env_cfg(
     rewards=rewards,
     terminations=terminations,
     events=events,
+    metrics=metrics,
     decimation=20,
     episode_length_s=episode_length_s,
     sim=SimulationCfg(

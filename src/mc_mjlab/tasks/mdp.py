@@ -29,6 +29,7 @@ read instead.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from weakref import WeakKeyDictionary
 
 import mujoco
 import torch
@@ -127,6 +128,222 @@ def _wrench_sensor(mj_model, suffix: str, sensor_type: int) -> tuple[int, int]:
   )
 
 
+class _ZmpSensors:
+  """Sensor plumbing for the measured centre of pressure, resolved once.
+
+  Split out of ``zmp_tracking`` so the reward is not the only way to reach this
+  number. The reward reports ``exp(-(error/std)^2)``, a bounded kernel output
+  that says nothing about metres, and every episode-sum of it turned out to
+  correlate with episode length at r = +0.98 -- so asking "did the residual
+  actually move the centre of pressure" needed the raw quantity, which only
+  existed inside the reward's ``__call__``.
+  """
+
+  def __init__(
+    self, env: ManagerBasedRlEnv, sensor_names: tuple[str, ...], asset_name: str
+  ) -> None:
+    mj_model = env.sim.mj_model
+    force_cols: list[int] = []
+    torque_cols: list[int] = []
+    site_ids: list[int] = []
+    for name in sensor_names:
+      f_adr, site_id = _wrench_sensor(
+        mj_model, f"{name}_fsensor", mujoco.mjtSensor.mjSENS_FORCE
+      )
+      t_adr, _ = _wrench_sensor(
+        mj_model, f"{name}_tsensor", mujoco.mjtSensor.mjSENS_TORQUE
+      )
+      force_cols += [f_adr, f_adr + 1, f_adr + 2]
+      torque_cols += [t_adr, t_adr + 1, t_adr + 2]
+      site_ids.append(site_id)
+
+    self.force_cols = torch.tensor(force_cols, device=env.device, dtype=torch.long)
+    self.torque_cols = torch.tensor(torque_cols, device=env.device, dtype=torch.long)
+    self.site_ids = torch.tensor(site_ids, device=env.device, dtype=torch.long)
+    self.num_sensors = len(site_ids)
+    # subtree_com of the robot's root body is the whole robot's CoM, and it is
+    # MuJoCo's own, so it needs no sensor and carries no estimation error.
+    self.root_body_id = env.scene[asset_name].indexing.root_body_id
+
+    # One-slot memo for `offset_error`, keyed on the step it was computed for.
+    self._cache_key: tuple[object, ...] | None = None
+    self._cache: tuple[torch.Tensor, torch.Tensor] | None = None
+
+  def measured_offset(
+    self,
+    env: ManagerBasedRlEnv,
+    min_normal_force: float = 20.0,
+    plane_height: float = 0.0,
+  ) -> tuple[torch.Tensor, torch.Tensor]:
+    """``(CoM-to-ZMP offset xy, vertical contact force)``, both ``(num_envs, ...)``."""
+    num_envs, k = env.num_envs, self.num_sensors
+    data = env.sim.data
+
+    rot = data.site_xmat[:, self.site_ids].reshape(num_envs, k, 3, 3)
+    site_pos = data.site_xpos[:, self.site_ids].reshape(num_envs, k, 3)
+    sensordata = data.sensordata
+    force_s = sensordata[:, self.force_cols].reshape(num_envs, k, 3, 1)
+    torque_s = sensordata[:, self.torque_cols].reshape(num_envs, k, 3, 1)
+
+    # MuJoCo reports the wrench transmitted at the sensor site; the reaction the
+    # ground applies to the robot is its negation -- the same `fs *= -1` the I/O
+    # binding applies before handing these to mc_rtc.
+    force_w = -(rot @ force_s).squeeze(-1)
+    torque_w = -(rot @ torque_s).squeeze(-1)
+
+    com = data.subtree_com[:, self.root_body_id]
+    lever = site_pos - com.unsqueeze(1)
+    force = force_w.sum(dim=1)
+    moment = (torque_w + torch.cross(lever, force_w, dim=-1)).sum(dim=1)
+
+    # Ground plane, expressed from the CoM: mc_rbdyn::zmp with n = +z.
+    normal_force = force[:, 2]
+    height = plane_height - com[:, 2]
+    safe_force = normal_force.clamp(min=min_normal_force)
+    measured = torch.stack(
+      (
+        (height * force[:, 0] - moment[:, 1]) / safe_force,
+        (moment[:, 0] + height * force[:, 1]) / safe_force,
+      ),
+      dim=-1,
+    )
+    return measured, normal_force
+
+  def offset_error(
+    self,
+    env: ManagerBasedRlEnv,
+    action_name: str,
+    min_normal_force: float = 20.0,
+    plane_height: float = 0.0,
+  ) -> tuple[torch.Tensor, torch.Tensor]:
+    """``(distance from the planned ZMP in metres, vertical contact force)``.
+
+    Memoised for the current step, because three terms score this same number
+    -- ``zmp_tracking``, ``recovery_tracking`` and the ``zmp_error`` metric --
+    and computing it is not free: the ``site_xmat``/``site_xpos`` gathers, a
+    batched ``(num_envs, k, 3, 3) @ (num_envs, k, 3, 1)``, the cross products
+    and the action-term lookup, at 50 Hz x num_envs.
+
+    ``common_step_counter`` is a sound key because terminations, rewards and
+    metrics all run in one phase of ``ManagerBasedRlEnv.step`` off the same
+    ``sim.data``; the tolerances are in the key too, so a term configured with
+    different ones still gets its own value rather than someone else's.
+    """
+    key = (env.common_step_counter, action_name, min_normal_force, plane_height)
+    if self._cache_key != key or self._cache is None:
+      measured, normal_force = self.measured_offset(env, min_normal_force, plane_height)
+      error = torch.linalg.vector_norm(
+        measured - planned_zmp_offset(env, action_name), dim=1
+      )
+      self._cache_key, self._cache = key, (error, normal_force)
+    return self._cache
+
+
+#: Per-env ``_ZmpSensors``, keyed weakly so they die with the env they resolved
+#: their model addresses against.
+_ZMP_SENSOR_CACHE: WeakKeyDictionary[
+  ManagerBasedRlEnv, dict[tuple[tuple[str, ...], str], _ZmpSensors]
+] = WeakKeyDictionary()
+
+
+def _zmp_sensors(
+  env: ManagerBasedRlEnv, sensor_names: tuple[str, ...], asset_name: str
+) -> _ZmpSensors:
+  """The one :class:`_ZmpSensors` for this env and sensor set.
+
+  Terms resolve their plumbing at init, so three of them each building their
+  own meant three copies of the same index tensors and, worse, three separate
+  ``offset_error`` memos -- which defeats the memo entirely.
+  """
+  cache = _ZMP_SENSOR_CACHE.setdefault(env, {})
+  key = (tuple(sensor_names), asset_name)
+  sensors = cache.get(key)
+  if sensors is None:
+    sensors = cache[key] = _ZmpSensors(env, sensor_names, asset_name)
+  return sensors
+
+
+def planned_zmp_offset(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """The controller's own CoM-to-ZMP offset, the target side of the comparison."""
+  term = _residual_term(env, action_name)
+  return (
+    term.controller_vector("planned_zmp") - term.controller_vector("control_com")
+  )[:, :2]
+
+
+class zmp_error:
+  """Distance between the measured centre of pressure and the planned one, in metres.
+
+  A *metric*, not a reward: unlike ``zmp_tracking`` this is not passed through a
+  kernel and not accumulated over the episode, so it is comparable between runs
+  of different length. That matters because the episode-sum rewards proved to be
+  episode length in disguise (r = +0.98), which made the tensorboard curves
+  unreadable as a measure of control quality.
+
+  **Read it together with :class:`zmp_grounded`.** Steps with the feet unloaded
+  contribute 0 m here rather than a number divided by a vanishing normal force,
+  and ``MetricsManager`` averages as ``sum / step_count`` over *every* step --
+  so on its own this curve falls when the robot spends more time off the ground,
+  which is the wrong direction for a tracking error. ``MetricsTermCfg.reduce``
+  offers no masked mean, so the denominator is published separately instead:
+  the grounded-conditional error is ``zmp_error / zmp_grounded``.
+  """
+
+  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+    self._sensors = _zmp_sensors(
+      env, cfg.params["sensor_names"], cfg.params["asset_cfg"].name
+    )
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    sensor_names: tuple[str, ...],
+    asset_cfg: SceneEntityCfg,
+    action_name: str = "mc_rtc_residual",
+    min_normal_force: float = 20.0,
+    plane_height: float = 0.0,
+  ) -> torch.Tensor:
+    del sensor_names, asset_cfg  # Resolved at init.
+    error, normal_force = self._sensors.offset_error(
+      env, action_name, min_normal_force, plane_height
+    )
+    return error * (normal_force >= min_normal_force)
+
+
+class zmp_grounded:
+  """Share of steps whose feet carry enough load for a centre of pressure.
+
+  The denominator :class:`zmp_error` needs to be read in metres, and a health
+  curve in its own right: a robot lifting off, stumbling or on its way down
+  spends more steps ungrounded, and that shows up here before it shows up in a
+  termination.
+  """
+
+  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+    self._sensors = _zmp_sensors(
+      env, cfg.params["sensor_names"], cfg.params["asset_cfg"].name
+    )
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    sensor_names: tuple[str, ...],
+    asset_cfg: SceneEntityCfg,
+    action_name: str = "mc_rtc_residual",
+    min_normal_force: float = 20.0,
+    plane_height: float = 0.0,
+  ) -> torch.Tensor:
+    del sensor_names, asset_cfg  # Resolved at init.
+    # Free: `zmp_error` computed this on the same step, and the sensors are
+    # shared, so this reads the memo rather than the sensors.
+    _, normal_force = self._sensors.offset_error(
+      env, action_name, min_normal_force, plane_height
+    )
+    return (normal_force >= min_normal_force).float()
+
+
 class zmp_tracking:
   """Reward the measured ZMP sitting where the mc_rtc controller wants it.
 
@@ -151,28 +368,9 @@ class zmp_tracking:
   """
 
   def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv) -> None:
-    mj_model = env.sim.mj_model
-    force_cols: list[int] = []
-    torque_cols: list[int] = []
-    site_ids: list[int] = []
-    for name in cfg.params["sensor_names"]:
-      f_adr, site_id = _wrench_sensor(
-        mj_model, f"{name}_fsensor", mujoco.mjtSensor.mjSENS_FORCE
-      )
-      t_adr, _ = _wrench_sensor(
-        mj_model, f"{name}_tsensor", mujoco.mjtSensor.mjSENS_TORQUE
-      )
-      force_cols += [f_adr, f_adr + 1, f_adr + 2]
-      torque_cols += [t_adr, t_adr + 1, t_adr + 2]
-      site_ids.append(site_id)
-
-    self._force_cols = torch.tensor(force_cols, device=env.device, dtype=torch.long)
-    self._torque_cols = torch.tensor(torque_cols, device=env.device, dtype=torch.long)
-    self._site_ids = torch.tensor(site_ids, device=env.device, dtype=torch.long)
-    self._num_sensors = len(site_ids)
-    # subtree_com of the robot's root body is the whole robot's CoM, and it is
-    # MuJoCo's own, so it needs no sensor and carries no estimation error.
-    self._root_body_id = env.scene[cfg.params["asset_cfg"].name].indexing.root_body_id
+    self._sensors = _zmp_sensors(
+      env, cfg.params["sensor_names"], cfg.params["asset_cfg"].name
+    )
 
   def __call__(
     self,
@@ -185,44 +383,9 @@ class zmp_tracking:
     plane_height: float = 0.0,
   ) -> torch.Tensor:
     del sensor_names, asset_cfg  # Resolved at init.
-    num_envs, k = env.num_envs, self._num_sensors
-    data = env.sim.data
-
-    rot = data.site_xmat[:, self._site_ids].reshape(num_envs, k, 3, 3)
-    site_pos = data.site_xpos[:, self._site_ids].reshape(num_envs, k, 3)
-    sensordata = data.sensordata
-    force_s = sensordata[:, self._force_cols].reshape(num_envs, k, 3, 1)
-    torque_s = sensordata[:, self._torque_cols].reshape(num_envs, k, 3, 1)
-
-    # MuJoCo reports the wrench transmitted at the sensor site; the reaction the
-    # ground applies to the robot is its negation -- the same `fs *= -1` the I/O
-    # binding applies before handing these to mc_rtc.
-    force_w = -(rot @ force_s).squeeze(-1)
-    torque_w = -(rot @ torque_s).squeeze(-1)
-
-    com = data.subtree_com[:, self._root_body_id]
-    lever = site_pos - com.unsqueeze(1)
-    force = force_w.sum(dim=1)
-    moment = (torque_w + torch.cross(lever, force_w, dim=-1)).sum(dim=1)
-
-    # Ground plane, expressed from the CoM: mc_rbdyn::zmp with n = +z.
-    normal_force = force[:, 2]
-    height = plane_height - com[:, 2]
-    safe_force = normal_force.clamp(min=min_normal_force)
-    measured = torch.stack(
-      (
-        (height * force[:, 0] - moment[:, 1]) / safe_force,
-        (moment[:, 0] + height * force[:, 1]) / safe_force,
-      ),
-      dim=-1,
+    error, normal_force = self._sensors.offset_error(
+      env, action_name, min_normal_force, plane_height
     )
-
-    term = _residual_term(env, action_name)
-    planned = (
-      term.controller_vector("planned_zmp") - term.controller_vector("control_com")
-    )[:, :2]
-
-    error = torch.linalg.vector_norm(measured - planned, dim=1)
     return torch.exp(-torch.square(error / std)) * (normal_force >= min_normal_force)
 
 
