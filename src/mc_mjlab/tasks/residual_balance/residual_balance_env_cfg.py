@@ -384,9 +384,34 @@ def _make_env_cfg(
       func=envs_mdp.reset_root_state_uniform,
       mode="reset",
       params={
-        # No z offset: dropping the robot injects a transient the controller
-        # has to absorb before the episode even starts.
-        "pose_range": {"x": (-0.1, 0.1), "y": (-0.1, 0.1), "yaw": (-math.pi, math.pi)},
+        # Deliberately empty, but nothing enforces that -- the action term's
+        # `_check_initial_pose_agreement` reads the entity's *static* init state
+        # and at most prints a line, and it never looks at this range.
+        #
+        # It used to be a hazard: mc_rtc seeds its walking plan from the base
+        # pose in the *controller config*, never from the pose the sim hands
+        # `init()`/`reset()`, and with yaw drawn over +/-pi that killed 39% of
+        # episodes 4-7 s in, before any push, by `collapsed` -- the controller
+        # chasing a motion it did not command (measured CoM speed 0.91 m/s
+        # against a 0.1 m/s walk target). That is now reconciled every reset,
+        # worker-side: `_seed_real_robot` teleports the estimated robot onto the
+        # sim's pose and re-runs `MCController::reset` so the walking references
+        # rebuild there. So this is empty because randomising it buys nothing,
+        # not because something would stop you.
+        #
+        # Nothing is lost. Every actor observation is body-frame or
+        # robot-internal (`base_lin_vel`, `base_ang_vel`, `projected_gravity`,
+        # joints, controller channels), and the ground is a bare infinite plane,
+        # so translating or spinning the start makes an episode neither
+        # observationally nor dynamically different. The randomisation that
+        # *would* matter -- initial tilt, height, joint state -- is not what this
+        # was doing, and initial *velocity* is not an option either: `reset()`
+        # takes encoders and a pose but no velocity, so the controller would
+        # again start believing something false.
+        #
+        # No z offset either: dropping the robot injects a transient the
+        # controller has to absorb before the episode even starts.
+        "pose_range": {},
         "velocity_range": {},
       },
     ),

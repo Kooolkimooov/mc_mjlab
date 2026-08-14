@@ -18,7 +18,9 @@ position/velocity subclass.
 from __future__ import annotations
 
 import abc
+import math
 import os
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -26,6 +28,7 @@ import torch
 from mjlab.envs.mdp.actions.actions import BaseAction, BaseActionCfg
 from mjlab.utils.lab_api.string import resolve_matching_names
 
+from mc_mjlab.actions.mc_rtc_controller_host import HostMetadata
 from mc_mjlab.actions.mc_rtc_controller_io_binding import (
   ControllerIoBinding,
   apply_reference_pd_gains,
@@ -143,6 +146,7 @@ class McRtcResidualActionBase(BaseAction):
       console_output=cfg.console_output,
     )
     metadata = self._pool.await_ready()
+    self._check_initial_pose_agreement(metadata)
 
     # Sim <-> mc_rtc input wiring (model introspection, IoLayout, per-step fill).
     self._io = ControllerIoBinding(
@@ -169,6 +173,44 @@ class McRtcResidualActionBase(BaseAction):
     self._alloc_interpolation_buffers()
 
   # ---- Construction helpers. ----
+
+  # Tolerances for the initial-pose agreement check. Position is generous
+  # because a centimetre of disagreement is harmless; heading is tight because
+  # it is not -- see the measurements quoted below.
+  _POSE_TOL_M = 0.05
+  _YAW_TOL_RAD = 0.10
+
+  def _check_initial_pose_agreement(self, metadata: HostMetadata) -> None:
+    """One line if the controller's assumed start pose differs from the sim's.
+
+    Informational only. The host reconciles the two at every reset -- it
+    teleports the controller's robots onto the simulation's pose and re-runs
+    ``MCController::reset`` so the walking references rebuild there -- so a
+    disagreement is no longer the silent 35%-of-episodes fault it used to be.
+    The load-bearing check now lives worker-side in ``_warn_if_pose_not_taken``,
+    which reads the pose back off the estimated robot *after* that teleport and
+    complains only when it did not take -- alongside
+    ``_warn_seeding_unavailable``, which covers the builds where the teleport
+    cannot happen at all. Those are also the builds that report no assumed pose,
+    which is why nothing is said here about a ``None``.
+    """
+    if metadata.assumed_base_pose is None:
+      return
+    ax, ay, az, ayaw = metadata.assumed_base_pose
+    init = self._entity.cfg.init_state
+    sx, sy, sz = (float(v) for v in init.pos)
+    w, x, y, z = (float(v) for v in init.rot)
+    syaw = math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+    dyaw = abs(math.atan2(math.sin(syaw - ayaw), math.cos(syaw - ayaw)))
+    dpos = math.dist((sx, sy, sz), (ax, ay, az))
+    if dpos > self._POSE_TOL_M or dyaw > self._YAW_TOL_RAD:
+      print(
+        f"[mc_rtc] controller config starts at yaw={ayaw:+.3f}, sim resets to "
+        f"yaw={syaw:+.3f} ({dpos:.3f} m, {dyaw:.3f} rad apart); reconciled per "
+        f"episode by the reset teleport.",
+        file=sys.stderr,
+        flush=True,
+      )
 
   def _setup_residual(self, cfg: McRtcResidualActionCfg) -> None:
     """Slice scale/offset/clip down to the residual actuator subset."""

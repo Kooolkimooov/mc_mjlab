@@ -11,6 +11,7 @@ shared-memory writes. The same ``ControllerHost`` serves the in-process path
 from __future__ import annotations
 
 import contextlib
+import math
 import os
 import signal
 import sys
@@ -172,6 +173,196 @@ class HostMetadata:
   force_sensor_names: tuple[str, ...]
   has_named_setters: bool
   has_reset: bool
+  #: Base pose a freshly constructed controller believes it starts from, as
+  #: ``(x, y, z, yaw)`` in the controller's own world frame. Set by the
+  #: controller config's ``init_pos`` for this robot, or by the RobotModule's
+  #: ``default_attitude()`` when that is absent -- and *not* by anything the
+  #: simulation later feeds through ``init()``/``reset()``. The walking plan is
+  #: seeded from it, which is why the action term compares it against the pose
+  #: the sim actually resets to. ``None`` where the binding cannot report it.
+  assumed_base_pose: tuple[float, float, float, float] | None
+
+
+def _seed_real_robot(controller, pose) -> None:
+  """Place the *estimated* robot where the simulation actually put it.
+
+  Base pose only, deliberately. Copying the joints as well (``mbc.q`` plus
+  forward kinematics, on the theory that the observers build their anchor frame
+  from foot poses) was tried and measured: it did not reduce the near-pi failure
+  rate, so it is not carried for a hypothesis the data declined to support.
+
+  ``MCGlobalController``'s attitude-taking ``init``/``reset`` overloads iterate
+  ``controller().robots()`` -- the control robots -- and never touch
+  ``realRobot()``. The real robot therefore keeps the pose the MCController
+  constructor gave it, which is the controller config's ``init_pos``. That is
+  the robot the observer pipeline estimates on and the stabilizer feeds back
+  from, so an episode that starts anywhere else begins with its state estimate
+  in the wrong frame.
+
+  Measured on HRP5P before this: with the sim's reset yaw drawn over +/-pi
+  against a config assuming 0, 39% of episodes died 4-7 s in, before any
+  disturbance, with the controller chasing a motion it had not commanded
+  (measured CoM speed 0.91 m/s against a 0.1 m/s walk target). Failure rose with
+  the disagreement -- 0% at 0.05 and 0.75 rad, 12.9% at 1.55, 81% at 3.05 -- and
+  setting the config's heading to pi inverted it exactly.
+
+  Yaw is what makes it bite: ``KinematicInertial`` takes attitude from the
+  accelerometer, which observes gravity and therefore roll and pitch but *not*
+  heading, so a wrong initial yaw is never corrected.
+
+  Seeding only, never per step: this writes an estimate the observers own, and
+  doing it every step would hand the controller ground truth and quietly delete
+  the state estimation this coupling exists to reproduce.
+  """
+  if not hasattr(controller, "controller"):
+    _warn_seeding_unavailable("MCGlobalController has no controller() accessor")
+    return
+  ctl = controller.controller()
+  real_robot = getattr(ctl, "realRobot", None)
+  if real_robot is None:
+    _warn_seeding_unavailable("MCController has no realRobot() accessor")
+    return
+  # Two steps, and measured to need exactly these two. Ablated at |yaw| >= 1.57,
+  # where the bug used to kill 54-64% of episodes:
+  #   posW alone                 13/38 failed
+  #   posW + observer reset      20/41
+  #   MCController::reset alone  24/40
+  #   posW + MCController::reset  0/27
+  # Zeroing velW/accW, moving the control robot, and resetting the observer
+  # pipeline all turned out to be unnecessary -- the control robot is already
+  # placed correctly by MCGlobalController::reset, and the observers are reset
+  # by the controller reset below.
+  real_robot().posW(pose)
+  # Re-run the controller's own reset now that the estimated robot is in the
+  # right frame. `MCGlobalController::reset()` already called this once -- but
+  # from inside `initController`, i.e. *before* the caller can place
+  # `realRobot()`, so `Walking_controller::reset()` re-derived its world
+  # references and reset the stabilizer task against the estimate's stale pose.
+  # Move first, rebuild second, as the BaselineWalkingController demo's teleport
+  # does.
+  #
+  # `fsm::Controller::reset` guards `startIdleState()` behind a one-shot
+  # `first_reset_`, so this re-entry re-seeds the controller without restarting
+  # the FSM.
+  reset_data = getattr(mc_control, "ControllerResetData", None)
+  if reset_data is None:
+    _warn_seeding_unavailable("mc_control has no ControllerResetData")
+  else:
+    ctl.reset(reset_data(ctl.robot().mbc.q))
+  _warn_if_pose_not_taken(real_robot(), pose)
+
+
+def _warn_seeding_unavailable(reason: str) -> None:
+  """One line when this build cannot do the reset teleport at all.
+
+  Every degraded path in ``_seed_real_robot`` lands here -- its two early
+  returns, and the missing-``ControllerResetData`` case that warns and carries
+  on -- because degrading silently is the whole problem: the walking plan goes
+  back to being seeded in the wrong frame, which cost 35% of episodes before it
+  was found and shows up as nothing but a survival rate.
+
+  Shares :data:`_POSE_WARNED` with :func:`_warn_if_pose_not_taken` -- both are
+  build-level faults, identical for every env of every worker, and one line
+  about the seeding is enough.
+
+  Where it lands: worker stderr, which under the default ``console_output="none"``
+  is an fd-level redirect into the capture file, so this reaches a terminal only
+  with ``console_output`` of "single"/"all", with ``MC_MJLAB_WORKER_LOG_DIR``
+  set, or attached to an error reply. Same as every other diagnostic the host
+  prints -- silencing mc_rtc's C++ spdlog has to be fd-level, and that takes
+  ours with it.
+  """
+  global _POSE_WARNED
+  if _POSE_WARNED:
+    return
+  _POSE_WARNED = True
+  print(
+    f"[mc_rtc] WARNING: cannot seed the estimated robot onto the sim's reset "
+    f"pose ({reason}) -- the walking plan will be built in the controller "
+    f"config's frame, expect the heading-disagreement failures back.",
+    file=sys.stderr,
+    flush=True,
+  )
+
+
+def _warn_if_pose_not_taken(robot, pose) -> None:
+  """One line if the estimated robot did not end up where the sim put it.
+
+  Reads back the *real* robot, the one :func:`_seed_real_robot` writes. Reading
+  the control robot instead cannot detect anything: ``MCGlobalController::reset``
+  has already placed that one at ``pose`` whatever happened here, so the
+  comparison is against the write we did not make. What this does catch is
+  ``realRobot()`` handing back a copy, where ``posW(pose)`` writes to a
+  temporary and the seeding is a silent no-op.
+
+  Warned once per worker: it is a build-level fault, identical for every env.
+  """
+  global _POSE_WARNED
+  if _POSE_WARNED:
+    return
+  got, want = robot.posW(), pose
+  dp = math.dist(
+    (got.translation()[0], got.translation()[1], got.translation()[2]),
+    (want.translation()[0], want.translation()[1], want.translation()[2]),
+  )
+  ge, we = got.rotation(), want.rotation()
+  dyaw = abs(
+    math.atan2(
+      math.sin(
+        math.atan2(float(ge[0, 1]), float(ge[0, 0]))
+        - math.atan2(float(we[0, 1]), float(we[0, 0]))
+      ),
+      math.cos(
+        math.atan2(float(ge[0, 1]), float(ge[0, 0]))
+        - math.atan2(float(we[0, 1]), float(we[0, 0]))
+      ),
+    )
+  )
+  if dp > 0.05 or dyaw > 0.10:
+    _POSE_WARNED = True
+    print(
+      f"[mc_rtc] WARNING: the estimated robot did not take the pose the sim "
+      f"reset to ({dp:.3f} m, {dyaw:.3f} rad off) -- the reset teleport is not "
+      f"working, expect the disagreement failures back.",
+      file=sys.stderr,
+      flush=True,
+    )
+
+
+#: Set once either seeding warning above has fired in this worker.
+_POSE_WARNED = False
+
+
+def _assumed_base_pose(controller) -> tuple[float, float, float, float] | None:
+  """``(x, y, z, yaw)`` a freshly built controller places its robot at.
+
+  Read *before* ``init()``, so it reflects the controller config rather than
+  anything the simulation feeds. ``posW().rotation()`` is SpaceVecAlg's
+  world-to-body matrix, so the robot's forward axis in world coordinates is its
+  first row -- hence ``atan2(E[0, 1], E[0, 0])`` for the heading.
+
+  ``controller().robot()`` and not ``controller.robot()``: the latter is
+  ``outputRobot``, which ``RobotConverter`` fills by copying the joint channels
+  across and nothing else, so its base pose never reflects the config's
+  ``init_pos`` -- it reads as identity whatever the config says. Reading it made
+  this check silently unable to detect the one disagreement it exists for.
+
+  ``None`` on a binding without the ``controller()`` accessor, the same one
+  :func:`_seed_real_robot` guards for. This runs in ``ControllerHost.__init__``,
+  so raising here would fail every worker before ``await_ready()`` -- a hard
+  startup failure in place of a run that merely goes unseeded (and warns).
+  """
+  if not hasattr(controller, "controller"):
+    return None
+  pose = controller.controller().robot().posW()
+  t = pose.translation()
+  e = pose.rotation()
+  return (
+    float(t[0]),
+    float(t[1]),
+    float(t[2]),
+    float(math.atan2(float(e[0, 1]), float(e[0, 0]))),
+  )
 
 
 @dataclass(frozen=True)
@@ -368,12 +559,18 @@ class ControllerHost:
       if robot.hasForceSensor(name)
     ]
 
+    # Guarded like every other controller call: this one reaches into the
+    # MCController, and anything it prints would escape `console_output`.
+    with self._output_guard(self._env_ids[0]):
+      assumed_base_pose = _assumed_base_pose(self._controllers[0])
+
     self._metadata = HostMetadata(
       ref_joint_order=tuple(self._ref_joint_order),
       body_sensor_names=tuple(body_sensor_names),
       force_sensor_names=tuple(force_sensor_names),
       has_named_setters=hasattr(self._controllers[0], "setSensorPositions"),
       has_reset=hasattr(self._controllers[0], "reset"),
+      assumed_base_pose=assumed_base_pose,
     )
     self._layout: IoLayout | None = None
     self._zero_base = np.zeros(len(self._ref_joint_order), dtype=np.float64)
@@ -440,6 +637,7 @@ class ControllerHost:
             q.inverse(), eigen.Vector3d(float(pos[0]), float(pos[1]), float(pos[2]))
           )
           controller.reset({self._robot_key: encoders}, {self._robot_key: pose})
+          _seed_real_robot(controller, pose)
         else:
           controller.setEncoderValues(encoders)
           # init() attitude is [qw, qx, qy, qz, tx, ty, tz].
@@ -454,6 +652,17 @@ class ControllerHost:
           ]
           controller.init(encoders, init_attitude)
           self._initialized[local] = True
+          # init() applies `q.inverse()` to its 7-array internally; the real
+          # robot needs the same PTransformd the reset path builds by hand.
+          _seed_real_robot(
+            controller,
+            sva.PTransformd(
+              eigen.Quaterniond(
+                float(quat[0]), float(quat[1]), float(quat[2]), float(quat[3])
+              ).inverse(),
+              eigen.Vector3d(float(pos[0]), float(pos[1]), float(pos[2])),
+            ),
+          )
 
         controller.running = True
         # Whatever made the QP give up is gone with the new state.
