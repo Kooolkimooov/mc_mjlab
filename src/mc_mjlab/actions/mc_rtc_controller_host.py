@@ -145,7 +145,7 @@ def _seed_real_robot(controller, pose) -> None:
   ctl = controller.controller()
   real_robot = getattr(ctl, "realRobot", None)
   if real_robot is None:
-    _warn_seeding_unavailable("MCController has no realRobot() accessor")
+    _warn_seeding_unavailable("MCController has no realRobot() accessor, deactivate random initial pose")
     return
   # Both steps are needed; ablated. docs/coupling.md#_seed_real_robot
   real_robot().posW(pose)

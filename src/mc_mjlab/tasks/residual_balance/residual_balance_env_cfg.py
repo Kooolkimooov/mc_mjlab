@@ -235,9 +235,11 @@ def _make_env_cfg(
       func=envs_mdp.reset_root_state_uniform,
       mode="reset",
       params={
-        # Deliberately empty, and nothing enforces it; randomising buys nothing
-        # here. docs/coupling.md#reset-pose-seeding
-        "pose_range": {},
+        # Safe only because the reset teleport reconciles the controller's frame
+        # every episode. docs/coupling.md#reset-pose-seeding
+        "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-math.pi, math.pi)},
+        # Not an option: `reset()` takes encoders and a pose but no velocity, so
+        # the controller would start believing something false.
         "velocity_range": {},
       },
     ),

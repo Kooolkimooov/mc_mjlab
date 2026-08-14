@@ -56,10 +56,16 @@ Yaw is what makes it bite: `KinematicInertial` takes attitude from the
 accelerometer, which observes gravity and therefore roll and pitch but *not*
 heading, so a wrong initial yaw is never corrected.
 
-This is why `reset_base`'s `pose_range` is empty in the residual balance task.
-The teleport reconciles a config/sim disagreement per episode, so randomising is
-no longer dangerous — it simply buys nothing, since every actor observation is
-body-frame or robot-internal and the ground is a bare infinite plane.
+**`reset_base`'s `pose_range` depends on this working.** It was emptied while the
+bug was live, and re-enabled (`x`/`y` +/-0.1 m, `yaw` over +/-pi) once the
+teleport reconciled the frames per episode. If the seeding ever silently
+degrades — a binding without `realRobot()`, a workspace rebuild — the
+randomisation turns straight back into the 39% failure, and the only symptom is
+a survival rate. That is what `_warn_seeding_unavailable` exists to shout about,
+and why re-enabling was checked against a measured baseline rather than assumed.
+
+`velocity_range` stays empty regardless: `reset()` takes encoders and a pose but
+no velocity, so the controller would start believing something false.
 
 ### _seed_real_robot
 
