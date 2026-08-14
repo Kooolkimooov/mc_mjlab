@@ -280,6 +280,23 @@ def _make_env_cfg(
     "controller_ref_vel": ObservationTermCfg(
       func=mdp.controller_reference_velocity, history_length=5
     ),
+    # The plan the two tracking rewards actually score, which the actor was
+    # missing entirely: `zmp_tracking` pays for the measured centre of pressure
+    # sitting where `planned_zmp` wants it and `com_velocity_tracking` for the
+    # CoM matching `control_com_vel`, but neither quantity reached the policy.
+    # `controller_ref_vel` is joint-level and an integration removed from both.
+    # Being scored against an invisible target leaves "intervene less" as the
+    # only safe strategy, which is what the iteration-200 measurement showed:
+    # mean action down to 14% of clip, performance approaching the zero-residual
+    # baseline from below instead of passing it. Controller-internal and exact,
+    # so no noise, and given the same history as the reference velocity because
+    # the plan steps foot to foot and the phase is the point.
+    "controller_planned_zmp": ObservationTermCfg(
+      func=mdp.controller_planned_zmp_offset, history_length=5
+    ),
+    "controller_planned_com_vel": ObservationTermCfg(
+      func=mdp.controller_planned_com_velocity, history_length=5
+    ),
   }
 
   # The critic sees the same signals without observation noise. Copy the terms

@@ -4,10 +4,29 @@ mjlab's own terms cover generic robot state; these exist because a residual
 task needs to talk about the controller itself: how far the policy departs
 from it (``action_l2``), what it is asking for versus what it got
 (``controller_position_error``, ``controller_reference_velocity``,
-``zmp_tracking``, ``com_velocity_tracking``), whether it is still generating a
-gait (``controller_reference_motion``) and whether it has given up
-(``controller_failed``). What they compare against is the raw controller output
-with the residual excluded, read off the action term.
+``zmp_tracking``, ``com_velocity_tracking``), what it intends
+(``controller_planned_zmp_offset``, ``controller_planned_com_velocity``),
+whether it is still generating a gait (``controller_reference_motion``) and
+whether it has given up (``controller_failed``). What they compare against is
+the raw controller output with the residual excluded, read off the action term.
+
+The two ``controller_planned_*`` terms are observations, not rewards, and they
+exist to close a gap the residual balance task ran into: it *pays* for tracking
+``planned_zmp`` and ``control_com_vel`` while showing the actor neither, so the
+policy was scored against a plan it could not see. What it could see of the
+controller was ``controller_reference_velocity``, joint-level and one
+integration removed from the centroidal quantities the reward is written on.
+A policy with no way to know when intervening helps has one safe strategy left
+-- intervene less -- and that is what the measurements showed it converging to:
+mean action falling 31% -> 14% of its clip while performance approached the
+zero-residual baseline from below rather than passing it.
+
+Both are controller-internal and exact, so they carry no observation noise, the
+same as ``controller_reference_velocity``. They are *plans*, not errors: the
+measured side of ``com_velocity_tracking`` is largely inferable from
+``base_lin_vel``, but the measured side of ``zmp_tracking`` -- the centre of
+pressure under the feet -- is in no observation group either, so adding it is
+the obvious next thing to try if these two are not enough on their own.
 
 ``controller_reference_motion`` is here but is *not* wired into the residual
 balance task, and should not be without re-measuring: the controller's
@@ -86,6 +105,24 @@ def controller_reference_velocity(
   """The controller's joint-velocity reference: where its gait is headed."""
   term = _residual_term(env, action_name)
   return _restrict(term, term.controller_reference("alpha"))
+
+
+def controller_planned_zmp_offset(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """The controller's planned CoM-to-ZMP offset: where it means to push.
+
+  The observation face of ``planned_zmp_offset``, which the ZMP reward and metric
+  score against -- same quantity, so they cannot drift apart.
+  """
+  return planned_zmp_offset(env, action_name)
+
+
+def controller_planned_com_velocity(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """The CoM velocity the controller's plan calls for."""
+  return _residual_term(env, action_name).controller_vector("control_com_vel")
 
 
 def base_progress_tanh(
