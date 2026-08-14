@@ -1,3 +1,6 @@
+This directory is mostly here for agents to documents findings and choices
+out of source code in order to keep it readable.
+
 # Why the numbers are what they are
 
 The measurement record behind this repo's constants and design choices. It lives
