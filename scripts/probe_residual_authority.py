@@ -1,31 +1,4 @@
-"""Does the residual actually move the centre of pressure?
-
-The residual_balance reward proved to be blind to the policy: with episode length
-divided out, the per-step ``zmp_tracking`` rate is the same for a zero residual
-and for every trained checkpoint (0.01183 / 0.01187 / 0.01196, SE 0.00015). Two
-things can cause that -- the reward is badly shaped, or the *action cannot reach
-the objective at all*. This settles the second before anyone spends time on the
-first, because at ``residual_scale = 0.01`` rad (~0.57 degrees of joint offset)
-it is entirely possible the residual simply cannot shift the centre of pressure.
-
-The probe drives a **constant** residual instead of a policy and measures
-``mdp.zmp_error`` -- the distance in metres between the measured centre of
-pressure and the one mc_rtc planned. A constant offset is the bluntest possible
-input: if a full-scale one does not move that distance, nothing a policy does
-will either, and the reward is not the binding constraint.
-
-It also bins the error by *time since the last push*, which gives the recovery
-profile -- how long after a disturbance the tracking error stays elevated. That
-is the window a disturbance-gated reward should pay on, so the sweep sizes the
-next change as well as justifying it.
-
-  uv run python scripts/probe_residual_authority.py --level 0    --minutes 10
-  uv run python scripts/probe_residual_authority.py --level 1.0  --pattern alternating
-  uv run python scripts/probe_residual_authority.py --level 1.0  --pattern noise
-
-Compare runs on ``zmp_error mean``. Authority is adequate if a full-scale
-constant residual shifts it by >= 0.007 m (20% of the ~0.036 m operating error).
-"""
+"""Does a constant residual move the centre of pressure? -- docs/evaluation.md."""
 
 from __future__ import annotations
 
@@ -99,17 +72,14 @@ def main() -> None:
     num_workers=args.num_workers,
     console_output="none",
   )
-  # Same reason as the baseline script: `step()` resets terminated envs in place
-  # before returning, which would erase the episode this wants to measure.
+  # `step()` would otherwise reset in place and erase what this measures.
   cfg.auto_reset = False
   env = ManagerBasedRlEnv(cfg, device=args.device)
 
   dim = env.action_manager.total_action_dim
   action = _build_action(args.pattern, args.level, env.num_envs, dim, env.device)
 
-  # The ZMP error is read through the same sensor plumbing the reward uses, so
-  # this measures exactly the quantity `zmp_tracking` is scored on -- in metres,
-  # before the kernel flattens it.
+  # The same plumbing the reward uses, in metres before the kernel flattens it.
   sensors = mdp._ZmpSensors(env, mdp.GROUND_CONTACT_SENSORS, "robot")
 
   print(
@@ -134,21 +104,12 @@ def main() -> None:
     err = torch.linalg.vector_norm(measured - mdp.planned_zmp_offset(env), dim=1)
     grounded = normal_force >= 20.0
 
-    # Steps since the push term last actually fired, from the term's own
-    # record. Watching the event manager's interval countdown instead -- the
-    # obvious way, and the way this was written first -- counts pushes that
-    # never landed: `EventManager` re-samples the countdown whenever the term
-    # fires, including the ticks `push_and_record` suppresses during
-    # `PUSH_WARMUP_S`. `steps_since_push` also reports a huge age for a push
-    # older than the current episode, so a freshly reset env drops out of `keep`
-    # below instead of binning its ~4 s posture settle as push recovery.
+    # From the term's own record, not the interval countdown, which also ticks
+    # for suppressed pushes. docs/evaluation.md#binning-by-time-since-a-push
     age = mdp.steps_since_push(env)
 
     slot = (age // BIN_STEPS).clamp(max=NUM_BINS - 1)
-    # `age >= 1` is `recovery_tracking`'s own gate: at age 0 the push has been
-    # applied but no physics has run on it yet, so that sample predates its
-    # effect. Matching the gate keeps these bins aligned with the steps the
-    # reward is paid on, which is what the profile is used to size.
+    # `age >= 1` matches `recovery_tracking`'s gate; age 0 predates the effect.
     keep = grounded & (age >= 1) & (age < NUM_BINS * BIN_STEPS)
     if keep.any():
       bin_sum.index_add_(0, slot[keep], err[keep].double())
@@ -182,10 +143,8 @@ def main() -> None:
       continue
     t0 = i * BIN_STEPS * env.step_dt
     rows.append((t0, s / c, int(c)))
-  # Bins are dropped below n=50, so "no bin reached 3 s" is a normal outcome of
-  # a short run or of episodes that end before the profile fills -- and it used
-  # to raise `StatisticsError` here, after `env.close()` and before `--dump`,
-  # losing the whole run. The bars are relative to this level, so they go too.
+  # "No bin reached 3 s" is normal on a short run, and used to raise
+  # `StatisticsError` here -- after `env.close()` and before `--dump`.
   settled = [m for t, m, _ in rows if t >= 3.0]
   tail = statistics.fmean(settled) if settled else float("nan")
   for t0, m, c in rows[:24]:

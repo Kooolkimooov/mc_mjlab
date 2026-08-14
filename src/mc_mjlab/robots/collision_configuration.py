@@ -1,33 +1,11 @@
-"""Collision handling for the mc_rtc robot entities
-
-The mc_mujoco robot XMLs mark collision geoms through MJCF default classes
-(``class="collision"``) but leave them unnamed, and everything in mjlab that
-selects geoms does so by regex on their names. So the collision lifecycle is:
-
-1. ``name_remaining_collision_geoms`` / ``is_collision_geom`` -- give the
-   unnamed geoms stable names, so presets and randomization can address them.
-2. ``group_and_disable_collision_geoms`` -- stamp the geom-group convention
-   (visual 2 / collision 3 / sites 4) and turn every collision off, so a
-   consumer re-enables a chosen set rather than inheriting the XML's.
-3. re-enable, one of two ways:
-   - ``get_collision_presets`` -- ``CollisionCfg`` sets for a robot whose geoms
-     are named (mjlab applies them by regex), or
-   - ``enable_all_collision_geoms`` -- the blanket fallback for a robot whose
-     geoms are still unnamed, keyed on the group-3 mark from step 2.
-
-Keeping the whole story in one file keeps the group-3 convention defined and
-consumed in the same place: ``group_and_disable_collision_geoms`` sets it,
-``enable_all_collision_geoms`` reads it, and they must not drift.
-"""
+"""Collision handling for the mc_rtc robot entities"""
 
 from __future__ import annotations
 
 import mujoco
 from mjlab.utils.spec_config import CollisionCfg
 
-##
 # Geom naming.
-##
 
 
 def is_collision_geom(geom: mujoco.MjsGeom) -> bool:
@@ -89,9 +67,7 @@ def name_remaining_collision_geoms(spec: mujoco.MjSpec, prefix: str) -> tuple[st
   return tuple(assigned)
 
 
-##
 # Geom-group convention + default-off.
-##
 
 COLLISION_GROUP = 3
 """Geom group the collision geoms are stamped with; the fallback keys on it."""
@@ -116,9 +92,7 @@ def enable_all_collision_geoms(spec: mujoco.MjSpec) -> None:
       geom.conaffinity = 1
 
 
-##
 # Named-geom presets.
-##
 
 
 def get_collision_presets(

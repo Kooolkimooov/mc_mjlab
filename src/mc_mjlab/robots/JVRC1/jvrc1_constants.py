@@ -23,9 +23,7 @@ from mc_mjlab.robots.pd_actuator_configuration import (
   get_pd_actuator_cfgs,
 )
 
-##
 # MJCF and assets.
-##
 
 JVRC1_MC_RTC_MODULE_NAME = "JVRC1"
 JVRC1_MC_RTC_ASSETS_DIR = MC_MUJOCO_SHARE_DIR / "JVRC1"
@@ -53,22 +51,10 @@ JVRC1_FOOT_BODIES: dict[str, str] = {
 }
 
 
-# JVRC1's hands are an underactuated grasp: five finger joints per side follow
-# ``<side>_UTHUMB`` through active mjEQ_JOINT equalities with fixed gear ratios
-# (+/-1, +/-3). That leaves two coherent configurations, and the spec and the
-# actuator set have to pick the same one:
-#
-#   True  (default) -- keep the couplings and leave the five slaves per hand
-#     unactuated. One commanded grasp DoF per hand, the fingers following it;
-#     this is the joint set mc_mujoco motorizes.
-#   False -- delete the couplings and actuate all 44, giving mc_rtc the
-#     per-finger control its refJointOrder and its 44 gain rows imply. Pick
-#     this for a task that actually manipulates something.
-#
-# Actuating a slave while its equality is live puts the PD and the constraint
-# solver on one DoF, pulling against each other. The whole finger stance is
-# zero and zero satisfies every ratio, so that conflict stays invisible until
-# something commands a finger away from zero -- which is why it can hide.
+# True keeps the finger equalities and leaves the slaves unactuated (what
+# mc_mujoco motorizes); False deletes them and actuates all 44. Actuating a
+# slave while its equality is live is invisible until a finger leaves zero.
+# docs/robots.md#actuated-joint-sets
 JVRC1_COUPLED_FINGERS = True
 
 
@@ -117,9 +103,7 @@ def get_non_actuated_joints(
   return _coupled_finger_names()
 
 
-##
 # Joint tables.
-##
 
 
 def get_residual_joints(
@@ -133,9 +117,7 @@ def get_residual_joints(
   )
 
 
-##
 # Collision presets. See collision.get_collision_presets for the contact model.
-##
 
 JVRC1_FOOT_COLLISION_EXPR = r"^(left|right)_foot_collision$"
 

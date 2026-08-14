@@ -1,11 +1,4 @@
-"""Residual joint-position action term backed by per-env mc_rtc controllers.
-
-Adds an RL residual on top of each mc_rtc controller's joint-position output
-(velocity tracks the raw output). The worker pool, shared-memory I/O, the
-one-period-behind dispatch pipeline and the target interpolation all live in
-``mc_rtc_residual_action.McRtcResidualActionBase``; this module only maps the
-interpolated controller output to position/velocity targets.
-"""
+"""Residual joint-position action term backed by per-env mc_rtc controllers."""
 
 from __future__ import annotations
 
@@ -32,11 +25,7 @@ class McRtcResidualJointPositionActionCfg(McRtcResidualActionCfg):
 
 
 class McRtcResidualJointPositionAction(McRtcResidualActionBase):
-  """mc_rtc residual action driving joint position + velocity targets.
-
-  The RL residual is added to the interpolated controller position; velocity
-  tracks the raw controller output (no residual).
-  """
+  """mc_rtc residual action driving joint position + velocity targets."""
 
   cfg: McRtcResidualJointPositionActionCfg
 

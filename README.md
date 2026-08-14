@@ -19,6 +19,7 @@ src/mc_mjlab/
   tasks/residual_balance/     # the RL task: __init__ registers the ids, env cfg + PPO cfg alongside
   tasks/zero_residual/        # the demo task: mc_rtc alone, RL residual left at zero
   utils/                      # task-id construction, mc_rtc.yaml reading (imports no mjlab)
+docs/                         # why the numbers are what they are (see docs/README.md)
 etc/
   mc_rtc.yaml                 # mc_rtc controller config
 scripts/

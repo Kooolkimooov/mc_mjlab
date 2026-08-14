@@ -1,19 +1,4 @@
-"""Reusable base for residual action terms backed by per-env mc_rtc controllers.
-
-Owns the control law: per-substep interpolation of the controller outputs, the
-one-period-behind dispatch sequencing that overlaps the workers' solve with the
-GPU sim, and the RL residual plumbing. It leans on two collaborators: the
-transport (``mc_rtc_controller_pool.ControllerPool`` -- processes, pipes, shared
-blocks) and the sim I/O wiring (``mc_rtc_controller_io_binding.ControllerIoBinding`` -- model
-introspection, ``IoLayout`` and per-step input assembly).
-
-Subclasses supply only what differs between residual types: which controller
-output channels to consume (``output_channels``, matching what the host writes),
-how to seed those channels at reset (``_seed_interpolation``) and how to map the
-interpolated outputs plus residual onto the entity's actuator targets
-(``_apply_control``). See ``mc_rtc_residual_joint_position_actions`` for the
-position/velocity subclass.
-"""
+"""Reusable base for residual action terms backed by per-env mc_rtc controllers."""
 
 from __future__ import annotations
 
@@ -41,10 +26,7 @@ if TYPE_CHECKING:
 
 @dataclass(kw_only=True)
 class McRtcResidualActionCfg(BaseActionCfg):
-  """Shared configuration for mc_rtc residual action terms.
-
-  Abstract: subclasses add a ``build`` returning their concrete action term.
-  """
+  """Shared configuration for mc_rtc residual action terms."""
 
   mc_rtc_config_path: str
   """Path to the mc_rtc configuration file."""
@@ -105,11 +87,7 @@ class McRtcResidualActionCfg(BaseActionCfg):
 
 
 class McRtcResidualActionBase(BaseAction):
-  """mc_rtc residual action base: steps controllers via a pool, adds RL residual.
-
-  Concrete subclasses set ``output_channels`` and implement ``_seed_interpolation``
-  and ``_apply_control``.
-  """
+  """mc_rtc residual action base: steps controllers via a pool, adds RL residual."""
 
   cfg: McRtcResidualActionCfg
 
@@ -181,19 +159,7 @@ class McRtcResidualActionBase(BaseAction):
   _YAW_TOL_RAD = 0.10
 
   def _check_initial_pose_agreement(self, metadata: HostMetadata) -> None:
-    """One line if the controller's assumed start pose differs from the sim's.
-
-    Informational only. The host reconciles the two at every reset -- it
-    teleports the controller's robots onto the simulation's pose and re-runs
-    ``MCController::reset`` so the walking references rebuild there -- so a
-    disagreement is no longer the silent 35%-of-episodes fault it used to be.
-    The load-bearing check now lives worker-side in ``_warn_if_pose_not_taken``,
-    which reads the pose back off the estimated robot *after* that teleport and
-    complains only when it did not take -- alongside
-    ``_warn_seeding_unavailable``, which covers the builds where the teleport
-    cannot happen at all. Those are also the builds that report no assumed pose,
-    which is why nothing is said here about a ``None``.
-    """
+    """One line if the controller's assumed start pose differs from the sim's."""
     if metadata.assumed_base_pose is None:
       return
     ax, ay, az, ayaw = metadata.assumed_base_pose
@@ -279,10 +245,8 @@ class McRtcResidualActionBase(BaseAction):
       for j, v in enumerate(values)
     ]
     norm = sum(v * v for v in values) ** 0.5
-    # Flushed: this is meant to be read live next to the viewer, and Python
-    # block-buffers into a pipe while mc_rtc's spdlog writes straight to fd 1 --
-    # unflushed the two interleave wrongly, or vanish entirely if the session is
-    # killed rather than exited.
+    # Flushed: Python block-buffers into a pipe while spdlog writes to fd 1, so
+    # unflushed the two interleave wrongly. docs/coupling.md#console-output
     print("[residual] " + " ".join(cells) + f" {norm:6.3f}", flush=True)
 
   def _alloc_interpolation_buffers(self) -> None:

@@ -1,12 +1,4 @@
-"""Sim <-> mc_rtc input wiring.
-
-Translates mjlab sim state into the mc_rtc input block and owns the ``IoLayout``
-that describes the shared blocks. At construction it introspects the MuJoCo model
-(target->dof addresses, the root free-joint, IMU/force sensor addresses), decides
-the sensor routing and builds the layout; per step it fills the input block from
-``entity.data``/``sim.data``. This is the mjlab-coupled counterpart to the
-torch-free ``ControllerPool`` (transport) and ``ControllerHost`` (worker compute).
-"""
+"""Sim <-> mc_rtc input wiring."""
 
 from __future__ import annotations
 
@@ -95,12 +87,7 @@ def zero_pd_gains(entity, target_names: Sequence[str]) -> int:
 
 
 class ControllerIoBinding:
-  """Owns the ``IoLayout`` and fills the mc_rtc input block from the sim.
-
-  Resolves all model addresses and the sensor routing once at construction;
-  ``fill_controller_input``/``reset_controller_input`` write the shared input
-  array each step/reset.
-  """
+  """Owns the ``IoLayout`` and fills the mc_rtc input block from the sim."""
 
   def __init__(
     self,

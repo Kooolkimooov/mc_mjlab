@@ -1,12 +1,4 @@
-"""Worker-side mc_rtc controller host.
-
-Owns everything that touches the mc_rtc bindings; imports only numpy, the
-stdlib and the bindings -- never torch or mjlab, so it stays light in worker
-processes. I/O flows through two ``IoLayout``-shaped shared-memory blocks;
-commands travel over a pipe per worker, whose send/recv also orders the
-shared-memory writes. The same ``ControllerHost`` serves the in-process path
-(``use_worker_processes=False``).
-"""
+"""Worker-side mc_rtc controller host."""
 
 from __future__ import annotations
 
@@ -107,23 +99,7 @@ GRAVITY = 9.81
 
 
 def _planned_zmp(robot: Any) -> Any:
-  """The ZMP the controller is commanding, from the control robot's centroid.
-
-  ``rbd::computeCentroidalZMP`` (RBDyn/src/RBDyn/ZMP.cpp) with the ground as the
-  ZMP plane, applied to the QP's own solution: ``TasksQPSolver`` runs
-  ``forwardAcceleration`` after every solve, so the control robot's
-  ``comAcceleration`` is the commanded one and inverting the LIPM relation on it
-  recovers the ZMP that motion implies.
-
-  This is the plan as the QP hands it down, not the walking MPC's raw
-  ``zmpTarget``: the two differ by ismpc's ZMP-delay compensation (it builds the
-  stabilizer's CoM-acceleration target from ``admittanceTarget``,
-  Walking_controller.cpp:765-793) and by whatever the QP traded away.
-  ``zmpTarget`` itself is reachable only through the controller's datastore,
-  which the mc_rtc Python bindings do not expose; this one needs nothing beyond
-  stock ``mc_rbdyn.Robot``, and it is arguably the more apt thing to reward --
-  it is what the controller is asking of the world *now*.
-  """
+  """The ZMP the controller is commanding, from the control robot's centroid."""
   com = robot.com
   com_acc = robot.comAcceleration
   denom = com_acc.z() + GRAVITY
@@ -136,30 +112,13 @@ def _planned_zmp(robot: Any) -> Any:
   )
 
 
-# Per-env 3-vector outputs a host can publish; ``IoLayout.output_vectors``
-# names a subset of these and the action term reads them back by the same name.
-#
-# Each reader takes the **control** robot (``MCController.robot()``) and returns
-# an ``eigen.Vector3d`` in the controller's own world frame. Not
-# ``MCGlobalController.robot()``, which every other read here goes through: that
-# one is the *canonical output* robot (`MAKE_ROBOTS_ACCESSOR(robot,
-# outputRobot)`), which `RobotConverter` fills by copying q/alpha/alphaD across
-# and nothing else -- it never runs forwardVelocity/forwardAcceleration, so its
-# `comVelocity`/`comAcceleration` read exactly zero and anything derived from
-# them is silently wrong rather than absent.
+# Per-env 3-vectors, read off the *control* robot -- not the canonical one
+# every other read here uses. docs/coupling.md#vector_outputs
 VECTOR_OUTPUTS: dict[str, Callable[[Any], Any]] = {
   "planned_zmp": _planned_zmp,
-  # The control robot's CoM, in that same frame. The planned ZMP is only
-  # comparable with the sim's once this is subtracted from both sides: the
-  # controller places its plan against the *estimated* state (the
-  # KinematicInertial observer's legged odometry), which drifts from MuJoCo's
-  # ground truth, and that drift would otherwise read as a tracking error.
-  # CoM rather than base because the LIPM relation the plan comes from is
-  # written on the CoM-to-ZMP offset.
+  # Subtracted from both sides to cancel observer drift.
   "control_com": lambda robot: robot.com,
-  # The CoM velocity the QP is commanding. Needs no drift correction at all: the
-  # observers integrate *position* from the anchor frame, so that is what drifts
-  # -- velocity is differential and directly comparable with MuJoCo's.
+  # Differential, so it needs no drift correction.
   "control_com_vel": lambda robot: robot.comVelocity,
 }
 
@@ -173,47 +132,13 @@ class HostMetadata:
   force_sensor_names: tuple[str, ...]
   has_named_setters: bool
   has_reset: bool
-  #: Base pose a freshly constructed controller believes it starts from, as
-  #: ``(x, y, z, yaw)`` in the controller's own world frame. Set by the
-  #: controller config's ``init_pos`` for this robot, or by the RobotModule's
-  #: ``default_attitude()`` when that is absent -- and *not* by anything the
-  #: simulation later feeds through ``init()``/``reset()``. The walking plan is
-  #: seeded from it, which is why the action term compares it against the pose
-  #: the sim actually resets to. ``None`` where the binding cannot report it.
+  #: Base pose a freshly built controller believes it starts from, from the
+  #: config's ``init_pos``. ``None`` where the binding cannot report it.
   assumed_base_pose: tuple[float, float, float, float] | None
 
 
 def _seed_real_robot(controller, pose) -> None:
-  """Place the *estimated* robot where the simulation actually put it.
-
-  Base pose only, deliberately. Copying the joints as well (``mbc.q`` plus
-  forward kinematics, on the theory that the observers build their anchor frame
-  from foot poses) was tried and measured: it did not reduce the near-pi failure
-  rate, so it is not carried for a hypothesis the data declined to support.
-
-  ``MCGlobalController``'s attitude-taking ``init``/``reset`` overloads iterate
-  ``controller().robots()`` -- the control robots -- and never touch
-  ``realRobot()``. The real robot therefore keeps the pose the MCController
-  constructor gave it, which is the controller config's ``init_pos``. That is
-  the robot the observer pipeline estimates on and the stabilizer feeds back
-  from, so an episode that starts anywhere else begins with its state estimate
-  in the wrong frame.
-
-  Measured on HRP5P before this: with the sim's reset yaw drawn over +/-pi
-  against a config assuming 0, 39% of episodes died 4-7 s in, before any
-  disturbance, with the controller chasing a motion it had not commanded
-  (measured CoM speed 0.91 m/s against a 0.1 m/s walk target). Failure rose with
-  the disagreement -- 0% at 0.05 and 0.75 rad, 12.9% at 1.55, 81% at 3.05 -- and
-  setting the config's heading to pi inverted it exactly.
-
-  Yaw is what makes it bite: ``KinematicInertial`` takes attitude from the
-  accelerometer, which observes gravity and therefore roll and pitch but *not*
-  heading, so a wrong initial yaw is never corrected.
-
-  Seeding only, never per step: this writes an estimate the observers own, and
-  doing it every step would hand the controller ground truth and quietly delete
-  the state estimation this coupling exists to reproduce.
-  """
+  """Place the *estimated* robot where the simulation actually put it."""
   if not hasattr(controller, "controller"):
     _warn_seeding_unavailable("MCGlobalController has no controller() accessor")
     return
@@ -222,28 +147,10 @@ def _seed_real_robot(controller, pose) -> None:
   if real_robot is None:
     _warn_seeding_unavailable("MCController has no realRobot() accessor")
     return
-  # Two steps, and measured to need exactly these two. Ablated at |yaw| >= 1.57,
-  # where the bug used to kill 54-64% of episodes:
-  #   posW alone                 13/38 failed
-  #   posW + observer reset      20/41
-  #   MCController::reset alone  24/40
-  #   posW + MCController::reset  0/27
-  # Zeroing velW/accW, moving the control robot, and resetting the observer
-  # pipeline all turned out to be unnecessary -- the control robot is already
-  # placed correctly by MCGlobalController::reset, and the observers are reset
-  # by the controller reset below.
+  # Both steps are needed; ablated. docs/coupling.md#_seed_real_robot
   real_robot().posW(pose)
-  # Re-run the controller's own reset now that the estimated robot is in the
-  # right frame. `MCGlobalController::reset()` already called this once -- but
-  # from inside `initController`, i.e. *before* the caller can place
-  # `realRobot()`, so `Walking_controller::reset()` re-derived its world
-  # references and reset the stabilizer task against the estimate's stale pose.
-  # Move first, rebuild second, as the BaselineWalkingController demo's teleport
-  # does.
-  #
-  # `fsm::Controller::reset` guards `startIdleState()` behind a one-shot
-  # `first_reset_`, so this re-entry re-seeds the controller without restarting
-  # the FSM.
+  # Move first, rebuild second: the reset inside `initController` ran before
+  # the caller could place `realRobot()`. docs/coupling.md#_seed_real_robot
   reset_data = getattr(mc_control, "ControllerResetData", None)
   if reset_data is None:
     _warn_seeding_unavailable("mc_control has no ControllerResetData")
@@ -253,25 +160,7 @@ def _seed_real_robot(controller, pose) -> None:
 
 
 def _warn_seeding_unavailable(reason: str) -> None:
-  """One line when this build cannot do the reset teleport at all.
-
-  Every degraded path in ``_seed_real_robot`` lands here -- its two early
-  returns, and the missing-``ControllerResetData`` case that warns and carries
-  on -- because degrading silently is the whole problem: the walking plan goes
-  back to being seeded in the wrong frame, which cost 35% of episodes before it
-  was found and shows up as nothing but a survival rate.
-
-  Shares :data:`_POSE_WARNED` with :func:`_warn_if_pose_not_taken` -- both are
-  build-level faults, identical for every env of every worker, and one line
-  about the seeding is enough.
-
-  Where it lands: worker stderr, which under the default ``console_output="none"``
-  is an fd-level redirect into the capture file, so this reaches a terminal only
-  with ``console_output`` of "single"/"all", with ``MC_MJLAB_WORKER_LOG_DIR``
-  set, or attached to an error reply. Same as every other diagnostic the host
-  prints -- silencing mc_rtc's C++ spdlog has to be fd-level, and that takes
-  ours with it.
-  """
+  """One line when this build cannot do the reset teleport at all."""
   global _POSE_WARNED
   if _POSE_WARNED:
     return
@@ -286,17 +175,7 @@ def _warn_seeding_unavailable(reason: str) -> None:
 
 
 def _warn_if_pose_not_taken(robot, pose) -> None:
-  """One line if the estimated robot did not end up where the sim put it.
-
-  Reads back the *real* robot, the one :func:`_seed_real_robot` writes. Reading
-  the control robot instead cannot detect anything: ``MCGlobalController::reset``
-  has already placed that one at ``pose`` whatever happened here, so the
-  comparison is against the write we did not make. What this does catch is
-  ``realRobot()`` handing back a copy, where ``posW(pose)`` writes to a
-  temporary and the seeding is a silent no-op.
-
-  Warned once per worker: it is a build-level fault, identical for every env.
-  """
+  """One line if the estimated robot did not end up where the sim put it."""
   global _POSE_WARNED
   if _POSE_WARNED:
     return
@@ -334,24 +213,7 @@ _POSE_WARNED = False
 
 
 def _assumed_base_pose(controller) -> tuple[float, float, float, float] | None:
-  """``(x, y, z, yaw)`` a freshly built controller places its robot at.
-
-  Read *before* ``init()``, so it reflects the controller config rather than
-  anything the simulation feeds. ``posW().rotation()`` is SpaceVecAlg's
-  world-to-body matrix, so the robot's forward axis in world coordinates is its
-  first row -- hence ``atan2(E[0, 1], E[0, 0])`` for the heading.
-
-  ``controller().robot()`` and not ``controller.robot()``: the latter is
-  ``outputRobot``, which ``RobotConverter`` fills by copying the joint channels
-  across and nothing else, so its base pose never reflects the config's
-  ``init_pos`` -- it reads as identity whatever the config says. Reading it made
-  this check silently unable to detect the one disagreement it exists for.
-
-  ``None`` on a binding without the ``controller()`` accessor, the same one
-  :func:`_seed_real_robot` guards for. This runs in ``ControllerHost.__init__``,
-  so raising here would fail every worker before ``await_ready()`` -- a hard
-  startup failure in place of a run that merely goes unseeded (and warns).
-  """
+  """``(x, y, z, yaw)`` a freshly built controller places its robot at."""
   if not hasattr(controller, "controller"):
     return None
   pose = controller.controller().robot().posW()
@@ -367,26 +229,7 @@ def _assumed_base_pose(controller) -> tuple[float, float, float, float] | None:
 
 @dataclass(frozen=True)
 class IoLayout:
-  """Column layout of the shared input/output blocks (one row per env).
-
-  Input row::
-
-    [0, T)          target-joint positions (encoders)
-    [T, 2T)         target-joint velocities
-    [2T, 3T)        target-joint torques (qfrc_actuator)
-    [3T, 3T+16)     root block; the first 7 are always pos(3) + quat wxyz(4):
-                      named routing:   qpos7, qvel6, qacc3
-                      singular routing: pos3, quat4, linvel3, omega_body3, accel3
-    [imu_off, ...)  6 per IMU body sensor: gyro(3), accel(3)
-    [wrench_off, ..) 6 per force sensor: force(3), torque(3) as MuJoCo reads them
-
-  Output row: one T-wide block per entry of ``output_channels``, in order --
-  e.g. the default ``("q", "alpha")`` gives q in ``[0, T)`` and alpha in
-  ``[T, 2T)``, for the target joints -- followed by a single status column at
-  ``status_off`` carrying 1.0 once the controller has failed (see
-  ``ControllerHost.step_env``), then 3 columns per entry of ``output_vectors``
-  from ``vector_off``.
-  """
+  """Column layout of the shared input/output blocks (one row per env)."""
 
   num_targets: int
   named_routing: bool
@@ -455,13 +298,7 @@ def attach_shm(name: str, shape: tuple[int, int]) -> _ShmHandle:
 
 
 class ControllerHost:
-  """Owns a slice of MCGlobalControllers and steps/resets them from I/O rows.
-
-  ``env_ids`` maps global env indices to local controllers; all I/O goes
-  through ``IoLayout``-shaped arrays. ``allowed_output_envs`` lists the global
-  env ids whose controllers may write to the console; ``None`` (the worker
-  path, where silencing is fd-level for the whole process) suppresses nothing.
-  """
+  """Owns a slice of MCGlobalControllers and steps/resets them from I/O rows."""
 
   def __init__(
     self,
@@ -773,10 +610,8 @@ class ControllerHost:
 
     controller.setJointTorques(self._expand(row[2 * T : 3 * T], self._zero_base))
 
-    # mc_mujoco stops the whole sim when run() reports failure. A trainer
-    # cannot: the QP giving up is the normal end of a fall, and it must cost
-    # one episode, not the run. Latch it and let the trainer terminate the env
-    # (the last good outputs stay in the block for the substeps still to come).
+    # A failed QP is the normal end of a fall: latch it and cost one episode,
+    # not the run. mc_mujoco stops the whole sim instead.
     ok = controller.run()
     self._failed[local] = not ok
 
@@ -792,11 +627,8 @@ class ControllerHost:
         out_row[base + k] = values[j][0] if j != -1 and len(values[j]) > 0 else 0.0
 
     if self._vector_readers:
-      # See VECTOR_OUTPUTS: these read the *control* robot, not the canonical
-      # one `controller.robot()` above hands out. Re-resolved every step and
-      # never cached: MCGlobalController::reset() erases the controller and
-      # builds a new one, so any handle into it dies at the next env reset --
-      # caching one segfaults the worker a reset later, not here.
+      # Re-resolved every step, never cached: a reset rebuilds the controller and
+      # a stale handle segfaults a reset later. docs/coupling.md#vector_outputs
       control_robot = controller.controller().robot()
       base = layout.vector_off
       for reader in self._vector_readers:
@@ -863,9 +695,7 @@ def worker_main(
 
     faulthandler.enable()
   elif suppress_output:
-    # spdlog writes from C++, so only an fd-level redirect silences it. A
-    # capture file rather than /dev/null so error replies can attach mc_rtc's
-    # own error text; reply_ok truncates it to keep it from growing.
+    # A capture file, not /dev/null, so error replies can attach mc_rtc's text.
     capture = tempfile.TemporaryFile()
     os.dup2(capture.fileno(), 1)
     os.dup2(capture.fileno(), 2)

@@ -22,9 +22,7 @@ from mc_mjlab.robots.pd_actuator_configuration import (
   get_pd_actuator_cfgs,
 )
 
-##
 # MJCF and assets.
-##
 
 RHPS1_MC_RTC_MODULE_NAME = "RHPS1_MuJoCo"
 RHPS1_MC_RTC_ASSETS_DIR = MC_MUJOCO_SHARE_DIR / "RHPS1"
@@ -65,16 +63,11 @@ def get_spec() -> mujoco.MjSpec:
   return spec
 
 
-##
 # Joint tables.
-##
 
 
-# Every joint in the mc_rtc refJointOrder is actuated and receives the RL
-# residual. RHPS1main has no fingers, so this is all 30 rotary joints (the 8
-# passive slide linkages are zero-DoF in the module and excluded), matching the
-# 30 motors the MJCF declares. To leave a joint fully passive, pass it to
-# ``get_actuated_joints``'s ``non_actuated``; nothing here needs it today.
+# All refJointOrder joints are actuated; `get_actuated_joints`'s
+# `non_actuated` is how to make one passive. docs/robots.md#actuated-joint-sets
 
 
 def get_residual_joints() -> tuple[str, ...]:
@@ -85,9 +78,7 @@ def get_residual_joints() -> tuple[str, ...]:
   )
 
 
-##
 # Collision presets. See collision.get_collision_presets for the contact model.
-##
 
 RHPS1_FOOT_COLLISION_EXPR = r"^(left|right)_foot_collision$"
 
@@ -99,9 +90,7 @@ RHPS1_FOOT_COLLISION_EXPR = r"^(left|right)_foot_collision$"
 
 RHPS1_COLLISION = RHPS1_FULL_COLLISION
 
-##
 # configuration build.
-##
 
 
 def get_robot_cfg() -> EntityCfg:

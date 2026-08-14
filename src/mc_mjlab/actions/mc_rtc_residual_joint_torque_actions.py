@@ -1,18 +1,4 @@
-"""Residual joint-torque action term backed by per-env mc_rtc controllers.
-
-Adds an RL residual to the joint torques the mc_rtc QP computes, reproducing
-mc_mujoco's ``--torque-control`` law (``MjRobot::sendControl``): q, alpha and
-jointTorque are each interpolated across ``frameskip``, and per joint the
-interpolated torque drives the actuator unless it is exactly zero, in which
-case the joint falls back to PD tracking of the interpolated q/alpha. mc_rtc
-leaves jointTorque at zero for joints its QP does not drive, so the fallback
-is what keeps those joints held rather than limp.
-
-Because the term computes that whole law itself, it takes over the entity's
-PD: the configured gains (``pd_gains_path`` when given) are copied out at
-construction and then zeroed, leaving mjlab's actuators as pass-through
-motors fed by ``set_joint_effort_target``.
-"""
+"""Residual joint-torque action term backed by per-env mc_rtc controllers."""
 
 from __future__ import annotations
 
@@ -40,11 +26,7 @@ class McRtcResidualJointTorqueActionCfg(McRtcResidualActionCfg):
 
 
 class McRtcResidualJointTorqueAction(McRtcResidualActionBase):
-  """mc_rtc residual action driving joint effort (torque) targets.
-
-  The RL residual is added to the commanded torque, for joints under the
-  controller's torque command and for joints on the PD fallback alike.
-  """
+  """mc_rtc residual action driving joint effort (torque) targets."""
 
   cfg: McRtcResidualJointTorqueActionCfg
 

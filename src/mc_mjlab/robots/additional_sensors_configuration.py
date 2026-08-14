@@ -1,11 +1,4 @@
-"""RL-only sensors added to the mc_rtc robot MJCFs.
-
-The mc_mujoco XMLs ship the force/IMU sensors the stabilizer needs, but not the
-sole velocimeters and root angular-momentum sensor the RL rewards read. They are
-added here, uniformly, keyed on frames every robot already has: the ``lf_force``
-/ ``rf_force`` sole sites the foot force sensors sit on, and the floating-base
-body.
-"""
+"""RL-only sensors added to the mc_rtc robot MJCFs."""
 
 from __future__ import annotations
 

@@ -1,38 +1,4 @@
-"""Score a checkpoint against the zero-residual controller, in one paired run.
-
-The question a residual policy has to answer is "does this beat mc_rtc on its
-own", and the training curves cannot answer it: ``Episode_Reward/*`` comes from
-a *stochastic* policy still carrying its exploration noise, which on this task
-is a disturbance in its own right -- it goes through the real PD gains onto the
-joints doing the balancing. Here both arms run in the same env, with the same
-pushes, terminations and reward terms, and the policy is evaluated
-deterministically (``MLPModel.forward`` returns the distribution mean), so a
-deficit is the learned mean being worse rather than the dither.
-
-  uv run python scripts/compare_to_baseline.py --checkpoint logs/.../model_499.pt
-
-Two things this does that a naive A/B does not, both learned by getting them
-wrong first:
-
-*Both arms at once.* The envs are split in half and stepped together in one
-loop, so the two arms share the wall-clock window, the machine load and the
-worker pool. Running one arm and then the other would put the second on
-controllers already worn by the first, and would let anything that drifts during
-the run land on only one of them.
-
-*Fixed episodes per env, not "everything that finished".* A fall recycles in a
-few seconds while a survivor runs to the cap, so counting every episode
-completed inside a wall-clock budget samples them proportional to 1/duration.
-That inflates a failure rate badly (a true 10% can read 67%), and it inflates it
-*by a different factor for each arm*, which biases the very difference being
-measured. Taking the first K episodes of every env is unbiased because the
-selection never looks at how long an episode lasted. The raw counts are printed
-alongside so the size of that correction stays visible.
-
-Sized to sit *alongside* a training run: ``--num-workers`` defaults low because
-the pool would otherwise take ``cpu_count - 2``, which a training run already
-holds.
-"""
+"""Score a checkpoint against the zero-residual controller -- docs/evaluation.md."""
 
 from __future__ import annotations
 
@@ -48,20 +14,14 @@ import torch
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 
-from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
-  _make_env_cfg,
+from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import _make_env_cfg
+from mc_mjlab.tasks.residual_balance.residual_balance_ppo_cfg import (
   residual_balance_ppo_cfg,
 )
 
 
 def _describe(values: Sequence[float]) -> dict[str, float]:
-  """Mean/spread/quartiles for one per-episode quantity.
-
-  The mean alone hides the shape: episode length here is strongly bimodal (an
-  early fall against a full survival), so a mean that moves can mean either
-  "falls got later" or "more episodes reached the cap", and the quartiles tell
-  those apart. ``sem`` is what two runs have to differ by to mean anything.
-  """
+  """Mean/spread/quartiles for one per-episode quantity."""
   n = len(values)
   if n == 0:
     return dict.fromkeys(
@@ -69,8 +29,7 @@ def _describe(values: Sequence[float]) -> dict[str, float]:
     ) | {"n": 0}
   mean = statistics.fmean(values)
   std = statistics.stdev(values) if n > 1 else 0.0
-  # "inclusive" is the linear-interpolation convention numpy/pandas use, so
-  # these quartiles match anything else this data gets pasted into.
+  # numpy/pandas convention, so these paste into anything else.
   q1, med, q3 = (
     statistics.quantiles(values, n=4, method="inclusive")
     if n > 1
@@ -138,20 +97,9 @@ class Arm:
   steps: int = 0
 
   def trimmed(self) -> tuple[list[Episode], int]:
-    """The first K episodes of every env, K set by the env that finished fewest.
-
-    Unbiased with respect to episode duration, which "every episode that
-    finished" is not -- see the module docstring.
-
-    K is counted over ``env_ids``, not over the envs that appear in
-    ``episodes``. Seeding it from the episodes instead silently drops any env
-    still inside its first episode at the deadline -- which is to say the
-    survivors, since a fall recycles in seconds and a survivor runs to the cap.
-    That is a selection on episode duration again, the exact bias this method
-    exists to avoid, and at ~1-3 episodes per env one vanishing env is large.
-    An arm with such an env now honestly reports K=0 rather than a clean-looking
-    number computed off the fallers alone.
-    """
+    """The first K episodes of every env, K set by the env that finished fewest."""
+    # K over `env_ids`, not over envs that finished: the latter drops survivors.
+    # docs/evaluation.md#fixed-episodes-per-env-not-everything-that-finished
     per_env: dict[int, int] = dict.fromkeys(self.env_ids, -1)
     for e in self.episodes:
       per_env[e.env_id] = max(per_env.get(e.env_id, -1), e.nth)
@@ -162,20 +110,7 @@ class Arm:
 
 
 def _run_both(env, wrapped, policy, minutes: float, policy_ids) -> tuple[Arm, Arm]:
-  """Step both arms at once, split by env index.
-
-  The alternative -- one arm then the other -- makes the two halves of the
-  comparison run in different wall-clock windows on a shared machine, and puts
-  the second arm on controllers that have already been through the first arm's
-  resets. Here every step advances both arms through the same worker pool under
-  the same load, so anything that drifts during the run drifts through both.
-
-  The cost is that the pairing is no longer within-env: an env belongs to one
-  arm for the whole run, so `encoder_bias` (a per-env startup constant that
-  moves survival on its own) differs between the arms rather than cancelling.
-  With envs split evenly that is a wash in expectation, and the run is half as
-  long.
-  """
+  """Step both arms at once, split by env index -- docs/evaluation.md#both-arms-at-once."""
   policy_set = set(policy_ids)
   base = Arm(
     label="baseline",
@@ -196,8 +131,7 @@ def _run_both(env, wrapped, policy, minutes: float, policy_ids) -> tuple[Arm, Ar
   while time.monotonic() < deadline:
     action.zero_()
     with torch.inference_mode():
-      # Evaluated for every env and masked down: the actor is batched, so
-      # slicing the observation first would cost more than the wasted rows.
+      # Masked, not sliced: the actor is batched, so wasted rows are cheaper.
       action[is_policy] = policy(wrapped.get_observations())[is_policy]
     _, _, terminated, time_outs, _ = env.step(action)
     base.steps += 1
@@ -224,29 +158,9 @@ def _run_both(env, wrapped, policy, minutes: float, policy_ids) -> tuple[Arm, Ar
 
 
 def _reset_done(env, env_ids) -> None:
-  """Recycle finished envs without pushing a second observation-history frame.
-
-  ``ManagerBasedRlEnv.reset()`` ends with
-  ``observation_manager.compute(update_history=True)``, and ``compute_group``
-  appends to every term's ``CircularBuffer`` for *all* envs, not just
-  ``env_ids`` -- the buffer's write pointer is shared across the batch, so it
-  cannot be otherwise. ``step()`` has already appended this step's frame, so
-  calling ``reset()`` here gives every ``history_length=5`` term two frames on
-  any step where at least one env finished, which is most of them. The window
-  then spans half the time it should and carries near-duplicate frames.
-
-  That is not symmetric across the arms: the baseline applies a zero action and
-  reads no observations at all, so the distortion lands only on the policy --
-  it biases the difference this script exists to measure. Hence the three calls
-  ``step()``'s own ``auto_reset`` path makes, minus the recompute.
-
-  The cost, stated rather than hidden: ``get_observations()`` returns the cached
-  buffer, so the first action of a new episode is computed from the dead
-  episode's last observation. One step per episode, against every step of every
-  episode the other way. From the next step on the histories are exactly what
-  training produces -- the reset zeroed those rows, so the next append backfills
-  all five slots with the fresh frame.
-  """
+  """Recycle finished envs without pushing a second observation-history frame."""
+  # `reset()` would append a frame for *every* env, halving the history's span.
+  # docs/evaluation.md#resetting-without-corrupting-the-observation-history
   env._reset_idx(env_ids)
   env.scene.write_data_to_sim()
   env.sim.forward()

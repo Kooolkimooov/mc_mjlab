@@ -1,9 +1,4 @@
-"""Which robot the coupling runs, and how its cfg must be prepared.
-
-``etc/mc_rtc.yaml``'s ``MainRobot`` is the single source of truth: it picks the
-mc_rtc robot module and, through ``ROBOTS``, the matching mjlab entity. Both
-the demo and the RL task go through here so the two sides cannot drift.
-"""
+"""Which robot the coupling runs, and how its cfg must be prepared."""
 
 from __future__ import annotations
 

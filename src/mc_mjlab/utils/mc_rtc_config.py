@@ -1,16 +1,4 @@
-"""Reading the few values this side has to agree with out of the mc_rtc config.
-
-``etc/mc_rtc.yaml`` is mc_rtc's file, not ours: it is handed to
-``MCGlobalController`` untouched and mc_rtc parses it itself. Only two values
-matter on this side -- ``MainRobot``, which the mjlab entity must match, and
-``Enabled``, the base controller the RL residual is trained on top of (and so
-part of what a checkpoint is only valid against).
-
-A line scanner rather than a YAML parse, so the package needs no YAML
-dependency for two keys. That buys simplicity at a cost worth knowing: it reads
-*top-level scalars only*. A nested key (``GUIServer.Enable``) is invisible to
-it, which is the point -- indentation is what keeps it from matching one.
-"""
+"""Reading the few values this side has to agree with out of the mc_rtc config."""
 
 from __future__ import annotations
 

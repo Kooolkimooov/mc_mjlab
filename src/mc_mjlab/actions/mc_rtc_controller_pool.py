@@ -1,20 +1,4 @@
-"""Main-side transport for the per-env mc_rtc controllers.
-
-Owns the worker processes (or the single in-process ``ControllerHost``), their
-pipes and the two shared-memory I/O blocks, and exposes a small dispatch API to
-the action term:
-
-    pool = ControllerPool(...)      # spawns workers (non-blocking)
-    metadata = pool.await_ready()   # block until controllers are constructed
-    pool.configure(layout)          # allocate shm, hand the layout to the hosts
-    pool.reset_envs(indices)        # synchronous controller reset
-    pool.dispatch_controller_step(indices)     # async controller step (worker path)
-    idx = pool.collect()            # await the outstanding step
-
-``in_np``/``out_np`` are the shared input/output arrays (available after
-``configure``); the action writes inputs and reads outputs directly on the hot
-path. Torch- and mjlab-free, like the worker-side ``ControllerHost``.
-"""
+"""Main-side transport for the per-env mc_rtc controllers."""
 
 from __future__ import annotations
 
@@ -88,22 +72,7 @@ def _shutdown_workers(
 
 
 class ControllerPool:
-  """Owns the controller workers/host, their pipes and the shared I/O blocks.
-
-  One async step is outstanding at a time: ``dispatch_controller_step`` sends without
-  blocking and ``collect`` awaits it, so each worker holds at most one command.
-
-  ``console_output`` picks which controllers may write mc_rtc terminal output:
-  "none" silences everything, "single" lets only env 0 print (it gets a
-  dedicated worker so every other worker is silenced wholesale at startup)
-  and "all" suppresses nothing.
-
-  A worker that dies or goes unresponsive mid-run (mc_rtc can wedge inside
-  ``reset()`` of a controller whose MPC has collapsed) is quarantined rather
-  than fatal: its process is killed and respawned, its controllers rebuilt,
-  and its envs reported failed via the status column so the trainer ends
-  those episodes and re-inits the fresh controllers on reset.
-  """
+  """Owns the controller workers/host, their pipes and the shared I/O blocks."""
 
   # Assigned in `configure`; the action reads/writes these on the hot path.
   in_np: np.ndarray

@@ -22,9 +22,7 @@ from mc_mjlab.robots.pd_actuator_configuration import (
   get_pd_actuator_cfgs,
 )
 
-##
 # MJCF and assets.
-##
 
 HRP5P_MC_RTC_MODULE_NAME = "HRP5P"
 HRP5P_MC_RTC_ASSETS_DIR = MC_MUJOCO_SHARE_DIR / "HRP5P"
@@ -65,15 +63,10 @@ def get_spec() -> mujoco.MjSpec:
   return spec
 
 
-##
 # Joint tables.
-##
 
-# Every joint in the mc_rtc refJointOrder (all 53, fingers included) is
-# actuated, matching the 53 motors HRP5P's own MJCF declares. Gains come from
-# PDgains_sim.dat at action-term init, so the fingers get their real gains
-# without a special case. To leave a joint fully passive, pass it to
-# ``get_actuated_joints``'s ``non_actuated``; nothing here needs it today.
+# All refJointOrder joints are actuated; `get_actuated_joints`'s
+# `non_actuated` is how to make one passive. docs/robots.md#actuated-joint-sets
 
 
 def get_residual_joints() -> tuple[str, ...]:
@@ -84,9 +77,7 @@ def get_residual_joints() -> tuple[str, ...]:
   )
 
 
-##
 # Collision presets. See collision.get_collision_presets for the contact model.
-##
 
 HRP5P_FOOT_COLLISION_EXPR = r"^(left|right)_foot_collision$"
 

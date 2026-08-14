@@ -1,19 +1,4 @@
-"""Per-robot data read from the mc_rtc ``RobotModule``, lazily and once.
-
-The controller's robot module owns the ground truth for refJointOrder, the
-half-sitting stance, the default floating-base attitude, and (via ``bounds``)
-the nominal torque limits. Reading them here keeps the mjlab side from carrying
-hand-copied transcriptions that drift from the robot the controller actually
-drives.
-
-Everything is lazy and cached on purpose: importing this module -- and, through
-it, the registry and the per-robot constants -- must not require a sourced
-mc_rtc workspace, and must not pay the module's construction cost until
-something actually needs controller-derived data.
-
-Binding quirk worth knowing: ``stance()`` keys come back as ``bytes`` while
-``bounds()`` keys come back as ``str``; ``_decode_joint_key`` normalises both.
-"""
+"""Per-robot data read from the mc_rtc ``RobotModule``, lazily and once."""
 
 from __future__ import annotations
 
@@ -83,9 +68,7 @@ def get_default_joint_positions(
   return out
 
 
-##
 # Anatomical joint subsets, read off the module's kinematic tree.
-##
 
 # mc_rtc's standard sensor names. The stabilizer is written against these, so a
 # humanoid module that runs a walking controller has them by construction --
@@ -100,12 +83,7 @@ _SIDES = ("left", "right")
 
 @dataclasses.dataclass(frozen=True)
 class _Tree:
-  """The module's ``MultiBody``, decoded once into plain Python.
-
-  Built from ``joints()``/``bodies()`` rather than ``jointIndexByName``: that
-  binding throws a C++ ``std::out_of_range`` on a missing name which terminates
-  the process uncatchably (the same trap ``ControllerHost.joint_index`` avoids).
-  """
+  """The module's ``MultiBody``, decoded once into plain Python."""
 
   joints: tuple[str, ...]
   dofs: tuple[int, ...]

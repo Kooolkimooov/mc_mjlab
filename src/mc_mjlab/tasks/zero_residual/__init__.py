@@ -1,9 +1,4 @@
-"""Task ids for the zero-residual demo, one per control mode.
-
-Driven by ``scripts/demos/run_test_mc_rtc.sh``, which runs mjlab's ``play
---agent zero`` against these: the zero action is the "no residual" part, so the
-robot tracks raw mc_rtc output and a healthy run holds a steady root height.
-"""
+"""Task ids for the zero-residual demo, one per control mode."""
 
 import sys
 from pathlib import Path

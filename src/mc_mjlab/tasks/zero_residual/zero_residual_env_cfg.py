@@ -1,25 +1,4 @@
-"""Zero-residual task: the mc_rtc controller driving the robot on its own.
-
-The env the demo used to build inline. There is no reward and no termination
-here on purpose -- nothing is being learned, the point is to watch the
-controller hold the robot up with the RL residual left at zero. mjlab's ``play
---agent zero`` supplies that zero action.
-
-This is a *play* task, and ``train`` on it is not supported. With no reward
-term there is nothing to optimise, and the env is built to be driven by a zero
-action: ``decimation=2`` means a policy would emit a fresh sample every 2 ms,
-across all controlled joints, with no termination to reset a robot it wrecks.
-Under random actions the contact set then grows past ``njmax`` and MuJoCo-Warp
-faults inside ``sim.forward()``. Train the residual balance task instead.
-
-The observation group and ``episode_length_s`` below are not for learning
-either -- they keep the env well-formed (rsl_rl rejects an empty observation
-set, and a zero ``max_episode_length`` cannot be sampled).
-
-Rates: the sim runs at 1 kHz and the controller at 500 Hz (``frameskip=2``, the
-mc_mujoco pairing), with ``decimation=2`` so one env step is one controller
-period.
-"""
+"""Zero-residual task: the mc_rtc controller driving the robot on its own."""
 
 from __future__ import annotations
 
@@ -53,11 +32,7 @@ from mc_mjlab.robots.robots_registry import (
 PLAY_NUM_ENVS = 1
 NUM_ENVS = 420
 
-# An hour of sim time: effectively unbounded for a demo (there is no
-# termination term either, so a run ends when you stop it) while staying a sane
-# step count. Zero is not equivalent -- it leaves ``max_episode_length`` at 0,
-# which rsl_rl cannot sample against -- and a huge sentinel like 1e10 is worse:
-# it overflows the episode-length buffer's dtype and corrupts GPU memory.
+# An hour of sim time: effectively unbounded for a demo.
 EPISODE_LENGTH_S = 3600.0
 
 
@@ -93,11 +68,8 @@ def _make_env_cfg(
     )
   }
 
-  # Nothing reads these -- the residual is zero and there is no reward. They
-  # exist because an env with no observation group is not a well-formed RL env:
-  # rsl_rl refuses to build an algorithm against an empty set, so `train` would
-  # die on this task after paying the full controller-construction cost. Cheap
-  # insurance, and they make the robot's state visible while playing.
+  # Unused: the residual is zero and nothing learns, but the managers require
+  # at least one term each.
   terms = {
     "base_lin_vel": ObservationTermCfg(func=envs_mdp.base_lin_vel),
     "base_ang_vel": ObservationTermCfg(func=envs_mdp.base_ang_vel),
@@ -123,11 +95,8 @@ def _make_env_cfg(
     episode_length_s=EPISODE_LENGTH_S,
     # Solver/integrator settings from mc_mujoco's HRP5Pmain.xml.
     sim=SimulationCfg(
-      # A standing robot needs few constraint rows, so the default heuristic
-      # (sized off exactly this stance) overflows the moment one sprawls -- and
-      # `njmax` is a hard per-world cap: past it MuJoCo writes out of bounds
-      # rather than failing cleanly, which surfaces as an async CUDA illegal
-      # access. The controller can lose the robot here too, so budget for it.
+      # Budget for a sprawled robot: `njmax` is a hard cap, and past it MuJoCo
+      # drops rows and simulates the fall wrong rather than failing.
       njmax=1500,
       nconmax=100,
       mujoco=MujocoCfg(

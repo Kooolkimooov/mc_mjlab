@@ -1,10 +1,4 @@
-"""PD actuator config shared by the mc_rtc robot entities.
-
-Every robot drives its motorized joints with the same natural-frequency PD
-model, with per-joint gains derived from the reflected rotor inertia the MJCF
-already carries. These helpers are that shared construction; the collision
-side lives in ``collision_configuration``.
-"""
+"""PD actuator config shared by the mc_rtc robot entities."""
 
 from __future__ import annotations
 
@@ -19,10 +13,8 @@ from mjlab.actuator import IdealPdActuatorCfg
 NATURAL_FREQ = 3.0 * 2.0 * math.pi  # rad/s
 DAMPING_RATIO = 1.5
 
-# Unclamped, like mc_mujoco's PD torque (its motors set forcelimited=false):
-# with the real gains, nominal limits would saturate constantly and change the
-# stabilizer's behavior. See mc_rtc_robot_configuration.get_effort_limits for the real
-# per-joint torque scale, kept out of the actuators on purpose.
+# Unclamped, like mc_mujoco's PD torque: with the real gains, nominal limits
+# would saturate constantly. docs/robots.md#pd_actuator_configuration
 EFFORT_LIMIT = float("inf")
 
 
