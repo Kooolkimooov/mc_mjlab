@@ -52,6 +52,7 @@ from weakref import WeakKeyDictionary
 
 import mujoco
 import torch
+from mjlab.envs.mdp import events
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
@@ -480,4 +481,159 @@ class com_velocity_tracking:
     return 0.5 * (
       torch.exp(-torch.square(horizontal / std))
       + torch.exp(-torch.square(vertical / std_vertical))
+    )
+
+
+class push_and_record:
+  """``push_by_setting_velocity``, plus a record of when it last fired.
+
+  The kick itself is mjlab's, unchanged. What this adds is ``last_push_step``,
+  which is what lets a reward pay attention only to the window where the residual
+  can plausibly help. Most steps of an episode are nominal walking, where mc_rtc
+  already tracks its own plan and there is nothing for a residual to add; the
+  measured per-step tracking rate is the same with a trained policy as with none
+  (0.01183 vs 0.01196, SE 0.00015). Those steps dilute the gradient from the few
+  hundred milliseconds after a disturbance where the difference is made.
+
+  Gating on this is safe in a way that gating on *measured error* would not be:
+  the push schedule is drawn by the event manager and is entirely independent of
+  the policy, so the agent cannot arrange to be paid more often. A gate keyed on
+  its own tracking error would be exactly that -- an incentive to enter the
+  high-paying state.
+  """
+
+  #: ``common_step_counter`` is monotone across episodes, so a value this far in
+  #: the past reads as "no push yet" for any run length.
+  NEVER = -(1 << 30)
+
+  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+    del cfg
+    self.last_push_step = torch.full(
+      (env.num_envs,), self.NEVER, dtype=torch.long, device=env.device
+    )
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor | None,
+    velocity_range: dict[str, tuple[float, float]],
+    asset_cfg: SceneEntityCfg | None = None,
+    warmup_s: float = 0.0,
+  ) -> None:
+    ids = torch.arange(env.num_envs, device=env.device) if env_ids is None else env_ids
+    if warmup_s > 0.0:
+      # Suppress, do not reschedule. `EventManager` owns the countdown and
+      # re-samples it whenever the term fires regardless of what this returns,
+      # so skipping here delays the *first* push without altering the 5-7 s
+      # cadence that follows -- and the first real push then lands on the first
+      # tick after the warm-up, which desynchronises it across envs instead of
+      # hitting every robot at the same phase.
+      #
+      # Why it exists: measured over 528 zero-residual episodes, the hazard rate
+      # is 0.122/s in the 4-8 s window and ~0.019/s everywhere after, so 48% of
+      # all deaths landed on the first push -- which arrives while the robot is
+      # still finishing its ~4 s posture settle. That made the task a startup
+      # lottery rather than a test of push recovery while walking.
+      ids = ids[env.episode_length_buf[ids] * env.step_dt >= warmup_s]
+      if ids.numel() == 0:
+        return
+    events.push_by_setting_velocity(
+      env, ids, velocity_range, asset_cfg or SceneEntityCfg("robot")
+    )
+    self.last_push_step[ids] = env.common_step_counter
+
+
+#: Age reported for an env that has not been pushed inside its current episode.
+NEVER_AGE = 1 << 30
+
+
+def _push_term(env: ManagerBasedRlEnv, term_name: str) -> push_and_record:
+  """The ``push_and_record`` behind ``term_name``, or a ``TypeError``."""
+  term = env.event_manager.get_term_cfg(term_name).func
+  if not isinstance(term, push_and_record):
+    raise TypeError(
+      f"event term {term_name!r} must be `mdp.push_and_record` for a "
+      f"disturbance-gated reward to know when it fired, got {type(term).__name__}"
+    )
+  return term
+
+
+def _age_since_push(env: ManagerBasedRlEnv, term: push_and_record) -> torch.Tensor:
+  """See :func:`steps_since_push`; this is that, with the term already resolved."""
+  # A Python int on the left: `int - tensor` broadcasts, and wrapping the step
+  # counter in `torch.as_tensor` would put a host-to-device copy on a path that
+  # runs once per step per reward.
+  age = env.common_step_counter - term.last_push_step
+  # Never-pushed and previous-episode pushes both read as "long ago".
+  return age.masked_fill(age >= env.episode_length_buf, NEVER_AGE)
+
+
+def steps_since_push(
+  env: ManagerBasedRlEnv, term_name: str = "push_robot"
+) -> torch.Tensor:
+  """Policy steps since each env was last pushed *within its current episode*.
+
+  Bounded by ``episode_length_buf`` on purpose. Class-based event terms get no
+  ``reset`` callback from mjlab's ``EventManager`` -- it only re-samples the
+  interval timers -- so ``last_push_step`` survives an episode boundary. Rather
+  than reach for a reset hook that does not exist, a push is simply not counted
+  unless it happened after this episode started, which is what
+  ``age < episode_length_buf`` says. Envs with no push yet read a huge age.
+
+  Reading ``last_push_step`` rather than watching the event manager's interval
+  countdown is the only way to get this right: the countdown is re-sampled
+  whenever the term *fires*, including the ticks ``push_and_record`` suppresses
+  during ``warmup_s``, so a timer-based detector counts pushes that never landed.
+
+  Resolves the event term on every call, which is what a diagnostic wants;
+  ``recovery_tracking`` resolves it once at init and calls
+  :func:`_age_since_push`.
+  """
+  return _age_since_push(env, _push_term(env, term_name))
+
+
+class recovery_tracking:
+  """``zmp_tracking``, paid only in the window after a push.
+
+  Same quantity and same kernel as :class:`zmp_tracking` -- the point is not to
+  measure something new but to stop averaging the informative steps into the
+  ~90% of an episode where the controller is undisturbed and the residual has
+  nothing to contribute. Sized from the measured recovery profile: the ZMP error
+  is elevated for roughly the first two seconds after a kick and settles after
+  that, so a window much longer than that would re-admit the steps this exists
+  to exclude.
+
+  Interval events fire *after* the reward is computed (see
+  ``manager_based_rl_env.step``), so the first step this can pay on has an age of
+  1, never 0.
+  """
+
+  def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv) -> None:
+    self._sensors = _zmp_sensors(
+      env, cfg.params["sensor_names"], cfg.params["asset_cfg"].name
+    )
+    # Resolved here rather than per call: `get_term_cfg` walks every mode's
+    # name list, and this is a reward.
+    self._push = _push_term(env, cfg.params.get("push_term_name", "push_robot"))
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    std: float,
+    window_s: float,
+    sensor_names: tuple[str, ...],
+    asset_cfg: SceneEntityCfg,
+    action_name: str = "mc_rtc_residual",
+    push_term_name: str = "push_robot",
+    min_normal_force: float = 20.0,
+    plane_height: float = 0.0,
+  ) -> torch.Tensor:
+    del sensor_names, asset_cfg, push_term_name  # Resolved at init.
+    error, normal_force = self._sensors.offset_error(
+      env, action_name, min_normal_force, plane_height
+    )
+    age = _age_since_push(env, self._push)
+    gate = (age >= 1) & (age <= round(window_s / env.step_dt))
+    return (
+      torch.exp(-torch.square(error / std)) * gate * (normal_force >= min_normal_force)
     )

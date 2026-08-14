@@ -116,6 +116,20 @@ from mc_mjlab.tasks import mdp
 PUSH_VELOCITY = 0.4
 PUSH_ANGULAR_VELOCITY = 0.0
 
+# How long an episode runs before pushes begin. The cadence is untouched -- the
+# term suppresses rather than reschedules, so pushes still arrive every 5-7 s
+# once they start.
+#
+# Measured over 528 zero-residual episodes, the hazard rate is 0.005/s before
+# the first push, 0.122/s across the 4-8 s window that contains it, and ~0.019/s
+# flat for the rest of the episode. 48% of all deaths were that one event, which
+# lands while the robot is still finishing its ~4 s posture settle: the task was
+# scoring a startup lottery rather than push recovery while walking.
+#
+# Removing it makes the task easier (survival ~20% -> ~39% at a 60 s cap), which
+# is why `WALK_WINDOW_S` grew alongside -- see there.
+PUSH_WARMUP_S = 10.0
+
 # How long the base controller actually walks, and therefore how long an
 # episode is worth running. This tracks the *installed* controller's FSM and
 # has to be revisited whenever that changes, because an episode running past
@@ -154,12 +168,18 @@ WALK_WINDOW_S = 90.0
 # left for the residual to earn. Tighten it and the signal is mostly noise
 # (0.02 scores 0.41); loosen it and it saturates (0.10 scores 0.84).
 #
-# The weight is per second like every other one here, so a perfectly tracking
-# episode earns 16 over the walk window and the baseline ~11, against the -40 a
-# fall costs (the -2000 termination penalty lands on one 20 ms step). Dense
-# shaping that ranks good balance without ever out-paying survival.
+# The weight is per second like every other one here, so at 0.5 over the 90 s
+# walk window a perfectly tracking episode earns 45 and the baseline ~31,
+# against the -4 a fall costs (the -200 termination penalty lands on one 20 ms
+# step). Dense shaping that ranks good balance without ever out-paying survival.
 ZMP_TRACKING_STD = 0.05
-ZMP_TRACKING_WEIGHT = 1.0
+# Halved when `recovery_tracking` was added. The two are the same quantity and
+# the same kernel; splitting the weight keeps the total tracking payment roughly
+# where it was while moving half of it onto the steps that follow a push, where
+# the residual can actually change the outcome. Nominal steps therefore still pay
+# (~0.0125 per step against ~0.001 of penalties), which is what stops the split
+# from creating an incentive to end the episode early.
+ZMP_TRACKING_WEIGHT = 0.5
 
 # CoM-velocity payment, the velocity half of the same LIPM state, sized the same
 # way. Over 96 s x 16 envs (131 episodes, 58 of them falls) the error runs median
@@ -181,7 +201,39 @@ ZMP_TRACKING_WEIGHT = 1.0
 # kernel was (0.785), so the weight carries over unchanged.
 COM_VELOCITY_TRACKING_STD = 0.05
 COM_VELOCITY_TRACKING_STD_VERTICAL = 0.005
-COM_VELOCITY_TRACKING_WEIGHT = 1.0
+# Halved when `recovery_tracking` arrived, but *not* for the reason the ZMP term
+# was: that half moved to the gated term, and there is no gated CoM-velocity
+# term for this one to move to. It is simply a de-emphasis, and it is in tension
+# with the paragraph above -- the sharper early warning of the two is now the
+# cheaper of the two. Re-measure before treating it as settled; the obvious
+# alternatives are back to 1.0, or a `recovery_com_velocity` mirroring
+# `recovery_tracking`'s gate.
+COM_VELOCITY_TRACKING_WEIGHT = 0.5
+
+# The disturbance-gated half of the ZMP payment. Why it exists: measured with
+# episode length divided out, the per-step tracking rate is the same under a
+# trained policy as under none (0.01183 vs 0.01196, SE 0.00015) -- the reward was
+# blind to the policy. Almost every step of an episode is nominal walking, where
+# mc_rtc tracks its own plan and a residual has nothing to add; those steps
+# average the informative ones away. This pays on the window after a push only.
+#
+# The window is measured, not guessed (`scripts/probe_residual_authority.py`,
+# 32 envs x 10 min, 529k grounded samples). Mean ZMP error against its settled
+# level of 0.0412 m: 4.0x at the kick, 2.3x at 0.2 s, ~1.5x from 0.4 to 1.5 s,
+# then decaying through 1.25x at 1.80 s to 1.06x by 2.4 s. Two seconds covers the
+# elevated stretch; much longer and it re-admits the nominal steps this exists to
+# exclude, which are ~90% of an episode at a 5-7 s push interval.
+#
+# Caveat, and it is not small: that profile was taken before the probe learned
+# to tell a real push from a warm-up-suppressed timer tick, and before it
+# stopped binning the ~4 s post-reset posture settle as push recovery. Both
+# pollutions landed in the early bins -- the ones that sized this window. A
+# short re-run after the fix puts the kick at ~5x rather than 4.0x and the
+# elevated stretch ending nearer 2 s than 2.4 s, so 2.0 still looks about right,
+# but re-measure at the full 32 envs x 10 min before treating it as settled.
+RECOVERY_TRACKING_STD = ZMP_TRACKING_STD
+RECOVERY_TRACKING_WEIGHT = 1.0
+RECOVERY_WINDOW_S = 2.0
 
 # A viewer default, not a training one: every env is its own mc_rtc controller
 # (~70 MB, ~570 ms to construct, built serially), so replaying at the training
@@ -432,6 +484,20 @@ def _make_env_cfg(
         "action_name": "mc_rtc_residual",
       },
     ),
+    # Same quantity and kernel as `zmp_tracking`, paid only in the window after a
+    # push -- see RECOVERY_* above for why half the tracking weight moved here.
+    "recovery_tracking": RewardTermCfg(
+      func=mdp.recovery_tracking,
+      weight=RECOVERY_TRACKING_WEIGHT,
+      params={
+        "std": RECOVERY_TRACKING_STD,
+        "window_s": RECOVERY_WINDOW_S,
+        "sensor_names": mdp.GROUND_CONTACT_SENSORS,
+        "asset_cfg": SceneEntityCfg("robot"),
+        "action_name": "mc_rtc_residual",
+        "push_term_name": "push_robot",
+      },
+    ),
     "residual_magnitude": RewardTermCfg(func=mdp.action_l2, weight=-0.1),
     "residual_rate": RewardTermCfg(func=envs_mdp.action_rate_l2, weight=-0.1),
   }
@@ -509,7 +575,11 @@ def _make_env_cfg(
       },
     ),
     "push_robot": EventTermCfg(
-      func=envs_mdp.push_by_setting_velocity,
+      # mjlab's kick, wrapped so it records *when* it fired: `recovery_tracking`
+      # gates on that. Swapping back to the plain `push_by_setting_velocity`
+      # would leave that reward with no way to know a push happened, and
+      # `steps_since_push` raises rather than silently paying nothing.
+      func=mdp.push_and_record,
       mode="interval",
       interval_range_s=(5.0, 7.0),
       params={
@@ -518,7 +588,8 @@ def _make_env_cfg(
           "y": (-push_velocity, push_velocity),
           "roll": (-push_angular_velocity, push_angular_velocity),
           "pitch": (-push_angular_velocity, push_angular_velocity),
-        }
+        },
+        "warmup_s": PUSH_WARMUP_S,
       },
     ),
     "encoder_bias": EventTermCfg(
