@@ -117,13 +117,23 @@ enter the high-paying state.
   then decaying through 1.25x at 1.80 s to 1.06x by 2.4 s. Two seconds covers the
   elevated stretch; much longer and it re-admits the nominal steps this exists to
   exclude, which are ~90% of an episode at a 5-7 s push interval.
-- **2026-08-14 — that profile is suspect.** It was taken before the probe learned
+- **2026-08-14 — that profile was suspect.** It was taken before the probe learned
   to tell a real push from a warm-up-suppressed timer tick, and before it stopped
   binning the ~4 s post-reset posture settle as push recovery. Both pollutions
-  landed in the early bins, the ones that sized this window. A short re-run after
-  the fix puts the kick at ~5x rather than 4.0x and the elevated stretch ending
-  nearer 2 s than 2.4 s, so 2.0 still looks about right — but re-measure at the
-  full 32 envs x 10 min before treating it as settled.
+  landed in the early bins, the ones that sized this window.
+- **2026-08-15 — re-measured after the fix, and 2.0 s holds.** 32 envs x 10 min,
+  zero residual, ~8600 samples per 100 ms bin, settled level 0.0364 m:
+
+  | since push | 0.0s | 0.2s | 0.5s | 1.0s | 1.3s | 1.8s | 2.0s | 2.3s |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | mean error | 0.237 | 0.083 | 0.054 | 0.055 | 0.069 | 0.047 | 0.043 | 0.042 |
+  | vs settled | 6.5x | 2.3x | 1.5x | 1.5x | 1.9x | 1.3x | 1.2x | 1.15x |
+
+  The kick is sharper than the polluted profile showed (6.5x, not 4.0x) and the
+  error is still ~1.2x settled at 2.0 s, so the window is if anything slightly
+  short rather than long. Note the **secondary bump at 1.2-1.4 s** (1.8-1.9x),
+  absent from the old profile — most likely the first footstep after the push,
+  and a reason not to shorten the window below ~1.5 s.
 
 ## termination_penalty
 

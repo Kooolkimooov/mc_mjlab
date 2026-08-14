@@ -83,5 +83,42 @@ binding constraint.
 Authority is adequate if a full-scale constant residual shifts the error by
 >= 0.007 m (20% of the ~0.036 m operating error).
 
+**Measured 2026-08-15, and it falls well short.** 32 envs x 10 min each, ~0.3-0.5 M
+grounded samples per run, settled operating error 0.0364 m:
+
+| run | `zmp_error` mean | shift vs level 0 | % of the 7 mm threshold |
+| --- | --- | --- | --- |
+| `--level 0` | 0.04920 +/- 0.00019 | — | — |
+| `--level 1.0 --pattern alternating` | 0.05125 +/- 0.00037 | **+0.00205 m** | 29% |
+| `--level 1.0 --pattern all` | 0.05016 +/- 0.00017 | **+0.00096 m** | 14% |
+
+At `residual_scale = 0.01` a saturated residual moves the centre of pressure by
+about **2 mm against a 36 mm operating error — 5.6% authority against a 20%
+criterion**. The shift is real (~5 sigma) but small, and a coordinated bias is
+*weaker* than an alternating one, so the pattern is not what limits it.
+
+**Caveat on the instrument.** A *constant* residual is a static posture offset,
+and the stabilizer is a feedback loop that actively absorbs one, so this measures
+steady-state authority against an opposing controller — close to a worst case. A
+residual acting transiently in the 200 ms after a push may have more leverage
+than this shows. What argues against reading it that way is the trained policy,
+which had exactly that dynamic freedom and used it to make tracking 10% *worse*
+(see [reward-shaping.md](reward-shaping.md#residual-harm-at-gamma099)).
+
+**What this implies for the scale.** Authority should scale roughly linearly, and
+torque does: 0.01 rad is 22-27% of the hardware limit and 5.6% authority, so
+~0.03 rad would be ~66-81% of the limit and ~17% authority — the first scale that
+approaches the criterion while staying inside the hardware. The window between
+"too weak to matter" and "past the actuators" is narrow but not empty. Note the
+2026-07-31 catastrophe at 0.1 was partly the *exploration noise*, which
+`std_range = (0.05, 0.30)` now bounds: at scale 0.03 and std 0.05 the dither is
+~0.0015 rad, a few percent of the torque budget rather than 115-140% of it.
+
+The surgical variant is per-joint: the ankles are what actually move the centre
+of pressure, and `residual_scales` already supports
+`{"[LR]_ANKLE_.*": 0.03, "^(?![LR]_ANKLE_).*": 0.005}` — raising ankle authority
+without loosening the hips. Which joints deserve it is not measured; the probe
+drives every residual joint uniformly and offers no joint-subset pattern.
+
 The question arose because the reward proved blind to the policy — see
 `RECOVERY_TRACKING_WEIGHT` in [reward-shaping.md](reward-shaping.md).
