@@ -230,6 +230,53 @@ Interval events fire *after* the reward is computed (see
 `manager_based_rl_env.step`), so the first step `recovery_tracking` can pay on has
 an age of 1, never 0.
 
+## Residual harm at gamma=0.99
+
+**A trained residual measured worse than no residual at all.** From
+`model_3050` of the 2026-08-14 run, against the zero-residual baseline in the
+same paired run (n=48/54, 24 envs x 20 min), with episode length divided out so
+duration is not a confound:
+
+| per-step rate | baseline | policy | delta | p |
+| --- | --- | --- | --- | --- |
+| `zmp_tracking` | 0.00687 | 0.00619 | -10% | <0.001 |
+| `com_velocity_tracking` | 0.00799 | 0.00735 | -8% | <0.001 |
+| `recovery_tracking` | 0.00282 | 0.00235 | -17% | 0.020 |
+
+| failure mode | baseline | policy | delta | p |
+| --- | --- | --- | --- | --- |
+| `fell_over` | 6.2% | 24.1% | +17.8pp | 0.013 |
+| `collapsed` | 77.1% | 66.7% | -10.4pp | 0.244 |
+| survival | 20.8% | 24.1% | +3.2pp | 0.696 |
+
+So it converts crouch-collapses into topples at unchanged survival, and tracks
+~10% worse per step on the objective it is optimising. The episode-sum rewards
+the script prints do not show this cleanly, because they track episode length;
+the per-step rates are what resolve it (see
+[evaluation.md](evaluation.md#per-step-rates-beat-survival)).
+
+**It got there gradually.** Over training the policy intervened steadily *more* —
+`residual_magnitude` -0.0305 -> -0.0450 between iterations 500 and 3100, +48% —
+while `fell_over` climbed 0.19 -> 0.23 and reward and episode length peaked
+around iteration 1400 and drifted down.
+
+**Within its own episodes, intervening more goes with dying sooner.**
+`corr(per-step |residual|, episode length) = -0.60` over 68 policy episodes, and
+episodes reaching the cap carry a smaller residual than those that do not
+(0.00149 vs 0.00168, p < 0.001).
+
+**Caveat, and it is not small:** that correlation is not proof of causation. A
+robot already in trouble produces extreme observations and therefore larger
+actions, so the arrow could point the other way. It is consistent with the
+residual causing falls, not demonstrative of it.
+
+**The hypothesis this suggests** is a credit-assignment one, and it is recorded
+under `gamma` in [ppo.md](ppo.md): at `gamma = 0.99` and `step_dt = 0.02` the
+horizon is 100 steps, **2 s**, against episodes of ~50 s. A residual can improve
+the ZMP match now and topple the robot five seconds later without the discounting
+ever presenting the bill. The signature fits — `zmp_error` improved monotonically
+while `fell_over` rose and survival did not.
+
 ## Rejected shaping ideas
 
 Recorded so they are not reinvented.
