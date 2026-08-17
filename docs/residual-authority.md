@@ -34,6 +34,18 @@ outgrows the hardware is invisible here and divergent on the robot.
   zero-residual baseline, from the first iteration onward and with a near-zero
   mean residual: **the environment was broken before the policy did anything.**
 - 2026-08-03 — back to 0.01.
+- 2026-08-15 — raised to `0.03` on the authority argument below, bundled with
+  `gamma = 0.997`. **Refuted at 1150 iterations and reverted the same day.** More
+  authority did not buy tracking; it cost it. Against the zero-residual baseline
+  (n = 112/arm, deterministic policy) the per-step deficit *widened* to
+  **zmp_tracking -16.7%, com_velocity_tracking -25.2%, recovery_tracking -16.5%**,
+  against -9.9% / -8.1% / -16.6% at scale `0.01`. Not a state-distribution
+  artifact: it holds in every episode-length band, including survivors-only where
+  both arms ran identical 4500-step episodes (-15.1%, p = 6e-8). Nor is it
+  exploration dither — `compare_to_baseline.py` runs
+  `runner.get_inference_policy()`, the distribution mean.
+  The horizon half of that bundle *did* work and was kept; see
+  [reward-shaping.md](reward-shaping.md#residual-harm-at-gamma099).
 
 ## residual_scales
 
@@ -105,14 +117,15 @@ than this shows. What argues against reading it that way is the trained policy,
 which had exactly that dynamic freedom and used it to make tracking 10% *worse*
 (see [reward-shaping.md](reward-shaping.md#residual-harm-at-gamma099)).
 
-**What this implies for the scale.** Authority should scale roughly linearly, and
-torque does: 0.01 rad is 22-27% of the hardware limit and 5.6% authority, so
-~0.03 rad would be ~66-81% of the limit and ~17% authority — the first scale that
-approaches the criterion while staying inside the hardware. The window between
-"too weak to matter" and "past the actuators" is narrow but not empty. Note the
-2026-07-31 catastrophe at 0.1 was partly the *exploration noise*, which
-`std_range = (0.05, 0.30)` now bounds: at scale 0.03 and std 0.05 the dither is
-~0.0015 rad, a few percent of the torque budget rather than 115-140% of it.
+**What this implied for the scale — and why it was wrong.** Authority should scale
+roughly linearly, and torque does: 0.01 rad is 22-27% of the hardware limit and
+5.6% authority, so ~0.03 rad should be ~66-81% of the limit and ~17% authority —
+the first scale approaching the criterion while staying inside the hardware. That
+argument was acted on 2026-08-15 and **the training result contradicted it**: at
+0.03 the deficit widened to -16.7% rather than closing (History above). So the
+probe measures what it says — steady-state authority — but authority is not the
+binding constraint, and the criterion should not be read as a target to reach by
+raising the scale. Do not raise it again on this reasoning alone.
 
 The surgical variant is per-joint: the ankles are what actually move the centre
 of pressure, and `residual_scales` already supports

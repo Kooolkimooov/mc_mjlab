@@ -287,6 +287,19 @@ the ZMP match now and topple the robot five seconds later without the discountin
 ever presenting the bill. The signature fits — `zmp_error` improved monotonically
 while `fell_over` rose and survival did not.
 
+**Tested 2026-08-15, and the hypothesis held on the failure mode.** At
+`gamma = 0.997` the topple signature is gone: `fell_over` is **19.6% for both
+arms** (against 6.2% baseline / 24.1% policy at γ.99), `collapsed` fell 70.5% ->
+57.1%, and survival rose 18.8% -> 29.5% (p = 0.061). The policy now converts
+crouch-collapses into *survivals* rather than into topples. n = 112/arm at
+`model_1150`.
+
+**The tracking deficit did not go away** — it was measured at
+`residual_scale = 0.03` in the same run and widened to -16.7%, which is the
+scale's doing rather than the horizon's
+([residual-authority.md](residual-authority.md#residual_scale)). Whether γ.997 at
+scale 0.01 closes it is the open question; that run is what tests it.
+
 ## Rejected shaping ideas
 
 Recorded so they are not reinvented.

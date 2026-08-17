@@ -102,19 +102,25 @@ support a 6.7 s horizon without GAE becoming almost pure bootstrap.
 converging. The horizon should stay well inside the episode but comfortably
 longer than the delay between a residual acting and the fall it causes.
 
-**Falsifiable.** If `residual_magnitude` still climbs and the per-step tracking
-deficit is still ~10% at iteration 1000, the horizon was not the constraint.
+**Tested, and it held.** The 2026-08-15 run answered the falsification test at
+1150 iterations: `fell_over` went from 24.1% against a 6.2% baseline to **19.6%
+against 19.6%** — the delayed-topple failure mode the horizon was blamed for is
+gone. The learning rate came off the floor as a side effect (below). The scale
+change bundled with it did not survive; see
+[residual-authority.md](residual-authority.md#residual_scale).
 
 ## num_steps_per_env
 
-**Current:** `48`, against mjlab's locomotion default of 24.
+**Current:** `96`, against mjlab's locomotion default of 24.
 
 Collection here is ~99% mc_rtc: at 128 envs the measured split is 2.9 s
 collecting against 0.03 s learning, so a longer rollout is nearly free per sample.
 24 steps is 0.48 s of horizon against episodes of 10-30 s, which leaves GAE almost
-pure bootstrap off a critic that was not converging. 48 halves the number of
-updates and doubles the horizon each advantage is estimated over, which is also
-the cheapest relief for the KL blowups that floored the learning rate.
+pure bootstrap off a critic that was not converging. 48 halved the number of
+updates and doubled the horizon each advantage is estimated over, which is also
+the cheapest relief for the KL blowups that floored the learning rate. 96 came
+with `gamma = 0.997`: 1.9 s of rollout for a 6.7 s horizon.
+
 ## Run 2026-08-14_19-14-46_std-floor
 
 Stopped by SIGINT at 3320 of 15000 iterations because the residual turned out to
@@ -157,3 +163,37 @@ trustworthy here.
 **Conclusion: 2000 iterations past ~1400 bought nothing.** More iterations at
 these settings is not the missing ingredient; see `gamma` for the hypothesis that
 replaced it.
+
+## Run 2026-08-15_07-30-27_scale03-gamma997
+
+Killed at 1150 of 4000 iterations (by an agent, not by a stopping rule — but the
+stopping rule had already fired). Tested `gamma = 0.997` +
+`num_steps_per_env = 96` + `residual_scale = 0.03` as one bundle. **The horizon
+half worked and was kept; the scale half was refuted and reverted.**
+
+Against the std-floor run at the same iteration (mean over 1110-1150):
+
+| | std-floor (γ.99, scale .01) | scale03-γ997 |
+| --- | --- | --- |
+| `Loss/learning_rate` floored, last 200 | 51% | **16%** |
+| `Loss/learning_rate` median | 1.0e-05 | **3.0e-05** |
+| `Policy/mean_std` | 0.0525 (on the 0.05 clamp) | **0.0682** |
+| `Loss/value` | 0.020 | 0.078 |
+| `Episode_Metrics/zmp_error` | 0.0550 | 0.0886 |
+| per-step `Train/mean_reward` | 0.01224 | 0.00693 |
+| `Episode_Termination/fell_over` | 0.272 | 0.261 |
+
+`Episode_Metrics/zmp_grounded` is 1.0000 in both, so the error comparison needs no
+denominator correction.
+
+**The learning rate unpinned without touching `desired_kl`.** That is the result
+worth keeping: `std_range` and `desired_kl = 0.02` half-fixed the pinning, and the
+longer horizon finished the job. `mean_std` also came off the 0.05 clamp. The
+4x rise in `Loss/value` is expected — returns are ~3.3x larger at γ.997.
+
+**The training-time metrics look worse and are not the verdict.** Exploration
+dither was 4x larger in rad (0.03 x 0.068 against 0.01 x 0.0525), which alone
+would degrade `zmp_error` under sampling. The deterministic comparison against the
+zero-residual baseline is the honest read, and it also came out worse — that is
+what condemned the scale, not this table. See
+[residual-authority.md](residual-authority.md#residual_scale) for it.
