@@ -186,7 +186,7 @@ same reason `zmp_error` needs that denominator.
 
 ## angular_momentum
 
-**Current:** weight `-0.05`, from `mdp.angular_momentum_l2`.
+**Current:** weight `-0.005`, from `mdp.angular_momentum_l2`.
 
 Centroidal angular momentum about the root, penalised as `-norm(L)^2`. The
 stabilizer QP does not directly regulate it, so unlike the tracking terms this is
@@ -196,9 +196,20 @@ It reads the `root_angmom` subtree-angular-momentum sensor, which
 `robots/additional_sensors_configuration.py` has been adding to every robot MJCF
 and which nothing had ever read.
 
+**The weight is measured, and the first guess was 10x too large.** A zero-residual
+baseline (16 envs x 1500 steps) carries `norm(L)^2 = 6.64`, so the originally
+proposed `-0.05` cost **-0.00664 per step — 58% of `dcm_stability`'s +0.01140.** It
+would have cancelled most of the objective, and worse, it is a penalty the base
+controller incurs for its *own* natural gait, which is the
+[known wrong sign](#known-wrong-sign) failure in a new place. At `-0.005` it costs
+0.00066 per step, ~6% of the objective: a regularizer rather than a competitor.
+
+**Re-measure if:** the robot changes. `norm(L)` scales with mass and gait speed, so
+the weight is not portable across HRP5P / JVRC1 / RHPS1.
+
 ## foot_slip
 
-**Current:** weight `-0.1`, from `mdp.foot_slip`.
+**Current:** weight `-1.0`, from `mdp.foot_slip`.
 
 Squared tangential sole velocity, summed over feet, counted only while a sole
 carries at least `min_normal_force`. Contact slip is a violation the QP's own
@@ -206,6 +217,17 @@ model cannot see, which is again what makes it worth paying for.
 
 It reads the `left_foot_lin_vel` / `right_foot_lin_vel` velocimeters — the other
 pair of sensors added by `additional_sensors_configuration` and never read.
+
+**This term is deliberately near-inert, and the weight is set for that.** The
+baseline barely slips: measured `sum(v_tangential^2) = 0.0004`, i.e. ~0.02 m/s. The
+originally proposed `-0.1` made it -8e-7 per step — four orders of magnitude below
+the objective, so it could never do anything. `-1.0` keeps the baseline cost
+negligible (-8e-6) while making a *real* slip bite, because the penalty is
+quadratic: a 0.3 m/s slide on one sole costs 0.0018 per step, ~16% of
+`dcm_stability`. It is a guard against a failure that is not currently happening,
+not a shaping term.
+
+**Re-measure if:** ground friction changes, or the baseline's slip level does.
 
 ## RECOVERY_TRACKING_WEIGHT
 
