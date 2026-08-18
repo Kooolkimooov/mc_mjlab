@@ -62,7 +62,15 @@ clip left at the old scalar would silently cap any joint given a larger scale.
 that is enforced. mjlab's `resolve_matching_names_values` raises if a joint
 matches two keys and if a key matches nothing, so a specific entry cannot sit
 alongside a `".*"` catch-all — write it as
-`{"[LR]_ANKLE_.*": 0.03, "^(?![LR]_ANKLE_).*": 0.005}`. What it does **not** raise
+`{"[RL]A[PR]": 0.03, "(?![RL]A[PR]$).*": 0.005}`.
+
+Note the pattern: matching is `re.fullmatch`, and HRP5P's residual joints are
+`RCY RCR RCP RKP RAP RAR` and their `L` twins — so the ankles are `[RL]A[PR]`.
+An `[LR]_ANKLE_.*` spelling, which this file carried until 2026-08-18, matches
+**nothing** on this robot and raises. Joint names are robot-specific; read them off
+`residual_actuator_names` rather than assuming.
+
+What it does **not** raise
 on is a joint matching no key at all: `BaseAction.__init__` seeds `scale` to ones
 and `clip` to +/-inf, so a residual joint left out silently gets scale 1.0 — 100x
 the intended authority — with no clip. That is the 220-270% failure above,
@@ -83,6 +91,56 @@ stays the place for exclusions that hold whatever the task is: a joint mc_rtc
 models as fixed can carry no residual anywhere, and is dropped there. Filtering
 that set rather than taking the legs directly keeps the robot's carve-outs and
 refJointOrder ordering.
+
+## GATE_STRENGTH
+
+**Current:** `0.0` in the action term (a no-op), opted into by the task. How much
+authority to withhold from a residual pointing *against* the controller's own
+commanded joint velocity.
+
+`scale` and `clip` bound **how much** the residual may do. This bounds **where and
+when**, which the literature says matters far more. Jayasinghe et al. ablate a
+residual recovery controller on a Go1 at 1.15x mass and report TTR-50 (lower
+better): full system 168, **no directional alignment 3367**, no transient
+filtering 1127, no dual-timescale 186, no gain modulation 174. Directional
+alignment is twenty times the next-largest term. Their conclusion: "mechanisms
+regulating where and when residual authority is applied are more critical than
+those governing adaptation rate... Even a simple linear residual remains effective
+when bounded and aligned, whereas unconstrained correction destabilizes recovery."
+
+Our own runs say the same thing from the other direction:
+`Episode_Reward/residual_magnitude` grows monotonically in **every** run
+(-0.0126 -> -0.0603 in `scale01`; -0.0087 -> -0.0728 in `dcm-obs`). The *reward* is
+gated on the post-push window by `recovery_dcm`; the *action* has never been gated
+at all, so the residual acts on every step including the ~90% of nominal walking
+where it can gain nothing and can still lose something.
+
+**The shape**, in `McRtcResidualActionBase._coherence_gate`:
+
+```
+cos    = <residual, alpha> / (|residual| |alpha|)
+active = tanh(|alpha| / GATE_ALPHA_REF)
+gate   = 1 - GATE_STRENGTH * relu(-cos) * active
+```
+
+Three properties it is built for, each of which the naive version gets wrong:
+
+- **It can only remove authority**, never add — `gate <= 1` by construction. This
+  is what makes gating on a *measured* quantity safe here when the same trick on
+  the reward would be perverse: it withholds capability rather than granting
+  payment, so there is no state the policy can steer into to be paid more. Compare
+  `RECOVERY_TRACKING_WEIGHT` in [reward-shaping.md](reward-shaping.md), which is
+  gated on the push *schedule* for exactly that reason.
+- **`active` covers the degenerate case, which is most steps.** At every joint
+  reversal and throughout double support `alpha -> 0`, the cosine is meaningless
+  noise, and an ungated version would fire at random precisely when the controller
+  is asking for nothing. Verified: at `|alpha|` of 1e-6 the gate reads 0.999997.
+- **Aligned residuals are untouched.** `relu(-cos)` is 0 for `cos >= 0`, so this
+  only ever attenuates opposition, never ordinary help.
+
+It gates against the **interpolated** alpha, not `controller_reference("alpha")` —
+that accessor returns the un-interpolated next target, and gating against a
+different alpha than the one being tracked injects a substep-frequency artefact.
 
 ## Does the residual have enough authority?
 
@@ -129,7 +187,7 @@ raising the scale. Do not raise it again on this reasoning alone.
 
 The surgical variant is per-joint: the ankles are what actually move the centre
 of pressure, and `residual_scales` already supports
-`{"[LR]_ANKLE_.*": 0.03, "^(?![LR]_ANKLE_).*": 0.005}` — raising ankle authority
+`{"[RL]A[PR]": 0.03, "(?![RL]A[PR]$).*": 0.005}` — raising ankle authority
 without loosening the hips. Which joints deserve it is not measured; the probe
 drives every residual joint uniformly and offers no joint-subset pattern.
 

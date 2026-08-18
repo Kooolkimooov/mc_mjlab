@@ -85,6 +85,16 @@ class McRtcResidualActionCfg(BaseActionCfg):
   output. In-process hosting falls back to per-call fd guards; a threaded
   in-process pool honors "single" only at construction/reset."""
 
+  gate_strength: float = 0.0
+  """How much authority to withhold from a residual opposing the controller's own
+  commanded joint velocity, in 0..1. 0 disables the gate, which is the default so
+  no task changes behaviour without opting in. It can only remove authority."""
+
+  gate_alpha_ref: float = 1.0
+  """Norm of the controller's joint-velocity reference over the residual joints at
+  which the gait counts as fully active, rad/s. Below it the gate relaxes: an idle
+  joint has no commanded direction to oppose."""
+
 
 class McRtcResidualActionBase(BaseAction):
   """mc_rtc residual action base: steps controllers via a pool, adds RL residual."""
@@ -181,6 +191,8 @@ class McRtcResidualActionBase(BaseAction):
   def _setup_residual(self, cfg: McRtcResidualActionCfg) -> None:
     """Slice scale/offset/clip down to the residual actuator subset."""
     self._residual_ids: torch.Tensor | None = None
+    # Before the early return; an all-joints residual needs it too.
+    self._last_gate = torch.ones(self.num_envs, device=self.device)
     if cfg.residual_actuator_names is None:
       return
     ids, _ = resolve_matching_names(cfg.residual_actuator_names, self._target_names)
@@ -319,6 +331,25 @@ class McRtcResidualActionBase(BaseAction):
         f"term's `controller_vectors` (have: {sorted(self._controller_vectors)})"
       ) from None
 
+  def _coherence_gate(
+    self, residual: torch.Tensor, alpha: torch.Tensor
+  ) -> torch.Tensor:
+    """Per-env factor shrinking a residual that opposes the commanded velocity."""
+    # `active` must stay: at a reversal alpha -> 0 and the cosine is pure noise.
+    speed = torch.linalg.vector_norm(alpha, dim=1)
+    cosine = torch.sum(residual * alpha, dim=1) / (
+      torch.linalg.vector_norm(residual, dim=1) * speed + 1e-9
+    )
+    active = torch.tanh(speed / self.cfg.gate_alpha_ref)
+    gate = 1.0 - self.cfg.gate_strength * torch.relu(-cosine) * active
+    self._last_gate = gate
+    return gate
+
+  @property
+  def last_gate(self) -> torch.Tensor:
+    """Most recent coherence gate, ones where it is disabled."""
+    return self._last_gate
+
   @property
   def residual_ids(self) -> torch.Tensor | None:
     """Columns of the target arrays carrying the residual; ``None`` = all."""
@@ -424,9 +455,17 @@ class McRtcResidualActionBase(BaseAction):
 
     self._steps_since_run += 1
 
+    residual = self._processed_actions
+    if self.cfg.gate_strength > 0.0:
+      # Interpolated, not `controller_reference`: that is the next target, not this
+      # substep's. docs/residual-authority.md#gate_strength
+      alpha = interpolated_control["alpha"]
+      if self._residual_ids is not None:
+        alpha = alpha[:, self._residual_ids]
+      residual = residual * self._coherence_gate(residual, alpha).unsqueeze(-1)
+
     # Scatter a restricted residual into the full target width (non-matched
     # joints get 0, i.e. pure mc_rtc tracking).
-    residual = self._processed_actions
     if self._residual_ids is not None:
       self._residual_full.zero_()
       self._residual_full[:, self._residual_ids] = residual
