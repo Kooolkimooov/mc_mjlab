@@ -589,6 +589,54 @@ for the same reason, stated as keeping the policy from becoming "too timid".
 than together. That is fine for a stage ramp and is why the boundaries are stated
 in environment steps (`iterations * num_steps_per_env * num_envs`), not iterations.
 
+## dcm_stability standing bias
+
+**Measured 2026-08-18, and it is real: `dcm_stability` scores a standing robot
++56.5% above a walking one.** Four times the old ZMP term's edge, in the term that
+now carries ~95% of the dense signal.
+
+4 envs x 700 steps per regime, zero residual, identical but for the controller
+(`Enabled: Posture` against `LogisticController_ismpc`, passed through
+`_make_env_cfg(mc_rtc_yaml=...)` so no config file was touched):
+
+| regime | `dcm_stability` | `zmp_tracking` | `com_velocity_tracking` | `norm(alpha)` |
+| --- | --- | --- | --- | --- |
+| walking | 0.5702 | 0.6665 | 0.8059 | 0.728 |
+| standing | 0.8923 | 0.8901 | 0.9327 | 0.000 |
+| **edge** | **+56.5%** | +33.6% | +15.7% | |
+
+**Why, and it is structural rather than incidental.** In the LIPM,
+`d(xi)/dt = omega * (xi - CoP)`: a robot walking forward *requires* the DCM to lead
+the CoP, and that offset is the quantity producing the motion. It is not an error.
+Standing has `com_vel ~ 0`, so `xi ~ com` and the scored distance collapses to a
+balanced stance's CoM-to-CoP offset. The term therefore pays most where the robot
+does least.
+
+**The old terms had the same defect an order of magnitude smaller.** `zmp_tracking`
+was demoted 0.5 -> 0.05 partly for a documented +14% edge; the direct measurement
+here puts it at +33.6%, so that figure was itself understated. But at weight 0.05
+it contributes ~6% of the dense signal, while `dcm_stability` + `recovery_dcm` carry
+~2.0 of ~2.1. **The coefficient moved the wrong way when the objective changed.**
+
+**It remains latent, for the reason the old note gives.** `residual_scale = 0.01`
+cannot cancel a swing trajectory (~0.5 rad), and the residual cannot change what
+mc_rtc commands — the gait is the controller's, not the policy's. The reachable
+consequence is not "the robot stands" but "the policy resists the gait as hard as
+its authority allows".
+
+**Which the coherence gate now partly absorbs.** Resisting the gait *is* opposing
+`alpha`, and that is exactly what `GATE_STRENGTH` withholds authority from — the
+gate was measured attenuating 59% of steps, rising to 65% when the gait is fastest.
+The two changes were made for unrelated reasons and the second happens to blunt the
+first.
+
+**The principled fix, when the objective is next revisited:** score the DCM offset
+against the offset the *commanded* velocity implies rather than against zero. In
+steady LIPM walking `xi - CoP ~ v / omega`, so penalising
+`abs(norm(xi - CoP) - norm(v_cmd) / omega)` targets zero offset when standing and
+`v/omega` when walking, and the bias disappears. Not done here: it is a change to
+the objective, and three of them are already stacked in the run testing the gate.
+
 ## Known wrong sign
 
 Both tracking terms score a standing robot slightly above a walking one (0.75 vs
@@ -599,6 +647,10 @@ cancel a swing trajectory — revisit it if `residual_scale` grows. See
 
 **Largely defused 2026-08-17** by the demotion to 0.05: those two terms were ~90%
 of the dense signal, so the wrong sign was on almost every nominal step. At a
-tenth of the weight the mis-ranking is a tenth as strong. It is not *gone* —
-`dcm_stability` has the same shape of risk and has not been checked for it, which
-is worth doing once `DCM_STD` is measured.
+tenth of the weight the mis-ranking is a tenth as strong.
+
+**But it moved rather than went away, and it got worse.** The check deferred here
+was run on 2026-08-18 and `dcm_stability` carries the same defect at **+56.5%**,
+against this term's directly measured +33.6%, while carrying ~95% of the dense
+signal instead of ~6%. See `dcm_stability standing bias` above. The 0.75/0.66
+figure quoted in this section also understates the ZMP term's own edge.
