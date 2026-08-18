@@ -142,6 +142,46 @@ It gates against the **interpolated** alpha, not `controller_reference("alpha")`
 that accessor returns the un-interpolated next target, and gating against a
 different alpha than the one being tracked injects a substep-frequency artefact.
 
+**Measured before committing to it**, because a gate with nothing to attenuate is
+a wasted run. Under `dcm-obs` `model_1850`, 24 envs x 2500 steps, 60000 env-steps:
+
+| | share `cos < 0` | mean `cos` |
+| --- | --- | --- |
+| all steps | **58.9%** | -0.047 |
+| `\|alpha\| >= 0.5` | 58.5% | -0.038 |
+| `\|alpha\| >= 1.0` | **64.7%** | -0.075 |
+
+So the residual opposes the plan on most steps, and *more often* the faster the
+gait is moving — which is the worst time for it. But the mean cosine is only
+-0.047: it is largely **orthogonal** to the plan with a systematic opposing tilt,
+not fighting it head-on. The gate therefore has real work to do without being
+destructive; at `GATE_STRENGTH = 1.0` it withholds ~10% of authority on average.
+
+Expect the realised effect to **shrink over training**: this was measured on a
+policy trained without the gate, and once opposition costs authority the policy
+should learn to align. A gate whose measured attenuation stays flat across a run
+is one the policy is ignoring.
+
+## GATE_ALPHA_REF
+
+**Current:** `0.5` rad/s, measured. The norm of the controller's joint-velocity
+reference **over the 12 residual joints** — not the per-joint figure of ~0.4 rad/s
+in `CLAUDE.md`, which is a different quantity.
+
+Measured over the same 60000 env-steps: mean 0.848, median 0.845, p25 0.514,
+p75 1.222, p90 1.390. There is no idle mode to speak of — even the 25th percentile
+is 0.51 — so `active` saturates over almost all of normal walking and only relaxes
+for genuinely still joints:
+
+| `\|alpha\|` | 0.2 | 0.514 (p25) | 0.845 (median) |
+| --- | --- | --- | --- |
+| `active` at ref 0.5 | 0.380 | 0.773 | **0.934** |
+| `active` at ref 1.0 | 0.197 | 0.473 | 0.688 |
+
+`0.5` is chosen so the gate is fully effective during ordinary gait (0.93 at the
+median) while still standing down where the cosine stops meaning anything. `1.0`
+would blunt it across the whole operating range, which defeats the point.
+
 ## Does the residual have enough authority?
 
 `scripts/probe_residual_authority.py` answers this directly: it drives a

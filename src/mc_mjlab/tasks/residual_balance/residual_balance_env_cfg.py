@@ -63,6 +63,10 @@ RECOVERY_WINDOW_S = 2.0
 ANGULAR_MOMENTUM_WEIGHT = -0.005
 FOOT_SLIP_WEIGHT = -1.0
 SOLE_VELOCIMETERS = ("left_foot_lin_vel", "right_foot_lin_vel")
+
+# Measured: the residual opposes the plan on 59% of steps, 65% at speed.
+GATE_STRENGTH = 1.0
+GATE_ALPHA_REF = 0.5
 CONTROLLER_HISTORY = 20
 
 # A viewer default: each env is its own ~70 MB controller, built serially.
@@ -122,6 +126,8 @@ def _make_env_cfg(
       pd_gains_path=str(robot.pd_gains_path),
       scale=residual_scales,
       clip=residual_clip,
+      gate_strength=GATE_STRENGTH,
+      gate_alpha_ref=GATE_ALPHA_REF,
       console_output=console_output,
       print_residual_every=print_residual_every,
     )
