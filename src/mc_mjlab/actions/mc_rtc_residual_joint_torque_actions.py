@@ -52,7 +52,7 @@ class McRtcResidualJointTorqueAction(McRtcResidualActionBase):
     # Position ramps from the current stance; velocity and torque from zero.
     # A zero torque seed puts every joint on the PD fallback for the first
     # control period, so the robot holds its stance instead of going limp.
-    stance = self._entity.data.joint_pos[:, self._target_ids]
+    stance = self._entity.data.joint_pos_biased[:, self._target_ids]
     self._previous_control["q"][env_ids] = stance[env_ids]
     self._next_control["q"][env_ids] = stance[env_ids]
     for channel in ("alpha", "tau"):
@@ -64,7 +64,8 @@ class McRtcResidualJointTorqueAction(McRtcResidualActionBase):
   ) -> None:
     torque = interpolated_control["tau"]
     pd_torque = self._kp * (
-      interpolated_control["q"] - self._entity.data.joint_pos[:, self._target_ids]
+      interpolated_control["q"]
+      - self._entity.data.joint_pos_biased[:, self._target_ids]
     ) + self._kd * (
       interpolated_control["alpha"] - self._entity.data.joint_vel[:, self._target_ids]
     )

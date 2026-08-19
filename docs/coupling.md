@@ -283,6 +283,18 @@ The stabilizer is a force-feedback loop, so foot/hand wrenches and the IMU must
 be fed. That is automatic when the model has sensors named
 `<ForceSensor>_fsensor`/`_tsensor` and `<BodySensor>_gyro`/`_accelerometer`.
 
+## Position control law
+
+mc_rtc's `q` and the position residual live in encoder coordinates. The action
+therefore sends `q + residual - encoder_bias` to MuJoCo's position servo, matching
+mjlab's standard joint-position action. Without that subtraction a simulated
+encoder bias changes what the controller observes but not where the actuator
+moves, an unrealistically easy plant that the real controller does not have.
+
+Interpolation seeds from `joint_pos_biased`, not ground-truth position. The first
+target after reset is consequently the current physical stance after bias
+compensation, with no one-step jump induced by the random calibration error.
+
 ## Torque control law
 
 `McRtcResidualJointTorqueAction` reproduces mc_mujoco's `--torque-control` law
@@ -295,14 +307,18 @@ The fallback is not optional. mc_rtc only fills `mbc.jointTorque` for robots
 whose solver has a `DynamicsConstraint`; a kinematics-only controller leaves it
 zero, and without the fallback those joints would go limp.
 
+The fallback error is `q_reference - joint_pos_biased`, for the same encoder
+semantics as the controller and position action. A nonzero direct torque remains
+a torque command and needs no position-bias adjustment.
+
 Because the term computes that whole law itself, it takes over the entity's PD:
 the configured gains (`pd_gains_path` when given) are copied out at construction
 and then zeroed, leaving mjlab's actuators as pass-through motors fed by
 `set_joint_effort_target`.
 
-At reset, position ramps from the current stance while velocity and torque ramp
-from zero. A zero torque seed puts every joint on the PD fallback for the first
-control period, so the robot holds its stance instead of going limp.
+At reset, position ramps from the current biased encoder stance while velocity
+and torque ramp from zero. A zero torque seed puts every joint on the PD fallback
+for the first control period, so the robot holds its stance instead of going limp.
 
 ## Invariants and traps
 

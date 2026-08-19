@@ -79,12 +79,15 @@ def gate_mean(
 
 
 def controller_position_error(
-  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+  env: ManagerBasedRlEnv,
+  action_name: str = "mc_rtc_residual",
+  biased: bool = True,
 ) -> torch.Tensor:
-  """What the controller asked of the residual joints, minus what it got."""
+  """Controller reference minus encoder-visible or privileged joint position."""
   term = _residual_term(env, action_name)
   asset = env.scene[term.cfg.entity_name]
-  error = term.controller_reference("q") - asset.data.joint_pos[:, term.target_ids]
+  position = asset.data.joint_pos_biased if biased else asset.data.joint_pos
+  error = term.controller_reference("q") - position[:, term.target_ids]
   return _restrict(term, error)
 
 

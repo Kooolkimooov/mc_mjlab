@@ -35,7 +35,7 @@ class McRtcResidualJointPositionAction(McRtcResidualActionBase):
 
   def _seed_interpolation(self, env_ids: torch.Tensor) -> None:
     # Position ramps from the current stance; velocity from zero.
-    stance = self._entity.data.joint_pos[:, self._target_ids]
+    stance = self._entity.data.joint_pos_biased[:, self._target_ids]
     self._previous_control["q"][env_ids] = stance[env_ids]
     self._next_control["q"][env_ids] = stance[env_ids]
     self._previous_control["alpha"][env_ids] = 0.0
@@ -44,7 +44,8 @@ class McRtcResidualJointPositionAction(McRtcResidualActionBase):
   def _apply_control(
     self, interpolated_control: dict[str, torch.Tensor], residual: torch.Tensor
   ) -> None:
-    target = interpolated_control["q"] + residual
+    bias = self._entity.data.encoder_bias[:, self._target_ids]
+    target = interpolated_control["q"] + residual - bias
     self._entity.set_joint_position_target(target, joint_ids=self._target_ids)
     self._entity.set_joint_velocity_target(
       interpolated_control["alpha"], joint_ids=self._target_ids

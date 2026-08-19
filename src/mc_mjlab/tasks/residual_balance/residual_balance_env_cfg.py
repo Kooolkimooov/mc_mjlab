@@ -165,7 +165,9 @@ def _make_env_cfg(
       func=mdp.controller_reference_position, history_length=CONTROLLER_HISTORY
     ),
     "controller_pos_error": ObservationTermCfg(
-      func=mdp.controller_position_error, history_length=CONTROLLER_HISTORY
+      func=mdp.controller_position_error,
+      noise=Unoise(n_min=-0.01, n_max=0.01),
+      history_length=CONTROLLER_HISTORY,
     ),
     "controller_planned_zmp": ObservationTermCfg(
       func=mdp.controller_planned_zmp_offset, history_length=CONTROLLER_HISTORY
@@ -203,6 +205,9 @@ def _make_env_cfg(
     name: replace(term, params=dict(term.params)) for name, term in actor_terms.items()
   }
   critic_terms["joint_pos"] = replace(critic_terms["joint_pos"], params={})
+  critic_terms["controller_pos_error"] = replace(
+    critic_terms["controller_pos_error"], params={"biased": False}
+  )
 
   # Privileged, critic-only: exogenous or unobservable, and the largest source of
   # return variance. `push_recency` is bounded on purpose -- see `mdp.push_recency`.

@@ -23,6 +23,13 @@ of that. **`joint_vel` in particular had been carrying noise 12x its own signal.
 `encoder_bias` startup event take effect. Without it the event samples a bias
 nothing ever reads.
 
+`controller_position_error` follows the same split. The actor receives a
+`+/-0.01`-corrupted `q_reference - joint_pos_biased`; the critic receives the
+uncorrupted `q_reference - joint_pos`. This matters because the actor also sees
+the exact reference: with a ground-truth, noise-free error it could reconstruct
+the true angle and bypass both its corrupted `joint_pos` channel and the physical
+encoder model.
+
 ## The actor/critic split
 
 The critic sees the same signals without observation noise. The terms are
@@ -145,5 +152,6 @@ the same wrenches and does reach the actor.
 ## Why the controller channels exist at all
 
 Without them the policy cannot phase its residual with the plan it is meant to
-protect. `controller_position_error` sees encoder-level noise; the reference
-velocity is controller-internal and known exactly.
+protect. `controller_position_error` uses the same biased encoder position the
+controller receives; the reference velocity is controller-internal and known
+exactly.
