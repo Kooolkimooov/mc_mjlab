@@ -65,14 +65,15 @@ the robot-state channels are the ones a longer window helps least: base velocity
 and joint state are near-Markov, whereas the plan's recent history is what encodes
 where in the stride the robot is.
 
-Actor width goes ~284 to ~1180, which grows the first layer from 145k to 604k
-parameters. Affordable because collection dominates completely — 6.94 s against
-0.039 s of learning per iteration, so a wider first layer costs no wall clock.
+Actor width goes 284 to 1219 (1179 before `gait_phase`), which grows the first
+layer from 145k to 624k parameters. Affordable because collection dominates
+completely — 6.94 s against 0.014 s of learning per iteration at 2x2 epochs x
+minibatches, so a wider first layer costs no wall clock.
 
-## Gait phase
+## Gait phase proxies
 
-**Current:** `foot_load_share` plus the two sole velocimeters
-(`left_foot_lin_vel`, `right_foot_lin_vel`), all at `CONTROLLER_HISTORY`.
+**Current:** `foot_load_share`, the two sole velocimeters (`left_foot_lin_vel`,
+`right_foot_lin_vel`), and `gait_phase` below — all at `CONTROLLER_HISTORY`.
 
 These are **sim-side proxies, and deliberately so.** mc_rtc's walking plan — the
 FSM's phase, the next planned footstep, time to touchdown — lives in the
@@ -85,6 +86,36 @@ in two numbers, and it reuses `_ZmpSensors` so it costs no new plumbing. The
 velocimeters separate swing from stance and give swing speed. Both sensor sets
 were already being added to every robot MJCF by
 `robots/additional_sensors_configuration.py` and had never been read by anything.
+
+## gait_phase
+
+**Current:** `(cos, sin)` of an inferred gait phase, `PHASE_RATE_REF = 7.1`, at
+`CONTROLLER_HISTORY`. Added **alongside** `foot_load_share`, not instead of it —
+the load share carries support-state magnitude the angle throws away.
+
+mc_rtc owns the gait and its plan is unreachable through the bindings, so the phase
+is inferred from the foot-load phase plane: with
+`d = (F_left - F_right) / (F_left + F_right)`, emit
+`normalise((d, d_dot / PHASE_RATE_REF))`. That normalised 2-vector **is**
+`(cos, sin)` of the phase — no `atan2`, and no 0->1 wraparound discontinuity, which
+is why leo_mjlab emits sin/cos rather than a raw scalar.
+
+**Measured before wiring, 6 envs x 1200 steps of zero residual:** the estimate winds
+once per gait cycle in **6/6 envs** — 70-89% of steps advance in a consistent
+direction, turn ratio 0.65-1.10 against the 1.22 s gait period read off `d`'s zero
+crossings. `PHASE_RATE_REF = 7.1` is the measured rms of `|d_dot|`; it sets the
+aspect ratio of the phase plane and nothing else.
+
+**Do not filter `d`.** An EMA was tried at four strengths and made it strictly
+worse — the turn ratio fell 0.80 -> 0.47 from alpha 1.0 to 0.05 as lag ate the
+winding, while consistent-direction stayed flat at ~83%. The derivative is noisy
+(`|d_dot|` rms 7.1/s against `|d|` mean 0.695) but the noise does not accumulate.
+
+**The phase runs retrograde and that is fine.** For `d = sin(wt)`,
+`atan2(d_dot, d)` *decreases* with time, so a first reading of this measurement
+looked like a 13% forward rate and a failure. Direction convention carries no
+information for a network reading a 2-vector; what matters is that the winding is
+consistent and one turn per cycle, which it is.
 
 ## controller_planned_zmp and controller_planned_com_vel
 

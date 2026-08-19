@@ -72,6 +72,8 @@ SOLE_VELOCIMETERS = ("left_foot_lin_vel", "right_foot_lin_vel")
 # Measured: the residual opposes the plan on 59% of steps, 65% at speed.
 GATE_STRENGTH = 1.0
 GATE_ALPHA_REF = 0.5
+# Measured |d_dot| rms over the baseline's load difference.
+PHASE_RATE_REF = 7.1
 CONTROLLER_HISTORY = 20
 
 # A viewer default: each env is its own ~70 MB controller, built serially.
@@ -182,6 +184,15 @@ def _make_env_cfg(
     # bindings, so support state and sole motion stand in for it.
     "foot_load_share": ObservationTermCfg(
       func=mdp.foot_load_share, history_length=CONTROLLER_HISTORY
+    ),
+    "gait_phase": ObservationTermCfg(
+      func=mdp.gait_phase,
+      params={
+        "sensor_names": mdp.GROUND_CONTACT_SENSORS,
+        "asset_cfg": SceneEntityCfg("robot"),
+        "rate_ref": PHASE_RATE_REF,
+      },
+      history_length=CONTROLLER_HISTORY,
     ),
     **{
       name: ObservationTermCfg(

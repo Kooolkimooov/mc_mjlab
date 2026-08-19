@@ -324,6 +324,38 @@ def foot_load_share(
   return forces / forces.sum(dim=1, keepdim=True).clamp(min=min_normal_force)
 
 
+class gait_phase:
+  """``(cos, sin)`` of gait phase, inferred from the foot-load phase plane."""
+
+  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+    self._sensors = _zmp_sensors(
+      env, cfg.params["sensor_names"], cfg.params["asset_cfg"].name
+    )
+    self._prev = torch.zeros(env.num_envs, device=env.device)
+    self._step = torch.full((env.num_envs,), -1, dtype=torch.long, device=env.device)
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    sensor_names: tuple[str, ...],
+    asset_cfg: SceneEntityCfg,
+    rate_ref: float = 1.0,
+    min_normal_force: float = 20.0,
+  ) -> torch.Tensor:
+    del sensor_names, asset_cfg  # Resolved at init.
+    forces = self._sensors.normal_forces(env).clamp(min=0.0)
+    total = forces.sum(dim=1).clamp(min=min_normal_force)
+    load = (forces[:, 0] - forces[:, 1]) / total
+    # One read per step, however many terms ask: a second call in the same step
+    # would difference against itself and report a zero rate.
+    fresh = self._step != env.common_step_counter
+    rate = torch.where(fresh, (load - self._prev) / env.step_dt, torch.zeros_like(load))
+    self._prev = torch.where(fresh, load, self._prev)
+    self._step = torch.where(fresh, env.common_step_counter, self._step)
+    plane = torch.stack((load, rate / rate_ref), dim=-1)
+    return plane / torch.linalg.vector_norm(plane, dim=-1, keepdim=True).clamp(min=1e-6)
+
+
 def measured_zmp_offset(
   env: ManagerBasedRlEnv,
   sensor_names: tuple[str, ...] = GROUND_CONTACT_SENSORS,
