@@ -397,7 +397,33 @@ an age of 1, never 0.
 
 ## Residual harm at gamma=0.99
 
-**A trained residual measured worse than no residual at all.** From
+> **SUPERSEDED 2026-08-19. The headline figures in this section do not reproduce.**
+> They come from a comparison at **6 envs per arm**, and `encoder_bias` is a per-env
+> `startup` draw, so episodes within an env are not independent and the effective
+> sample size tracks the env count rather than the episode count. Re-measured at
+> **28 envs per arm** (n = 168), the same checkpoint reads:
+>
+> | | 6 envs/arm (below) | 28 envs/arm |
+> | --- | --- | --- |
+> | tracking aggregate | **-10.1%** (p = 2e-06) | **-0.9%** (p = 0.37) |
+> | `zmp_tracking` | -10% | -1.4% (p = 0.15) |
+> | `com_velocity_tracking` | -8% | -1.5% (p = 0.01) |
+> | `recovery_tracking` | -17% | +2.0% (p = 0.63) |
+> | `fell_over` | +17.8pp | +7.7pp (p = 0.06) |
+> | hazard ratio | — | 0.81 |
+>
+> **The claim this section is named for — that the residual is measurably worse than
+> no residual at gamma = 0.99 — is not supported at proper power.** The direction is
+> unchanged and the topple increase survives as a trend, but the magnitude was an
+> artefact of six environments. Resampling puts the sign-error rate at 6 envs/arm at
+> **15.3%**; the floor is 16 envs/arm. Full record and method in the untracked
+> `RUN_COMPARISONS.md`.
+>
+> The reasoning downstream of this section — the credit-assignment hypothesis that
+> produced `gamma = 0.997` — was independently supported by the correlation statistic
+> and by the later runs, so it is not withdrawn. Only these numbers are.
+
+**Original text, kept for the record.** From
 `model_3050` of the 2026-08-14 run, against the zero-residual baseline in the
 same paired run (n=48/54, 24 envs x 20 min), with episode length divided out so
 duration is not a confound:
