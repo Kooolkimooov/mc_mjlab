@@ -62,8 +62,8 @@ ANGULAR_MOMENTUM_WEIGHT = -0.005
 FOOT_SLIP_WEIGHT = -1.0
 SOLE_VELOCIMETERS = ("left_foot_lin_vel", "right_foot_lin_vel")
 
-# Measured: the residual opposes the plan on 59% of steps, 65% at speed.
-GATE_STRENGTH = 1.0
+# 0: attenuation stayed flat over 1500 iterations and the tracking win vanished.
+GATE_STRENGTH = 0.0
 GATE_ALPHA_REF = 0.5
 # Measured |d_dot| rms over the baseline's load difference.
 PHASE_RATE_REF = 7.1
