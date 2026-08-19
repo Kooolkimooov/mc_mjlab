@@ -427,6 +427,44 @@ is reference-plus-residual such a term reduces to a second penalty on the
 residual. Whole-body failure shows up in the base — attitude, height, travel —
 which is what the task's terminations and `base_progress_tanh` read instead.
 
+## action_l2
+
+**Current:** weight `-0.1`, on the raw action **clamped to `RAW_CLIP = 1.0`**.
+
+The clamp is not cosmetic — it fixes a runaway that destroyed a run. The residual
+is hard-clipped, and because the env cfg sets `clip` equal to `scale`, the clip
+binds at a raw action of exactly 1.0. Past that a larger raw action has **no
+physical effect whatsoever**, so an unclamped quadratic penalty keeps charging more
+for a difference the robot cannot feel.
+
+**How it failed.** `Run 2026-08-17_15-38-02_zeroinit-4ev` was healthy for 2940
+iterations and then diverged inside ten:
+
+| iteration | `Train/mean_reward` | `Episode_Reward/residual_magnitude` | `Loss/value` | `Episode_Metrics/zmp_error` |
+| --- | --- | --- | --- | --- |
+| 2940 | 28.2 | -0.066 | 0.047 | 0.0644 |
+| 2950 | 24.1 | -0.412 | 15.9 | 0.0634 |
+| 2970 | -90.0 | -3.91 | 23.7 | 0.0703 |
+| 2999 | -290.8 | -0.249 | 32.7 | 0.0660 |
+
+The policy's mean wandered out to a raw action of roughly **16** — sixteen times
+the point where the clip binds. `zmp_error` never moved, because the *physical*
+residual was bounded the whole time. What diverged was the penalty: it reached
+-25 per step, which handed the critic targets two orders of magnitude outside its
+range (`Loss/value` 0.047 -> 32.7), and the adaptive schedule could not pull the
+rate down fast enough at 4 events per iteration
+([ppo.md](ppo.md#num_learning_epochs)).
+
+**Why the clamp is safe.** It is inert in the healthy regime. At `model_2900` the
+per-step penalty was 0.00137, i.e. `action_l2` ~ 0.685 over 12 joints, so the mean
+per-joint action was ~0.24 — well inside 1.0. The clamp changes the reward *only*
+where the policy has already left the region its actions can affect, which is
+exactly the pathology.
+
+Note `residual_rate` (mjlab's `action_rate_l2`) is still on the unclamped raw
+action and has the same shape of exposure, though its weight is 10x smaller and it
+did not drive this failure.
+
 ## Known wrong sign
 
 Both tracking terms score a standing robot slightly above a walking one (0.75 vs

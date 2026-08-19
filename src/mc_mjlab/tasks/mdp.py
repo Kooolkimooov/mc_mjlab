@@ -36,8 +36,11 @@ def controller_failed(
 
 
 def action_l2(env: ManagerBasedRlEnv) -> torch.Tensor:
-  """Squared magnitude of the residual action."""
-  return torch.sum(torch.square(env.action_manager.action), dim=1)
+  """Squared magnitude of the residual action, saturating where the clip does."""
+  # Past the clip a larger raw action has no physical effect, so paying more for it
+  # is a runaway: it diverged a run. docs/reward-shaping.md#action_l2
+  action = env.action_manager.action.clamp(-RAW_CLIP, RAW_CLIP)
+  return torch.sum(torch.square(action), dim=1)
 
 
 def _restrict(term: McRtcResidualActionBase, values: torch.Tensor) -> torch.Tensor:
@@ -111,6 +114,9 @@ GRAVITY = 9.81
 
 #: Floor under the CoM height, so a collapsed robot cannot divide omega by ~0.
 MIN_COM_HEIGHT = 0.1
+
+#: Raw action at which the residual clip binds, given `clip` is set to `scale`.
+RAW_CLIP = 1.0
 
 
 def _wrench_sensor(mj_model, suffix: str, sensor_type: int) -> tuple[int, int]:
