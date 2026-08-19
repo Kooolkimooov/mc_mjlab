@@ -63,6 +63,14 @@ def controller_reference_velocity(
   return _restrict(term, term.controller_reference("alpha"))
 
 
+def controller_reference_position(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """The controller's joint-position reference: the vector the residual is added to."""
+  term = _residual_term(env, action_name)
+  return _restrict(term, term.controller_reference("q"))
+
+
 def controller_planned_zmp_offset(
   env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
 ) -> torch.Tensor:
@@ -139,6 +147,14 @@ class _ZmpSensors:
 
     self._cache_key: tuple[object, ...] | None = None
     self._cache: tuple[torch.Tensor, torch.Tensor] | None = None
+
+  def normal_forces(self, env: ManagerBasedRlEnv) -> torch.Tensor:
+    """Vertical contact force under each sensor, ``(num_envs, num_sensors)``."""
+    num_envs, k = env.num_envs, self.num_sensors
+    data = env.sim.data
+    rot = data.site_xmat[:, self.site_ids].reshape(num_envs, k, 3, 3)
+    force_s = data.sensordata[:, self.force_cols].reshape(num_envs, k, 3, 1)
+    return -(rot @ force_s).squeeze(-1)[:, :, 2]
 
   def measured_offset(
     self,
@@ -222,6 +238,17 @@ def planned_zmp_offset(
   return (
     term.controller_vector("planned_zmp") - term.controller_vector("control_com")
   )[:, :2]
+
+
+def foot_load_share(
+  env: ManagerBasedRlEnv,
+  sensor_names: tuple[str, ...] = GROUND_CONTACT_SENSORS,
+  asset_name: str = "robot",
+  min_normal_force: float = 20.0,
+) -> torch.Tensor:
+  """Each foot's share of the vertical contact force: the support state, in 0..1."""
+  forces = _zmp_sensors(env, sensor_names, asset_name).normal_forces(env).clamp(min=0.0)
+  return forces / forces.sum(dim=1, keepdim=True).clamp(min=min_normal_force)
 
 
 class zmp_error:

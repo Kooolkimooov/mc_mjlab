@@ -55,6 +55,9 @@ RECOVERY_TRACKING_STD = ZMP_TRACKING_STD
 RECOVERY_TRACKING_WEIGHT = 1.0
 RECOVERY_WINDOW_S = 2.0
 
+SOLE_VELOCIMETERS = ("left_foot_lin_vel", "right_foot_lin_vel")
+CONTROLLER_HISTORY = 20
+
 # A viewer default: each env is its own ~70 MB controller, built serially.
 PLAY_NUM_ENVS = 1
 
@@ -143,14 +146,33 @@ def _make_env_cfg(
     ),
     "actions": ObservationTermCfg(func=envs_mdp.last_action, history_length=5),
     "controller_ref_vel": ObservationTermCfg(
-      func=mdp.controller_reference_velocity, history_length=5
+      func=mdp.controller_reference_velocity, history_length=CONTROLLER_HISTORY
+    ),
+    "controller_ref_pos": ObservationTermCfg(
+      func=mdp.controller_reference_position, history_length=CONTROLLER_HISTORY
+    ),
+    "controller_pos_error": ObservationTermCfg(
+      func=mdp.controller_position_error, history_length=CONTROLLER_HISTORY
     ),
     "controller_planned_zmp": ObservationTermCfg(
-      func=mdp.controller_planned_zmp_offset, history_length=5
+      func=mdp.controller_planned_zmp_offset, history_length=CONTROLLER_HISTORY
     ),
     "controller_planned_com_vel": ObservationTermCfg(
-      func=mdp.controller_planned_com_velocity, history_length=5
+      func=mdp.controller_planned_com_velocity, history_length=CONTROLLER_HISTORY
     ),
+    # Gait phase, sim-side: mc_rtc's walking plan is unreachable through the
+    # bindings, so support state and sole motion stand in for it.
+    "foot_load_share": ObservationTermCfg(
+      func=mdp.foot_load_share, history_length=CONTROLLER_HISTORY
+    ),
+    **{
+      name: ObservationTermCfg(
+        func=envs_mdp.builtin_sensor,
+        params={"sensor_name": f"robot/{name}"},
+        history_length=CONTROLLER_HISTORY,
+      )
+      for name in SOLE_VELOCIMETERS
+    },
   }
 
   # Copy the terms rather than rebuilding them from `func`/`params`: a rebuild
