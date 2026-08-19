@@ -346,6 +346,11 @@ class McRtcResidualActionBase(BaseAction):
     return gate
 
   @property
+  def processed_action(self) -> torch.Tensor:
+    """Residual after scale and clip, before the coherence gate."""
+    return self._processed_actions
+
+  @property
   def last_gate(self) -> torch.Tensor:
     """Most recent coherence gate, ones where it is disabled."""
     return self._last_gate

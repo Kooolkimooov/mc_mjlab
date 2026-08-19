@@ -157,7 +157,7 @@ def _make_env_cfg(
     "joint_vel": ObservationTermCfg(
       func=envs_mdp.joint_vel_rel, noise=Unoise(n_min=-0.05, n_max=0.05)
     ),
-    "actions": ObservationTermCfg(func=envs_mdp.last_action, history_length=5),
+    "actions": ObservationTermCfg(func=mdp.executed_action, history_length=5),
     "controller_ref_vel": ObservationTermCfg(
       func=mdp.controller_reference_velocity, history_length=CONTROLLER_HISTORY
     ),
@@ -343,6 +343,7 @@ def _make_env_cfg(
     "zmp_error": MetricsTermCfg(func=mdp.zmp_error, params=dict(metric_params)),
     "zmp_grounded": MetricsTermCfg(func=mdp.zmp_grounded, params=dict(metric_params)),
     # No `action_name`: this one compares against the support, not against a plan.
+    "gate_mean": MetricsTermCfg(func=mdp.gate_mean),
     "dcm_error": MetricsTermCfg(
       func=mdp.dcm_error,
       params={

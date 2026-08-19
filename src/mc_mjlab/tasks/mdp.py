@@ -60,6 +60,23 @@ def _restrict(term: McRtcResidualActionBase, values: torch.Tensor) -> torch.Tens
   return values if ids is None else values[:, ids]
 
 
+def executed_action(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """The residual as actually applied, gate included -- not the raw request."""
+  # `last_action` is the network's intent; the gate scales it on ~59% of steps, so
+  # the policy's own history would misreport its dynamics. docs/observations.md
+  term = _residual_term(env, action_name)
+  return term.processed_action * term.last_gate.unsqueeze(-1)
+
+
+def gate_mean(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """Coherence-gate factor, 1 where nothing is withheld."""
+  return _residual_term(env, action_name).last_gate
+
+
 def controller_position_error(
   env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
 ) -> torch.Tensor:
