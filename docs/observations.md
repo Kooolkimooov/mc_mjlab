@@ -124,6 +124,10 @@ looked like a 13% forward rate and a failure. Direction convention carries no
 information for a network reading a 2-vector; what matters is that the winding is
 consistent and one turn per cycle, which it is.
 
+The derivative state resets per environment. The first observation after reset
+uses zero rate and seeds the next difference from the new episode, so neither the
+phase vector nor its history contains an old-episode-to-new-episode impulse.
+
 ## controller_planned_zmp and controller_planned_com_vel
 
 **Current:** both present, `history_length=CONTROLLER_HISTORY`, no noise.

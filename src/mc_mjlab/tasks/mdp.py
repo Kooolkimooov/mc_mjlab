@@ -335,7 +335,14 @@ class gait_phase:
       env, cfg.params["sensor_names"], cfg.params["asset_cfg"].name
     )
     self._prev = torch.zeros(env.num_envs, device=env.device)
+    self._initialized = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
     self._step = torch.full((env.num_envs,), -1, dtype=torch.long, device=env.device)
+
+  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+    """Forget the phase derivative across episode boundaries."""
+    ids = slice(None) if env_ids is None else env_ids
+    self._initialized[ids] = False
+    self._step[ids] = -1
 
   def __call__(
     self,
@@ -352,9 +359,11 @@ class gait_phase:
     # One read per step, however many terms ask: a second call in the same step
     # would difference against itself and report a zero rate.
     fresh = self._step != env.common_step_counter
-    rate = torch.where(fresh, (load - self._prev) / env.step_dt, torch.zeros_like(load))
+    valid = fresh & self._initialized
+    rate = torch.where(valid, (load - self._prev) / env.step_dt, torch.zeros_like(load))
     self._prev = torch.where(fresh, load, self._prev)
     self._step = torch.where(fresh, env.common_step_counter, self._step)
+    self._initialized |= fresh
     plane = torch.stack((load, rate / rate_ref), dim=-1)
     return plane / torch.linalg.vector_norm(plane, dim=-1, keepdim=True).clamp(min=1e-6)
 
