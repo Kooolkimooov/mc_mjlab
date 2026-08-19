@@ -84,9 +84,22 @@ first epoch — have accumulated more drift and read higher. Down-steps cluster,
 while recovery needs eleven consecutive *low* readings that the later epochs
 structurally cannot supply.
 
-**It is free.** Learning is 0.039 s against 6.94 s of collection, so this task is
-~99% collection-bound; fewer gradient steps costs no wall clock. The minibatch
-grows to 6144 samples, which is the more stable KL estimate anyway.
+**It is free in wall clock.** Learning is 0.039 s against 6.94 s of collection, so
+this task is ~99% collection-bound; fewer gradient steps costs no time. The
+minibatch grows to 6144 samples, which is the more stable KL estimate anyway.
+
+**It is NOT free in stability, and this doc said otherwise until 2026-08-18.** The
+event count cuts both ways: 4 events cap the schedule's *recovery* at 1.5^4 = 5x
+per iteration, where 20 events could pull the rate down 3325x inside one. Fewer
+events is better against the chronic pinning and **worse against an acute
+blow-up.** `Run 2026-08-17_15-38-02_zeroinit-4ev` diverged at iteration ~2945 and
+never came back: `Loss/value` went 0.047 -> 15.9 between iterations 2940 and 2950,
+by which point the rate had reached the floor several iterations too late.
+
+That divergence had a second cause that mattered more, and it is fixed rather than
+traded off — see `action_l2` in
+[reward-shaping.md](reward-shaping.md#action_l2). Keep 2 x 2, but do not read the
+event count as a pure win.
 
 **Re-measure `desired_kl` only after this**, not alongside it — with the event
 count down, 0.02 may already be enough.
@@ -270,3 +283,47 @@ would degrade `zmp_error` under sampling. The deterministic comparison against t
 zero-residual baseline is the honest read, and it also came out worse — that is
 what condemned the scale, not this table. See
 [residual-authority.md](residual-authority.md#residual_scale) for it.
+
+## Run 2026-08-17_15-38-02_zeroinit-4ev
+
+3000 iterations in 7 h 13 m. **The first run to beat the zero-residual controller,
+and the first to diverge.** Tested `ZeroInitMLPModel` and `2 x 2` learning epochs x
+minibatches; otherwise `gamma = 0.997`, `residual_scale = 0.01`, and the *old*
+plan-matching reward and 284-dim observations, so its comparisons line up directly
+with `scale01-gamma997`.
+
+**The optimiser was healthy for the first time.** Over 2410 iterations the rate was
+floored **0.0%** of the time at a median of 4.4e-04, against 19% / 3.0e-05 for
+`scale01` and 44% / 1.0e-05 for `std-floor`. `Policy/mean_std` sat at 0.11-0.12 and
+never approached the 0.05 clamp; `Loss/value` held ~0.10.
+
+**Zero-init showed too.** `Episode_Reward/residual_magnitude` began at -0.0052 at
+iteration 40, rather than jumping straight to a random feedback law.
+
+**It peaked early and decayed.** Best smoothed `Episode_Metrics/zmp_error` was
+0.06072 at **iteration 1320**; the final 1600 iterations moved it nowhere
+(0.0625 at 2999) while reward drifted 26 -> 22.5 -> 26.
+
+Against the baseline, deterministic, per-step:
+
+| | `model_1000` (n=136/arm) | `model_2900` (n=224/arm) |
+| --- | --- | --- |
+| `zmp_tracking` | **+3.7%** (p = 0.003) | **-5.5%** (p = 1.3e-09) |
+| `com_velocity_tracking` | -5.0% | -6.3% |
+| survival | **+11.5pp** (p = 0.029) | +5.8pp (p = 0.14) |
+| `collapsed` | -24.6pp | -12.8pp |
+| `corr(residual, episode length)` | +0.12 | +0.27 |
+
+`model_1000` is positive in all four length bands; `model_2900` is negative in all
+four. The correlation staying positive is the horizon fix holding — it was **-0.60**
+at `gamma = 0.99`, where intervening more went with dying sooner.
+
+**Then it diverged at iteration ~2945** and never recovered, ending at reward -291
+with a NaN at 2993. Two causes, one traded off and one fixed: the 4-event schedule
+could not throttle fast enough (`num_learning_epochs` above), and `action_l2` was
+charging unboundedly for raw actions past the clip
+([reward-shaping.md](reward-shaping.md#action_l2)).
+
+**Conclusion: cap this configuration near 1500 iterations.** Its useful work is
+done by ~1300, everything after is decay, and the last 50 iterations were actively
+destructive. Only `save_interval = 50` preserved the checkpoint worth having.

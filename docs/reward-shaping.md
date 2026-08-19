@@ -114,6 +114,25 @@ controller is built to deliver, and across four runs at three scales and two
 discount horizons it never once beat a zero residual on them. This scores the
 robot's actual dynamic margin instead, which the plan cannot buy itself.
 
+**That case is weaker than it looked, and this section was written before the
+evidence against it.** The fifth run — `zeroinit-4ev`, the first with a healthy
+learning rate — **did** beat the baseline on plan-matching. At `model_1000`,
+n=136/arm: per-step `zmp_tracking` **+3.7%** (p = 0.003), positive in all four
+episode-length bands including survivors-only, with survival **+11.5pp**
+(p = 0.029). So the plan-matching objective is improvable after all; "four runs
+never beat it" was measuring a pinned optimiser, not an impossible objective.
+
+What is still true is that the win was **small and transient**. By `model_2900` the
+same measurement read **-5.5%** (p = 1.3e-09) and survival had fallen to +5.8pp
+(p = 0.14), matching a training curve whose best smoothed `zmp_error` was at
+iteration 1320 and which decayed for 1600 iterations afterwards. Read together:
+the objective has a little headroom, a healthy optimiser finds it inside ~1300
+iterations, and then overtraining gives it back.
+
+**So the open question this term was introduced to settle is not settled.** Whether
+`dcm_stability` beats a plan-matching run *capped at ~1300 iterations* is untested,
+and that is the comparison that decides whether this redesign was needed.
+
 The premise that there was simply nothing to win is **wrong**, and that is worth
 recording. Weights are per second and scaled by `step_dt = 0.02`, so each
 tracking term's ceiling is `0.5 * 0.02 = 0.01` per step. The zero-residual

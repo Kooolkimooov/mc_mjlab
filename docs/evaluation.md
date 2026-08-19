@@ -129,6 +129,33 @@ Removing one from the *middle* of a group would silently shift later terms into
 the wrong column rather than fail, so it is only sound for terms appended at the
 end.
 
+## Never score the last checkpoint
+
+**Score the best-metric checkpoint, and confirm the choice with a second read.**
+The last checkpoint is not the best one and can be actively broken: `zeroinit-4ev`
+peaked on `Episode_Metrics/zmp_error` at iteration 1320, decayed for 1600
+iterations, and then diverged outright in its last 50, so `model_2999` was corrupt
+while `model_1000` was the best result this project has produced. Reading only the
+final checkpoint would have reported the opposite of the truth in both directions.
+
+The cheap procedure: smooth `Episode_Metrics/zmp_error` over ~60 iterations, take
+the argmin, and compare that checkpoint plus one much later. Two reads bracket the
+trajectory — a single one cannot distinguish "still improving" from "peaked and
+decaying", and those call for opposite decisions about run length.
+
+## Comparing a checkpoint whose config has moved on
+
+Checkpoints die whenever the observation width changes, so scoring an older one
+means reconstructing the cfg it trained under. A `git worktree` at the right commit
+plus `PYTHONPATH=<worktree>/src:$PYTHONPATH` shadows the installed package without
+touching the working tree or any live run. Two things bite:
+
+- **Prepend to `PYTHONPATH`, never replace it.** The mc_rtc bindings arrive on it
+  from the sourced workspace; clobbering it fails at `import mc_rbdyn`.
+- **Copy `etc/mc_rtc.yaml` into the worktree.** It is untracked, so the worktree
+  gets the *committed* `MainRobot`, and a different robot means a different joint
+  count and a `size mismatch` that looks exactly like a stale-checkpoint error.
+
 ## probe_residual_authority.py
 
 Answers a different question, and the one to ask first when a reward looks blind:
