@@ -44,17 +44,24 @@ PUSH_WARMUP_S = 10.0
 # Tracks the *installed* FSM, which a workspace rebuild reverts.
 WALK_WINDOW_S = 90.0
 
+# A prior now, not the objective: mc_rtc's QP already optimises these.
 ZMP_TRACKING_STD = 0.05
-ZMP_TRACKING_WEIGHT = 0.5
+ZMP_TRACKING_WEIGHT = 0.05
 COM_VELOCITY_TRACKING_STD = 0.05
 COM_VELOCITY_TRACKING_STD_VERTICAL = 0.005
-COM_VELOCITY_TRACKING_WEIGHT = 0.5
+COM_VELOCITY_TRACKING_WEIGHT = 0.05
+
+# Measured: scores the zero-residual baseline 0.57, a p90 push landing 0.05.
+DCM_STD = 0.05
+DCM_STABILITY_WEIGHT = 1.0
 
 # RECOVERY_WINDOW_S rests on a profile taken before the probe was fixed.
-RECOVERY_TRACKING_STD = ZMP_TRACKING_STD
+RECOVERY_TRACKING_STD = DCM_STD
 RECOVERY_TRACKING_WEIGHT = 1.0
 RECOVERY_WINDOW_S = 2.0
 
+ANGULAR_MOMENTUM_WEIGHT = -0.05
+FOOT_SLIP_WEIGHT = -0.1
 SOLE_VELOCIMETERS = ("left_foot_lin_vel", "right_foot_lin_vel")
 CONTROLLER_HISTORY = 20
 
@@ -225,16 +232,38 @@ def _make_env_cfg(
         "action_name": "mc_rtc_residual",
       },
     ),
-    "recovery_tracking": RewardTermCfg(
-      func=mdp.recovery_tracking,
+    # The objective: divergence from the support, which mc_rtc's plan-matching
+    # cannot buy itself. docs/reward-shaping.md#dcm_stability
+    "dcm_stability": RewardTermCfg(
+      func=mdp.dcm_stability,
+      weight=DCM_STABILITY_WEIGHT,
+      params={
+        "std": DCM_STD,
+        "sensor_names": mdp.GROUND_CONTACT_SENSORS,
+        "asset_cfg": SceneEntityCfg("robot"),
+      },
+    ),
+    "recovery_dcm": RewardTermCfg(
+      func=mdp.recovery_dcm,
       weight=RECOVERY_TRACKING_WEIGHT,
       params={
         "std": RECOVERY_TRACKING_STD,
         "window_s": RECOVERY_WINDOW_S,
         "sensor_names": mdp.GROUND_CONTACT_SENSORS,
         "asset_cfg": SceneEntityCfg("robot"),
-        "action_name": "mc_rtc_residual",
         "push_term_name": "push_robot",
+      },
+    ),
+    "angular_momentum": RewardTermCfg(
+      func=mdp.angular_momentum_l2, weight=ANGULAR_MOMENTUM_WEIGHT
+    ),
+    "foot_slip": RewardTermCfg(
+      func=mdp.foot_slip,
+      weight=FOOT_SLIP_WEIGHT,
+      params={
+        "sensor_names": mdp.GROUND_CONTACT_SENSORS,
+        "asset_cfg": SceneEntityCfg("robot"),
+        "velocimeter_names": SOLE_VELOCIMETERS,
       },
     ),
     "residual_magnitude": RewardTermCfg(func=mdp.action_l2, weight=-0.1),
@@ -307,6 +336,14 @@ def _make_env_cfg(
   metrics = {
     "zmp_error": MetricsTermCfg(func=mdp.zmp_error, params=dict(metric_params)),
     "zmp_grounded": MetricsTermCfg(func=mdp.zmp_grounded, params=dict(metric_params)),
+    # No `action_name`: this one compares against the support, not against a plan.
+    "dcm_error": MetricsTermCfg(
+      func=mdp.dcm_error,
+      params={
+        "sensor_names": mdp.GROUND_CONTACT_SENSORS,
+        "asset_cfg": SceneEntityCfg("robot"),
+      },
+    ),
   }
 
   # Solver settings follow mc_mujoco's HRP5Pmain.xml, as in the demo.

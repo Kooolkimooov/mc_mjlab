@@ -1,19 +1,30 @@
 # Reward shaping
 
-The reward must pay for tracking the controller's plan, not for surviving. With
-`gamma=0.99` the discounted horizon is ~100 steps (2 s), so the termination
-penalty shapes only the last couple of seconds before a fall (`0.99^400 ~ 0.02`)
-and the dense terms do all the work.
+The reward must pay for stability the base controller cannot buy itself, not for
+agreeing with it and not for merely surviving. The dense terms do most of the
+work: at `gamma=0.997` the horizon is ~333 steps (6.7 s), long enough that the
+termination penalty now reaches the residual's own delayed consequences, but still
+short against a 90 s episode.
 
-Those are `zmp_tracking` and `com_velocity_tracking`: the CoM-to-ZMP offset and
-the CoM velocity, the two halves of the planar LIPM state the plan is written on.
-There is deliberately no separate DCM term — the divergent mode
-`com + comVel/omega` is a linear combination of those two, so any DCM weighting
-is already reachable by choosing their weights.
+**Reorganised 2026-08-17.** The objective is `dcm_stability` — the divergence rate
+of the LIPM's divergent component from the centre of pressure — with
+`recovery_dcm` paying the same quantity on the window after a push, and
+`angular_momentum` and `foot_slip` penalising two things the stabilizer QP's model
+does not regulate.
 
-Both were sized against the zero-residual baseline, and both collapse in the
-run-up to a fall (to 0.12 and 0.10 of a possible 1.0), which is what makes them
-the early warning the sparse penalty cannot be.
+`zmp_tracking` and `com_velocity_tracking` remain, demoted from 0.5 to 0.05: they
+score the measured state against mc_rtc's *own plan*, which the QP already
+optimises, so as the objective they paid the residual to reproduce what the base
+controller is built to deliver. They are a "don't fight the controller" prior now.
+Both were sized against the zero-residual baseline and both collapse in the run-up
+to a fall (to 0.12 and 0.10 of a possible 1.0), so they remain useful diagnostics.
+
+The earlier claim here that a separate DCM term was unnecessary — that the
+divergent mode is a linear combination of the two, so any DCM weighting is
+reachable by choosing their weights — was **wrong in a way that mattered**. It is a
+linear combination of *measured CoM and CoM velocity*, but those terms score
+`measured - planned`, not the measured state itself. No choice of weights over two
+plan-tracking errors expresses a plan-independent stability margin.
 
 Constants in `tasks/residual_balance/residual_balance_env_cfg.py`; terms in
 `tasks/mdp.py`.
@@ -33,10 +44,7 @@ scores 0.84).
 
 ## ZMP_TRACKING_WEIGHT
 
-**Current:** `0.5`. Weights are per second — the manager scales by `step_dt` — so
-at 0.5 over the 90 s walk window a perfectly tracking episode earns 45 and the
-baseline ~31, against the -4 a fall costs. Dense shaping that ranks good balance
-without ever out-paying survival.
+**Current:** `0.05`, a prior rather than the objective — see `dcm_stability`.
 
 **History:**
 - `1.0` originally.
@@ -72,10 +80,7 @@ drifting.
 
 ## COM_VELOCITY_TRACKING_WEIGHT
 
-**Current:** `0.5`.
-
-**Re-measure if:** you are wondering whether this should be back at 1.0. It
-probably should.
+**Current:** `0.05`, matching the ZMP term's demotion.
 
 **History:**
 - `1.0`, kept deliberately equal to the ZMP term because the two are
@@ -90,12 +95,111 @@ probably should.
   alternatives, if it is revisited: back to 1.0, or add a
   `recovery_com_velocity` mirroring `recovery_tracking`'s gate.
 
+## dcm_stability
+
+**Current:** weight `1.0`, `DCM_STD = 0.05` (measured, see below). The task's
+primary dense reward since 2026-08-17, replacing the plan-matching pair.
+
+**What it scores.** With the divergent component of motion
+`xi = com_xy + com_vel_xy / omega` and `omega = sqrt(g / com_z)`, the linear
+inverted pendulum gives `d(xi)/dt = omega * (xi - CoP)`. So `norm(xi - CoP)` is
+not a proxy for instability — it **is** the divergence rate, in metres. The reward
+is `exp(-(error/std)^2)`, gated on the feet carrying load exactly as
+`zmp_tracking` is.
+
+**Why it replaced plan-matching.** `zmp_tracking` and `com_velocity_tracking`
+score the measured state against mc_rtc's *own plan*, which the stabilizer QP is
+already solving for — so the residual was paid to reproduce what the base
+controller is built to deliver, and across four runs at three scales and two
+discount horizons it never once beat a zero residual on them. This scores the
+robot's actual dynamic margin instead, which the plan cannot buy itself.
+
+The premise that there was simply nothing to win is **wrong**, and that is worth
+recording. Weights are per second and scaled by `step_dt = 0.02`, so each
+tracking term's ceiling is `0.5 * 0.02 = 0.01` per step. The zero-residual
+baseline reaches 0.00664 (66%) on ZMP and 0.00790 (79%) on CoM velocity, which
+back-solves to a 0.032 m operating error — consistent with
+[residual-authority.md](residual-authority.md). A third of the ZMP reward is
+unclaimed. The residual was not failing to find headroom that does not exist; it
+was failing to find headroom that does, presumably where the QP is constrained or
+where its model disagrees with the sim.
+
+**It reuses `_ZmpSensors` entirely.** `measured_offset` already returns
+`CoP - CoM` in xy, so `xi - CoP = com_vel_xy/omega - measured_offset` and no new
+sensor plumbing was needed. `measured_offset` is now the memoised call (five terms
+read it per step), rather than `offset_error` as before.
+
+## DCM_STD
+
+**Current:** `0.05` — measured off the zero-residual baseline, not copied from
+`ZMP_TRACKING_STD` despite landing on the same number.
+
+Measured 2026-08-17, zero action, 16 envs x 2500 steps, 40000 grounded samples
+(fully grounded throughout). The DCM-to-CoP distance runs:
+
+| mean | median | p75 | p90 | p99 |
+| --- | --- | --- | --- | --- |
+| 0.0435 | 0.0331 | 0.0618 | 0.0864 | 0.1889 |
+
+Scoring that distribution through `exp(-(e/std)^2)` — note this is the mean of the
+score, not the score of the mean, which differ substantially here:
+
+| `std` | baseline mean score | headroom | score at p90 |
+| --- | --- | --- | --- |
+| 0.03 | 0.399 | 0.601 | 0.000 |
+| 0.04 | 0.492 | 0.508 | 0.009 |
+| **0.05** | **0.571** | **0.429** | **0.051** |
+| 0.06 | 0.637 | 0.363 | 0.126 |
+| 0.08 | 0.737 | 0.263 | 0.312 |
+
+`0.05` is chosen on the same two criteria that sized `ZMP_TRACKING_STD` (which
+scores its baseline 0.68 with a p90 landing at 0.02): a push landing must collapse
+the payment, and there must be real headroom left for the residual to earn. At
+0.05 a p90 disturbance pays 0.051 — the same order as the ZMP term's 0.02 — while
+leaving **43% of the term unclaimed**, more than the ZMP term's 32%. `0.06` scores
+the baseline closer to the ZMP precedent but lets a p90 landing still pay 0.126,
+which blunts the early-warning property this term exists for.
+
+**Re-measure if:** `PUSH_VELOCITY` moves, or the baseline's operating error does.
+
+`dcm_error` is the metric for this. Read it as `dcm_error / zmp_grounded`, for the
+same reason `zmp_error` needs that denominator.
+
+## angular_momentum
+
+**Current:** weight `-0.05`, from `mdp.angular_momentum_l2`.
+
+Centroidal angular momentum about the root, penalised as `-norm(L)^2`. The
+stabilizer QP does not directly regulate it, so unlike the tracking terms this is
+something the residual can improve without competing with the controller.
+
+It reads the `root_angmom` subtree-angular-momentum sensor, which
+`robots/additional_sensors_configuration.py` has been adding to every robot MJCF
+and which nothing had ever read.
+
+## foot_slip
+
+**Current:** weight `-0.1`, from `mdp.foot_slip`.
+
+Squared tangential sole velocity, summed over feet, counted only while a sole
+carries at least `min_normal_force`. Contact slip is a violation the QP's own
+model cannot see, which is again what makes it worth paying for.
+
+It reads the `left_foot_lin_vel` / `right_foot_lin_vel` velocimeters — the other
+pair of sensors added by `additional_sensors_configuration` and never read.
+
 ## RECOVERY_TRACKING_WEIGHT
 
-**Current:** `1.0`, with `RECOVERY_TRACKING_STD = ZMP_TRACKING_STD` and
-`RECOVERY_WINDOW_S = 2.0`. The disturbance-gated half of the ZMP payment.
+**Current:** `1.0`, with `RECOVERY_TRACKING_STD = DCM_STD` and
+`RECOVERY_WINDOW_S = 2.0`. The disturbance-gated half of the payment.
 
-**Why it exists:** measured with episode length divided out, the per-step
+**2026-08-17 — the term is now `mdp.recovery_dcm`, not `recovery_tracking`.** The
+gate machinery is unchanged (`_age_since_push`, the same window, the same
+schedule-independence argument below); only the scored quantity moved from
+plan-matching to the DCM offset above. Everything recorded here about *why the
+gate exists and why it is 2.0 s* still applies.
+
+**Why the gate exists:** measured with episode length divided out, the per-step
 tracking rate is the same under a trained policy as under none (0.01183 vs
 0.01196, SE 0.00015) — **the reward was blind to the policy**. Almost every step
 of an episode is nominal walking, where mc_rtc tracks its own plan and a residual
@@ -330,3 +434,9 @@ Both tracking terms score a standing robot slightly above a walking one (0.75 vs
 theoretical only because the residual is hard-clipped to an authority that cannot
 cancel a swing trajectory — revisit it if `residual_scale` grows. See
 [residual-authority.md](residual-authority.md).
+
+**Largely defused 2026-08-17** by the demotion to 0.05: those two terms were ~90%
+of the dense signal, so the wrong sign was on almost every nominal step. At a
+tenth of the weight the mis-ranking is a tenth as strong. It is not *gone* —
+`dcm_stability` has the same shape of risk and has not been checked for it, which
+is worth doing once `DCM_STD` is measured.
