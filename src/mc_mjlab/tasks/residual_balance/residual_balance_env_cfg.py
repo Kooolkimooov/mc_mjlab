@@ -11,6 +11,7 @@ from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp import dr
 from mjlab.managers.action_manager import ActionTermCfg
+from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.metrics_manager import MetricsTermCfg
 from mjlab.managers.observation_manager import ObservationGroupCfg, ObservationTermCfg
@@ -348,6 +349,22 @@ def _make_env_cfg(
     "asset_cfg": SceneEntityCfg("robot"),
     "action_name": "mc_rtc_residual",
   }
+  # Ramped, not imposed: at full strength from iteration 0 it charges mc_rtc's own
+  # torques before the residual has done anything. docs/reward-shaping.md#torque_margin
+  curriculum = {
+    "torque_margin_weight": CurriculumTermCfg(
+      func=mdp.reward_weight,
+      params={
+        "reward_name": "torque_margin",
+        "weight_stages": [
+          {"step": 0, "weight": TORQUE_MARGIN_WEIGHT},
+          {"step": 500 * 96 * 128, "weight": TORQUE_MARGIN_WEIGHT * 2},
+          {"step": 1000 * 96 * 128, "weight": TORQUE_MARGIN_WEIGHT * 3.5},
+        ],
+      },
+    )
+  }
+
   metrics = {
     "zmp_error": MetricsTermCfg(func=mdp.zmp_error, params=dict(metric_params)),
     "zmp_grounded": MetricsTermCfg(func=mdp.zmp_grounded, params=dict(metric_params)),
@@ -371,6 +388,7 @@ def _make_env_cfg(
     ),
     observations=observations,
     actions=actions,
+    curriculum=curriculum,
     rewards=rewards,
     terminations=terminations,
     events=events,

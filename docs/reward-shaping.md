@@ -574,6 +574,21 @@ is necessary but not sufficient: the first policy step still spans the transient
 The limits come from the mc_rtc `RobotModule` so they follow the robot, but the
 *ratio* depends on the gains that produce the torque.
 
+## torque_margin_weight
+
+**Current:** the task's first and only curriculum term, from `mdp.reward_weight`
+(ported from leo_mjlab's `velocity/mdp/curriculums.py`).
+
+A safety penalty at full strength from iteration 0 charges mc_rtc's own torques
+before the residual has done anything — the residual starts at exactly zero under
+`ZeroInitMLPModel`, so every newton-metre early in training belongs to the base
+controller. leo_mjlab ramps its equivalent from -0.05 to -1.00 over 6000 iterations
+for the same reason, stated as keeping the policy from becoming "too timid".
+
+**It fires from `_reset_idx`**, so envs cross a stage boundary as they reset rather
+than together. That is fine for a stage ramp and is why the boundaries are stated
+in environment steps (`iterations * num_steps_per_env * num_envs`), not iterations.
+
 ## Known wrong sign
 
 Both tracking terms score a standing robot slightly above a walking one (0.75 vs
