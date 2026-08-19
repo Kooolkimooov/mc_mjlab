@@ -37,16 +37,15 @@ def residual_balance_ppo_cfg(
       num_mini_batches=2,
       learning_rate=1.0e-3,
       schedule="adaptive",
-      # 333 steps (6.7 s), not 100 (2 s): a residual's topple lands outside 2 s.
+      # The 6.7 s discount horizon and 4.6 s 95% GAE trace cover delayed falls.
       gamma=0.997,
-      lam=0.95,
+      lam=0.99,
       desired_kl=0.02,
       max_grad_norm=1.0,
     ),
     experiment_name=experiment_name,
-    save_interval=50,
-    # 1 s of rollout cannot support a 6.7 s horizon.
-    num_steps_per_env=96,
+    save_interval=20,
+    num_steps_per_env=256,
     max_iterations=max_iterations,
     logger="wandb",
   )

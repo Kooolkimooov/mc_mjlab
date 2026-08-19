@@ -181,8 +181,9 @@ and survival did not improve.
 **Why it is affordable now.** A longer horizon leans harder on the critic, and
 until the -200 termination penalty landed the critic was not converging
 (`Loss/value` 0.7-5.5). It now sits at ~0.02 for a whole run.
-`num_steps_per_env` doubled alongside for the same reason — 1 s of rollout cannot
-support a 6.7 s horizon without GAE becoming almost pure bootstrap.
+`num_steps_per_env` first doubled alongside for the same reason — 1 s of rollout
+cannot support a 6.7 s horizon without GAE becoming almost pure bootstrap. The
+current rollout and lambda close the remaining mismatch below.
 
 **Re-measure if:** episode length changes a lot, or `Loss/value` stops
 converging. The horizon should stay well inside the episode but comfortably
@@ -195,9 +196,27 @@ gone. The learning rate came off the floor as a side effect (below). The scale
 change bundled with it did not survive; see
 [residual-authority.md](residual-authority.md#residual_scale).
 
+## lam
+
+**Current:** `0.99`, against the previous `0.95`.
+
+`gamma` alone is not PPO's multi-step credit trace. GAE weights fall by
+`gamma * lambda` on each step. The old pair gave `0.997 * 0.95 = 0.94715`: a
+mean trace length of only 19 steps (0.38 s), with 95% of its mass inside 1.10 s.
+Calling that configuration a 6.7 s credit assignment was therefore wrong.
+
+At `lambda = 0.99`, the factor is 0.98703. Its mean trace length is 77 steps
+(1.54 s), and 95% of the mass lies inside 229 steps (4.58 s). The critic still
+bootstraps the tail, but a delayed topple now contributes materially to the
+advantage that updates the action which preceded it.
+
+**Re-measure if:** advantage variance or `Loss/value` rises sharply. Lambda trades
+bias for variance; the deterministic baseline comparison, not training return,
+decides whether the longer trace helped.
+
 ## num_steps_per_env
 
-**Current:** `96`, against mjlab's locomotion default of 24.
+**Current:** `256` (5.12 s), against mjlab's locomotion default of 24.
 
 Collection here is ~99% mc_rtc: at 128 envs the measured split is 2.9 s
 collecting against 0.03 s learning, so a longer rollout is nearly free per sample.
@@ -205,7 +224,14 @@ collecting against 0.03 s learning, so a longer rollout is nearly free per sampl
 pure bootstrap off a critic that was not converging. 48 halved the number of
 updates and doubled the horizon each advantage is estimated over, which is also
 the cheapest relief for the KL blowups that floored the learning rate. 96 came
-with `gamma = 0.997`: 1.9 s of rollout for a 6.7 s horizon.
+with `gamma = 0.997`: 1.9 s of rollout for a 6.7 s discount horizon, but still
+covered less than half the 4.58 s GAE mass window after fixing `lambda`. A
+256-step rollout covers that window and leaves 0.54 s for its tail.
+
+`save_interval` moved from 50 to 20 at the same time. Checkpoints therefore stay
+approximately equally dense in experience: every 5120 policy steps per env now,
+against 4800 before. Iteration numbers across the two configurations are not
+sample-count comparable.
 
 ## Run 2026-08-14_19-14-46_std-floor
 
