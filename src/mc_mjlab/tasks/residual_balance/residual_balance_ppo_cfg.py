@@ -31,12 +31,13 @@ def residual_balance_ppo_cfg(
       use_clipped_value_loss=True,
       clip_param=0.2,
       entropy_coef=0.0005,
-      num_learning_epochs=5,
-      num_mini_batches=4,
+      # Their product is the adaptive schedule's step count: 20 events allow a
+      # 1.5^20 = 3325x rate collapse in one iteration, 4 events only 5x.
+      num_learning_epochs=2,
+      num_mini_batches=2,
       learning_rate=1.0e-3,
       schedule="adaptive",
-      # 333 steps (6.7 s), not 100 (2 s): the topple a residual causes lands
-      # outside a 2 s horizon. docs/ppo.md#gamma
+      # 333 steps (6.7 s), not 100 (2 s): a residual's topple lands outside 2 s.
       gamma=0.997,
       lam=0.95,
       desired_kl=0.02,

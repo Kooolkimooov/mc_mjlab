@@ -58,6 +58,39 @@ deficit the policy must first climb out of.
 **Re-measure if:** rsl_rl is upgraded. Assert rather than trust — sample the
 untrained actor and require `mean_head_magnitude(...) < 1e-3`.
 
+## num_learning_epochs
+
+**Current:** `2` with `num_mini_batches = 2`, against mjlab's 5 and 4.
+
+**Their product is the number of learning-rate adaptation events per iteration.**
+rsl_rl's adaptive schedule runs *inside* the minibatch loop (`ppo.py:234-249`,
+within the flat `mini_batch_generator`; `ppo.py:321` confirms
+`num_updates = num_learning_epochs * num_mini_batches`), not once per iteration.
+Each event can multiply the rate by 1.5 either way.
+
+| epochs x minibatches | events | worst-case collapse in one iteration |
+| --- | --- | --- |
+| 5 x 4 | 20 | 1.5^20 = **3325x** |
+| 2 x 2 | 4 | 1.5^4 = **5x** |
+
+Falling 1e-3 -> the 1e-5 floor needs `log(100)/log(1.5) = 11.4` consecutive
+divisions — reachable inside a single iteration at 20 events, impossible at 4.
+This is the mechanism behind `desired_kl`'s "it hit the floor in the first
+iteration of every run so far".
+
+The schedule is also biased downward within an iteration: KL is measured against
+the collection-time policy, so later minibatches — and every minibatch after the
+first epoch — have accumulated more drift and read higher. Down-steps cluster,
+while recovery needs eleven consecutive *low* readings that the later epochs
+structurally cannot supply.
+
+**It is free.** Learning is 0.039 s against 6.94 s of collection, so this task is
+~99% collection-bound; fewer gradient steps costs no wall clock. The minibatch
+grows to 6144 samples, which is the more stable KL estimate anyway.
+
+**Re-measure `desired_kl` only after this**, not alongside it — with the event
+count down, 0.02 may already be enough.
+
 ## std_range
 
 **Current:** `(0.05, 0.30)`.
@@ -98,14 +131,18 @@ both ends anyway.
 **Current:** `0.02` — the one parameter with authority over the learning rate on
 this task.
 
-rsl_rl's adaptive schedule halves the rate whenever the measured KL exceeds 2x
-this, clamped to a 1e-5 floor.
+rsl_rl's adaptive schedule divides the rate by 1.5 whenever the measured KL
+exceeds 2x this, clamped to a 1e-5 floor.
 
-**Re-measure if:** the rate still pins. The next move is 0.03, and the suspect
-after that is `obs_normalization`: the running normalizer shifts between when
+**Re-measure only after `num_learning_epochs`**, which is the multiplier sitting
+in front of this one and is the larger lever. The suspect after both is
+`obs_normalization`: the running normalizer shifts between when
 `old_actions_log_prob` is stored at collection and when the update runs, which
 inflates *measured* KL with no weight change at all. rsl_rl logs no KL scalar to
-confirm that from the outside.
+confirm that from the outside. That one is real but bounded — `EmpiricalNormalization`
+moves its mean by ~`batch / count`, so by iteration 218 (count ~2.7M against a
+12288-sample batch) it is a 1/n effect. It explains "floored from iteration 0",
+not "floored 55% of the last 200".
 
 **History:**
 - At `0.01` it hit the floor in the first iteration of *every* run so far and
