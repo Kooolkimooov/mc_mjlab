@@ -21,6 +21,42 @@ hand the controller a huge random offset on step one and knock it over.
   of the hole its own random initialization dug. A residual policy should start
   indistinguishable from the controller it wraps and improve from there, never
   much worse.
+- 2026-08-17 — that diagnosis was right and this was the wrong lever. `init_std`
+  never touched the larger of the two terms; see `ZeroInitMLPModel` below.
+
+## ZeroInitMLPModel
+
+**Current:** the actor's `class_name`, a subclass that zeroes the mean rows of the
+output layer after construction. Defined in `tasks/zero_init_actor.py`, selected
+through rsl_rl's documented `"module.path:Attr"` form, so nothing is patched.
+
+**Why it exists.** rsl_rl never initializes the actor's mean head. `MLPModel`
+calls `distribution.init_mlp_weights`, but `GaussianDistribution` — the scalar-std
+class this task uses — inherits the base no-op, because it keeps std in a separate
+`nn.Parameter` and has no std rows to zero. (The implementation that *does* zero
+std rows belongs to `HeteroscedasticGaussianDistribution`, which is not in use
+here.) So the output layer keeps `nn.Linear`'s default init.
+
+Measured on this exact actor — 284 obs, hidden `(512, 256, 128)`, ELU, unit-variance
+inputs, which is what `obs_normalization = True` delivers:
+
+| untrained mean action | value |
+| --- | --- |
+| RMS | **0.0944** |
+| peak | **0.4748** |
+| `init_std` for comparison | 0.100 |
+
+Iteration 0 is therefore not "zero residual plus dither". It is a **deterministic
+random state-feedback law** the size of the exploration noise, peaking at 4.7x it —
+and unlike dither it does not average away, because it is a fixed function of
+exactly the state the stabilizer is reacting to.
+
+**What it buys:** iteration 0 becomes identical to the zero-residual baseline, so
+every `compare_to_baseline.py` reading starts from parity rather than from a
+deficit the policy must first climb out of.
+
+**Re-measure if:** rsl_rl is upgraded. Assert rather than trust — sample the
+untrained actor and require `mean_head_magnitude(...) < 1e-3`.
 
 ## std_range
 

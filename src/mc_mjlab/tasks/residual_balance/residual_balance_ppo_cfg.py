@@ -9,10 +9,10 @@ def residual_balance_ppo_cfg(
   max_iterations: int = 500, experiment_name: str = "mc_rtc_residual_balance"
 ) -> RslRlOnPolicyRunnerCfg:
   """PPO settings, following mjlab's locomotion configs."""
-  # Every value that deviates from mjlab's defaults is measured; docs/ppo.md has
-  # the why, keyed by field name.
   return RslRlOnPolicyRunnerCfg(
     actor=RslRlModelCfg(
+      # rsl_rl leaves the mean rows at nn.Linear's default: untrained RMS 0.094.
+      class_name="mc_mjlab.tasks.zero_init_actor:ZeroInitMLPModel",
       hidden_dims=(512, 256, 128),
       activation="elu",
       obs_normalization=True,
