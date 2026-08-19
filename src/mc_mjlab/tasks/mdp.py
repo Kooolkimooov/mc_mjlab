@@ -637,22 +637,6 @@ class torque_margin:
     return torch.sum(torch.log1p(over), dim=1) * settled
 
 
-def reward_weight(
-  env: ManagerBasedRlEnv,
-  env_ids: torch.Tensor,
-  reward_name: str,
-  weight_stages: list[dict],
-) -> torch.Tensor:
-  """Step a reward term's weight through ``weight_stages`` as training advances."""
-  # Fires from `_reset_idx`, so envs cross a stage boundary staggered, not together.
-  del env_ids
-  cfg = env.reward_manager.get_term_cfg(reward_name)
-  for stage in weight_stages:
-    if env.common_step_counter > stage["step"]:
-      cfg.weight = stage["weight"]
-  return torch.tensor([cfg.weight])
-
-
 class push_and_record:
   """``push_by_setting_velocity``, plus a record of when it last fired."""
 

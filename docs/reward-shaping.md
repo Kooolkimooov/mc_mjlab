@@ -612,8 +612,8 @@ The limits come from the mc_rtc `RobotModule` so they follow the robot, but the
 
 ## torque_margin_weight
 
-**Current:** the task's first and only curriculum term, from `mdp.reward_weight`
-(ported from leo_mjlab's `velocity/mdp/curriculums.py`).
+**Current:** mjlab's `reward_curriculum`, with weights `-0.05`, `-0.20`, and
+`-0.50` at common policy-step counts 0, 48000, and 96000 respectively.
 
 A safety penalty at full strength from iteration 0 charges mc_rtc's own torques
 before the residual has done anything — the residual starts at exactly zero under
@@ -621,9 +621,16 @@ before the residual has done anything — the residual starts at exactly zero un
 controller. leo_mjlab ramps its equivalent from -0.05 to -1.00 over 6000 iterations
 for the same reason, stated as keeping the policy from becoming "too timid".
 
-**It fires from `_reset_idx`**, so envs cross a stage boundary as they reset rather
-than together. That is fine for a stage ramp and is why the boundaries are stated
-in environment steps (`iterations * num_steps_per_env * num_envs`), not iterations.
+`common_step_counter` increments once per vectorised policy step, **not once per
+environment**. Multiplying the thresholds by `num_envs` delayed the old ramp by
+128x, so it never fired in practical runs. The thresholds are now invariant to
+both environment count and rollout length. With the current 256-step rollout they
+land near iterations 188 and 375; with the historical 96-step rollout they land
+at 500 and 1000.
+
+The curriculum manager calls from `_reset_idx`, but the reward configuration is
+global. The first reset after a threshold changes the scalar for every env; this
+is not a staggered per-env curriculum.
 
 ## com_velocity_error
 

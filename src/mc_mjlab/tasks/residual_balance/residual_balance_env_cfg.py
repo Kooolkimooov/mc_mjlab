@@ -10,6 +10,7 @@ from typing import Literal
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp import dr
+from mjlab.envs.mdp.curriculums import reward_curriculum
 from mjlab.managers.action_manager import ActionTermCfg
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
@@ -55,8 +56,9 @@ RECOVERY_TRACKING_WEIGHT = 1.0
 RECOVERY_WINDOW_S = 2.0
 
 # Measured: inert at baseline (0.00% of settled steps over limit), bites past it.
-TORQUE_MARGIN_WEIGHT = -0.2
+TORQUE_MARGIN_WEIGHT = -0.05
 TORQUE_SOFT_RATIO = 1.0
+TORQUE_MARGIN_STAGE_STEPS = (48_000, 96_000)
 
 ANGULAR_MOMENTUM_WEIGHT = -0.005
 FOOT_SLIP_WEIGHT = -1.0
@@ -338,17 +340,16 @@ def _make_env_cfg(
     "asset_cfg": SceneEntityCfg("robot"),
     "action_name": "mc_rtc_residual",
   }
-  # Ramped, not imposed: at full strength from iteration 0 it charges mc_rtc's own
-  # torques before the residual has done anything. docs/reward-shaping.md#torque_margin
+  # Ramped so early training does not charge mc_rtc alone. docs/reward-shaping.md
   curriculum = {
     "torque_margin_weight": CurriculumTermCfg(
-      func=mdp.reward_weight,
+      func=reward_curriculum,
       params={
         "reward_name": "torque_margin",
-        "weight_stages": [
+        "stages": [
           {"step": 0, "weight": TORQUE_MARGIN_WEIGHT},
-          {"step": 500 * 96 * 128, "weight": TORQUE_MARGIN_WEIGHT * 2},
-          {"step": 1000 * 96 * 128, "weight": TORQUE_MARGIN_WEIGHT * 3.5},
+          {"step": TORQUE_MARGIN_STAGE_STEPS[0], "weight": TORQUE_MARGIN_WEIGHT * 4},
+          {"step": TORQUE_MARGIN_STAGE_STEPS[1], "weight": TORQUE_MARGIN_WEIGHT * 10},
         ],
       },
     )
