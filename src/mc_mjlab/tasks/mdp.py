@@ -43,6 +43,17 @@ def action_l2(env: ManagerBasedRlEnv) -> torch.Tensor:
   return torch.sum(torch.square(action), dim=1)
 
 
+def action_rate_l2(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """Squared change in the residual action, saturating where the clip does."""
+  # mjlab's version charges the raw action unboundedly, the same runaway
+  # `action_l2` was clamped for. docs/reward-shaping.md#action_l2
+  manager = env.action_manager
+  delta = manager.action.clamp(-RAW_CLIP, RAW_CLIP) - manager.prev_action.clamp(
+    -RAW_CLIP, RAW_CLIP
+  )
+  return torch.sum(torch.square(delta), dim=1)
+
+
 def _restrict(term: McRtcResidualActionBase, values: torch.Tensor) -> torch.Tensor:
   """Keep only the columns carrying the residual (see ``residual_ids``)."""
   ids = term.residual_ids

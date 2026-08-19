@@ -273,7 +273,7 @@ def _make_env_cfg(
       },
     ),
     "residual_magnitude": RewardTermCfg(func=mdp.action_l2, weight=-0.1),
-    "residual_rate": RewardTermCfg(func=envs_mdp.action_rate_l2, weight=-0.1),
+    "residual_rate": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.1),
   }
 
   terminations = {
