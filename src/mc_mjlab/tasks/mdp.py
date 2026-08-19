@@ -9,6 +9,7 @@ import mujoco
 import torch
 from mjlab.envs.mdp import events
 from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.utils.lab_api.math import quat_apply_inverse
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
 
@@ -251,6 +252,21 @@ def foot_load_share(
   return forces / forces.sum(dim=1, keepdim=True).clamp(min=min_normal_force)
 
 
+def measured_zmp_offset(
+  env: ManagerBasedRlEnv,
+  sensor_names: tuple[str, ...] = GROUND_CONTACT_SENSORS,
+  asset_name: str = "robot",
+) -> torch.Tensor:
+  """The *measured* CoM-to-CoP offset, free of the observer drift the actor sees."""
+  measured, _ = _zmp_sensors(env, sensor_names, asset_name).measured_offset(env)
+  return measured
+
+
+def encoder_bias(env: ManagerBasedRlEnv, asset_name: str = "robot") -> torch.Tensor:
+  """The per-joint encoder bias itself, which the actor can only suffer."""
+  return env.scene[asset_name].data.encoder_bias
+
+
 class zmp_error:
   """Distance from the measured centre of pressure to the planned one, in metres."""
 
@@ -366,6 +382,7 @@ class push_and_record:
     self.last_push_step = torch.full(
       (env.num_envs,), self.NEVER, dtype=torch.long, device=env.device
     )
+    self.last_push_vel = torch.zeros((env.num_envs, 3), device=env.device)
 
   def __call__(
     self,
@@ -382,8 +399,15 @@ class push_and_record:
       ids = ids[env.episode_length_buf[ids] * env.step_dt >= warmup_s]
       if ids.numel() == 0:
         return
-    events.push_by_setting_velocity(
-      env, ids, velocity_range, asset_cfg or SceneEntityCfg("robot")
+    asset = env.scene[(asset_cfg or SceneEntityCfg("robot")).name]
+    # Mirrors `events.push_by_setting_velocity`, sampling here so the delta can be
+    # recorded: `root_link_vel_w` comes from `cvel`, which MuJoCo does not
+    # recompute until the next forward, so a before/after difference reads zero.
+    vel_w = asset.data.root_link_vel_w[ids]
+    delta = events._sample_se3_range(velocity_range, vel_w.shape, str(env.device))
+    asset.write_root_link_velocity_to_sim(vel_w + delta, env_ids=ids)
+    self.last_push_vel[ids] = quat_apply_inverse(
+      asset.data.root_link_quat_w[ids], delta[:, :3]
     )
     self.last_push_step[ids] = env.common_step_counter
 
@@ -415,6 +439,25 @@ def steps_since_push(
 ) -> torch.Tensor:
   """Policy steps since each env was last pushed *within its current episode*."""
   return _age_since_push(env, _push_term(env, term_name))
+
+
+def push_recency(
+  env: ManagerBasedRlEnv, term_name: str = "push_robot", tau_s: float = 2.0
+) -> torch.Tensor:
+  """1 at the instant of a push, decaying to 0; 0 for an env not pushed this episode."""
+  # Bounded on purpose: `steps_since_push` reports NEVER_AGE (2^30), which would
+  # wreck the observation normalizer if fed in raw.
+  age = _age_since_push(env, _push_term(env, term_name)).clamp(min=0)
+  return torch.exp(-age.float() * env.step_dt / tau_s).unsqueeze(-1)
+
+
+def last_push_velocity(
+  env: ManagerBasedRlEnv, term_name: str = "push_robot"
+) -> torch.Tensor:
+  """The velocity delta of the last push, zeroed once it predates this episode."""
+  term = _push_term(env, term_name)
+  within = (_age_since_push(env, term) < NEVER_AGE).unsqueeze(-1)
+  return term.last_push_vel * within
 
 
 class recovery_tracking:

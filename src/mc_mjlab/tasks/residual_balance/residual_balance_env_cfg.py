@@ -182,6 +182,15 @@ def _make_env_cfg(
   }
   critic_terms["joint_pos"] = replace(critic_terms["joint_pos"], params={})
 
+  # Privileged, critic-only: exogenous or unobservable, and the largest source of
+  # return variance. `push_recency` is bounded on purpose -- see `mdp.push_recency`.
+  critic_terms |= {
+    "push_recency": ObservationTermCfg(func=mdp.push_recency),
+    "last_push_velocity": ObservationTermCfg(func=mdp.last_push_velocity),
+    "encoder_bias": ObservationTermCfg(func=mdp.encoder_bias),
+    "measured_zmp_offset": ObservationTermCfg(func=mdp.measured_zmp_offset),
+  }
+
   observations = {
     "actor": ObservationGroupCfg(
       terms=actor_terms, concatenate_terms=True, enable_corruption=True

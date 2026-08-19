@@ -34,6 +34,23 @@ The encoder bias goes with the noise: a privileged critic should value states
 from the true joint angles, not from the miscalibrated reading the actor has to
 live with. mjlab's own tracking task splits the two groups the same way.
 
+**Until 2026-08-17 that was the critic's *only* advantage** — noise-free
+`joint_pos` and nothing else. It now also gets four terms the actor cannot have,
+which matters more at `gamma = 0.997` than it did at 0.99, because a longer
+horizon leans harder on the critic:
+
+| critic-only term | why the actor cannot have it |
+| --- | --- |
+| `push_recency` | the push is exogenous and unobservable, and is the largest single source of return variance |
+| `last_push_velocity` | same, and it is the magnitude the critic needs to value the state |
+| `encoder_bias` | the bias *value*, rather than merely its absence |
+| `measured_zmp_offset` | the true CoP, without the `KinematicInertial` drift the actor lives with |
+
+`push_recency` is `exp(-age * step_dt / tau)`, **not** raw `mdp.steps_since_push`.
+That function reports `NEVER_AGE = 1 << 30` for an env not yet pushed in its
+episode; feeding 1e9 into `EmpiricalNormalization` would destroy it, and silently.
+Any future term built on `steps_since_push` needs the same treatment.
+
 ## history
 
 **Current:** `20` (`CONTROLLER_HISTORY`) on the controller and gait channels, `5`
@@ -89,10 +106,10 @@ Controller-internal and exact, so they carry no observation noise, the same as
 foot to foot and the phase is the point.
 
 They are *plans*, not errors. The measured side of `com_velocity_tracking` is
-largely inferable from `base_lin_vel`, but the measured side of `zmp_tracking` —
-the centre of pressure under the feet — is in no observation group either, so
-adding it is the obvious next thing to try if these two are not enough on their
-own.
+largely inferable from `base_lin_vel`; the measured side — the centre of pressure
+under the feet — went to the **critic** as `measured_zmp_offset` on 2026-08-17.
+The actor still does not get it directly, but `foot_load_share` is derived from
+the same wrenches and does reach the actor.
 
 ## Why the controller channels exist at all
 
