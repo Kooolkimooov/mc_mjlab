@@ -12,6 +12,7 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.utils.lab_api.math import quat_apply_inverse
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
+from mc_mjlab.robots import mc_rtc_robot_configuration as mc_rtc
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -527,6 +528,46 @@ class foot_slip:
     loaded = self._sensors.normal_forces(env) >= min_normal_force
     tangential = torch.sum(torch.square(velocity[:, :, :2]), dim=2)
     return torch.sum(tangential * loaded, dim=1)
+
+
+class torque_margin:
+  """Penalise peak joint torque past the robot's own hardware limit."""
+
+  def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv) -> None:
+    term = _residual_term(env, cfg.params.get("action_name", "mc_rtc_residual"))
+    ids = term.residual_ids
+    cols = list(range(len(term.target_names))) if ids is None else ids.tolist()
+    limits = mc_rtc.get_effort_limits(term.cfg.mc_rtc_robot_name)
+    missing = [term.target_names[i] for i in cols if term.target_names[i] not in limits]
+    if missing:
+      raise KeyError(
+        f"the mc_rtc RobotModule reports no torque limit for {missing}; "
+        f"`torque_margin` cannot bound a joint it has no limit for."
+      )
+    self._cols = torch.tensor(cols, device=env.device, dtype=torch.long)
+    self._limits = torch.tensor(
+      [limits[term.target_names[i]] for i in cols], device=env.device
+    )
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    soft_ratio: float = 1.0,
+    action_name: str = "mc_rtc_residual",
+    warmup_steps: int = 25,
+  ) -> torch.Tensor:
+    term = _residual_term(env, action_name)
+    # Fold in this step's own read: apply_actions trails sim.step by one substep,
+    # so the accumulator alone misses the last of the decimation window.
+    peak = torch.maximum(
+      term.consume_torque_peak(),
+      env.scene[term.cfg.entity_name].data.qfrc_actuator[:, term.target_ids].abs(),
+    )[:, self._cols]
+    over = torch.relu(peak / self._limits - soft_ratio)
+    # The reset teleport drives a substep transient of 22x the limit that no policy
+    # -rate sample sees and the residual did not cause. docs/reward-shaping.md
+    settled = env.episode_length_buf >= warmup_steps
+    return torch.sum(torch.log1p(over), dim=1) * settled
 
 
 class push_and_record:

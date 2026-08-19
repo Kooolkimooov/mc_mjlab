@@ -506,6 +506,74 @@ Note `residual_rate` (mjlab's `action_rate_l2`) is still on the unclamped raw
 action and has the same shape of exposure, though its weight is 10x smaller and it
 did not drive this failure.
 
+## torque_margin
+
+**Current:** weight `-0.05` **provisional**, ramped x4 at iteration 500 and x10 at
+1000 by the `torque_margin_weight` curriculum. `TORQUE_SOFT_RATIO = 1.0`.
+
+**Why it exists: the measurement was already in the repo and nothing acted on it.**
+[residual-authority.md](residual-authority.md#residual_scale) records that
+`residual_scale = 0.01` through the real `PDgains_sim.dat` gains is **22-27% of
+every leg joint's hardware limit**, and that a saturated residual takes ankle pitch
+to **0.64** of its limit. Nothing enforced any of it. The position clip bounds the
+*offset*, not the torque it produces, and `EFFORT_LIMIT` is deliberately `inf`
+(mc_mujoco parity, see `pd_actuator_configuration`) so MuJoCo will not clamp
+either. A residual that outgrows the actuators is invisible in sim and divergent
+on the robot.
+
+Both halves already existed unwired: `mc_rtc_robot_configuration.get_effort_limits`
+reads per-joint limits straight from the mc_rtc `RobotModule`, and
+`entity.data.qfrc_actuator` gives the realised joint torque.
+
+**Shape**, after leo_mjlab's `raw_torque_peak_penalty`:
+
+```
+cost = sum_j log1p(relu(peak|tau_j| / limit_j - SOFT_RATIO))
+```
+
+- **Peak over the decimation window, not the mean.** What sizes an actuator is the
+  worst instant, and at 20 substeps per policy step that instant is invisible to
+  anything sampled at the policy rate. The action term peak-holds it; note
+  `apply_action` runs *before* `sim.step`, so the accumulator trails by one substep
+  and the reward folds in its own read to cover the last of the window.
+- **`SOFT_RATIO = 1.0`, the limit itself.** leo_mjlab ran 0.7 and moved to 1.0
+  deliberately — charging below the limit made the policy timid.
+- **`log1p`, not square.** A soft knee, so one saturated joint cannot swamp the
+  objective the way `angular_momentum` did at its first weight.
+- **Residual joints only.** The documented hazard is the leg joints, which are
+  exactly the twelve the residual drives; charging the other 41 adds an offset the
+  policy can barely influence.
+
+**Measured 2026-08-18, and the sizing rule is not the one used for the shaping
+terms.** This is a *guard*, like `foot_slip`: the right baseline cost is **zero**,
+not the ~5% used for `angular_momentum`. At `-0.2` with the warm-up gate the
+zero-residual baseline pays exactly **0.000000** per step.
+
+Over 6 envs x 700 steps, the max-over-joints ratio to the hardware limit:
+
+| | median | p90 | p99 | max | steps over limit |
+| --- | --- | --- | --- | --- | --- |
+| settled | 0.133 | 0.203 | 0.229 | **0.40** | **0.00%** |
+| first 0.5 s | 0.128 | 0.177 | 1.80 | **22.1** | 1.03% |
+
+The worst settled joint is `LAP` at 0.40, which matches
+[residual-authority.md](residual-authority.md#residual_scale)'s independent finding
+that ankle pitch is the binding joint. So the baseline has ~2.5x of headroom and
+the term never fires on it — it exists for the regime that produced the 2026-07-31
+failure at 220-270% of limit.
+
+**`warmup_steps = 25` is load-bearing, not hygiene.** The reset teleport drives a
+*substep* transient of **22x the limit** — `kp` reaches 36000 on the knees, so a
+1 rad settling error is ~36000 Nm. No policy-rate sample ever sees it (sampled at
+the policy rate the same run maxes at 0.40), but the peak-hold does, and it is not
+the residual's doing. Without the gate the baseline paid 0.27% of the objective
+in pure reset artefact. The action term also zeroes its accumulator on reset, which
+is necessary but not sufficient: the first policy step still spans the transient.
+
+**Re-measure if:** the robot changes, `residual_scale` grows, or the PD gains move.
+The limits come from the mc_rtc `RobotModule` so they follow the robot, but the
+*ratio* depends on the gains that produce the torque.
+
 ## Known wrong sign
 
 Both tracking terms score a standing robot slightly above a walking one (0.75 vs

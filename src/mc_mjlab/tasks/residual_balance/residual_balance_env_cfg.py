@@ -60,6 +60,10 @@ RECOVERY_TRACKING_STD = DCM_STD
 RECOVERY_TRACKING_WEIGHT = 1.0
 RECOVERY_WINDOW_S = 2.0
 
+# Measured: inert at baseline (0.00% of settled steps over limit), bites past it.
+TORQUE_MARGIN_WEIGHT = -0.2
+TORQUE_SOFT_RATIO = 1.0
+
 ANGULAR_MOMENTUM_WEIGHT = -0.005
 FOOT_SLIP_WEIGHT = -1.0
 SOLE_VELOCIMETERS = ("left_foot_lin_vel", "right_foot_lin_vel")
@@ -271,6 +275,11 @@ def _make_env_cfg(
         "asset_cfg": SceneEntityCfg("robot"),
         "velocimeter_names": SOLE_VELOCIMETERS,
       },
+    ),
+    "torque_margin": RewardTermCfg(
+      func=mdp.torque_margin,
+      weight=TORQUE_MARGIN_WEIGHT,
+      params={"soft_ratio": TORQUE_SOFT_RATIO, "action_name": "mc_rtc_residual"},
     ),
     "residual_magnitude": RewardTermCfg(func=mdp.action_l2, weight=-0.1),
     "residual_rate": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.1),

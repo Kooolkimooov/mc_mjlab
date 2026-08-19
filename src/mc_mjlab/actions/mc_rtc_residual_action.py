@@ -193,6 +193,9 @@ class McRtcResidualActionBase(BaseAction):
     self._residual_ids: torch.Tensor | None = None
     # Before the early return; an all-joints residual needs it too.
     self._last_gate = torch.ones(self.num_envs, device=self.device)
+    self._torque_peak = torch.zeros(
+      self.num_envs, self._num_targets, device=self.device
+    )
     if cfg.residual_actuator_names is None:
       return
     ids, _ = resolve_matching_names(cfg.residual_actuator_names, self._target_names)
@@ -345,6 +348,12 @@ class McRtcResidualActionBase(BaseAction):
     self._last_gate = gate
     return gate
 
+  def consume_torque_peak(self) -> torch.Tensor:
+    """Peak |joint torque| since the last call, over the target joints; resets it."""
+    peak = self._torque_peak.clone()
+    self._torque_peak.zero_()
+    return peak
+
   @property
   def processed_action(self) -> torch.Tensor:
     """Residual after scale and clip, before the coherence gate."""
@@ -392,6 +401,8 @@ class McRtcResidualActionBase(BaseAction):
 
     if env_ids is None:
       env_ids = slice(None)
+
+    self._torque_peak[env_ids] = 0.0
 
     if isinstance(env_ids, slice):
       env_indices = list(range(self.num_envs))[env_ids]
@@ -457,6 +468,14 @@ class McRtcResidualActionBase(BaseAction):
       + interpolation_coef * (self._next_control[c] - self._previous_control[c])
       for c in self.output_channels
     }
+
+    # Peak-held across the decimation window: what sizes an actuator is the worst
+    # instant, and apply_actions runs before sim.step so this trails by a substep.
+    torch.maximum(
+      self._torque_peak,
+      self._entity.data.qfrc_actuator[:, self._target_ids].abs(),
+      out=self._torque_peak,
+    )
 
     self._steps_since_run += 1
 
