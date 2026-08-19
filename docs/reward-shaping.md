@@ -31,7 +31,10 @@ Constants in `tasks/residual_balance/residual_balance_env_cfg.py`; terms in
 
 ## ZMP_TRACKING_STD
 
-**Current:** `0.05` — sized off the zero-residual baseline rather than picked.
+**Removed 2026-08-19** with its reward term; see `Pruning the agreement rewards`.
+The sizing argument is kept because it is the template every later `std` followed.
+
+Was `0.05` — sized off the zero-residual baseline rather than picked.
 Measured over 64 s x 16 envs, the CoM-to-ZMP offset error runs median 2.1 cm,
 p75 4.4 cm, p90 9.0 cm. `std` is where the exponential has fallen to 1/e, so
 5 cm scores that baseline 0.68 on average: ordinary walking is well paid, a push
@@ -44,7 +47,8 @@ scores 0.84).
 
 ## ZMP_TRACKING_WEIGHT
 
-**Current:** `0.05`, a prior rather than the objective — see `dcm_stability`.
+**Removed 2026-08-19.** `zmp_tracking` is no longer a reward term; the quantity
+survives as the `zmp_error` metric. See `Pruning the agreement rewards` below.
 
 **History:**
 - `1.0` originally.
@@ -57,7 +61,11 @@ scores 0.84).
 
 ## COM_VELOCITY_TRACKING_STD
 
-**Current:** `0.05` horizontal, `COM_VELOCITY_TRACKING_STD_VERTICAL = 0.005`.
+**Removed 2026-08-19** with its reward term; see `Pruning the agreement rewards`.
+The two-scale reasoning below is why `com_velocity_error` is reported as a plain
+norm rather than through a kernel.
+
+Was `0.05` horizontal, `COM_VELOCITY_TRACKING_STD_VERTICAL = 0.005`.
 Over 96 s x 16 envs (131 episodes, 58 of them falls) the error runs median
 1.2 cm/s and mean 3.3 cm/s.
 
@@ -80,7 +88,9 @@ drifting.
 
 ## COM_VELOCITY_TRACKING_WEIGHT
 
-**Current:** `0.05`, matching the ZMP term's demotion.
+**Removed 2026-08-19**, and replaced by the `com_velocity_error` metric. This is the
+term that was negative against baseline in **every** comparison ever run, so it is
+kept as a diagnostic. See `Pruning the agreement rewards` below.
 
 **History:**
 - `1.0`, kept deliberately equal to the ZMP term because the two are
@@ -588,6 +598,70 @@ for the same reason, stated as keeping the policy from becoming "too timid".
 **It fires from `_reset_idx`**, so envs cross a stage boundary as they reset rather
 than together. That is fine for a stage ramp and is why the boundaries are stated
 in environment steps (`iterations * num_steps_per_env * num_envs`), not iterations.
+
+## com_velocity_error
+
+**Current:** a metric, in m/s, replacing the `com_velocity_tracking` reward.
+
+The norm of `measured CoM velocity - control_com_vel`. Reported raw rather than
+through an exponential kernel: as a diagnostic the metres-per-second figure is the
+useful quantity, and the two-scale split that `COM_VELOCITY_TRACKING_STD` needed
+only existed to keep a *reward* from hiding crouch-collapse.
+
+**Why it is worth logging at all.** This is the only quantity that came out negative
+against the zero-residual baseline in **every** comparison ever run on this task —
+across three rewards, two horizons, three residual scales, and with and without the
+coherence gate. That makes it the best available detector of a policy fighting the
+plan, which is exactly what stops being visible once the agreement rewards are gone.
+
+## Pruning the agreement rewards
+
+**Removed 2026-08-19:** `zmp_tracking` and `com_velocity_tracking` are no longer
+reward terms. Both scored `measured - planned` against mc_rtc's own plan, which the
+stabilizer QP already optimises. Both are retained as metrics (`zmp_error`,
+`com_velocity_error`), so nothing stops being observable.
+
+**Two independent lines of evidence picked out the same two terms.**
+
+Measured share of the total absolute dense reward on the zero-residual baseline, and
+the policy's own delta against that baseline:
+
+| term | share | policy delta | verdict |
+| --- | --- | --- | --- |
+| `dcm_stability` | **61.4%** | +4.2% (p = 0.007) | working |
+| `termination_penalty` | 12.8% | -24.5% | working |
+| `recovery_dcm` | 11.0% | +9.3% (p = 0.03) | working |
+| `angular_momentum` | 5.9% | -17.2% (p = 5e-04) | working |
+| `com_velocity_tracking` | 4.5% | **-7.2 / -5.6 / -6.7 / -3.6%** | negative everywhere |
+| `zmp_tracking` | 3.8% | +1.3 / -1.4 / -0.2 / +0.3% | null |
+| `upright` | 0.5% | -16.0% (p = 0.04) | working |
+| `foot_slip` | 0.1% | noise at 1e-5 | inert guard |
+| `torque_margin` | 0.0% | exactly 0 | inert guard |
+
+The terms that are zero-sum-or-worse **are** the agreement terms, and together they
+are only **8.3% of the dense signal**.
+
+**Why removing them is low-risk rather than a gamble.** `com_velocity_tracking` is
+negative against baseline in every comparison across both reward eras, often at
+p < 1e-07 — the policy actively sacrifices a term it is paid for. A prior that can be
+given up that freely is not binding, so removing it should change behaviour little.
+That is the argument *for* deletion: it was paying for nothing.
+
+**What is deliberately kept.** The *raw* controller signals stay as observations —
+`controller_ref_pos`, `controller_ref_vel`, `controller_planned_zmp`,
+`controller_planned_com_vel`, `controller_pos_error`. Feeding the policy the plan is
+useful; *paying* it to match the plan is not. `recovery_dcm` also stays: it is gated
+on the post-push window but scores the DCM-to-CoP distance, which is
+plan-independent, so it is not an agreement term despite the gating.
+
+`foot_slip` and `torque_margin` stay at 0.1% and 0.0%. They are guards, not shaping:
+they cost nothing and fire only on a real contact-slip or hardware-limit excursion.
+Removing them would save nothing and lose the detection.
+
+**This does not fix the wrong sign.** The agreement pair carried a +33.6% standing
+bias; `dcm_stability` carries **+56.5%** and is 61.4% of the signal. The prune
+removes 8.3% of wrong-signed reward and leaves the larger share untouched — see
+`dcm_stability standing bias` below, and the velocity-referenced fix proposed there.
 
 ## dcm_stability standing bias
 

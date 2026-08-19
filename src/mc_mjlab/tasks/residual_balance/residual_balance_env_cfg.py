@@ -45,13 +45,6 @@ PUSH_WARMUP_S = 10.0
 # Tracks the *installed* FSM, which a workspace rebuild reverts.
 WALK_WINDOW_S = 90.0
 
-# A prior now, not the objective: mc_rtc's QP already optimises these.
-ZMP_TRACKING_STD = 0.05
-ZMP_TRACKING_WEIGHT = 0.05
-COM_VELOCITY_TRACKING_STD = 0.05
-COM_VELOCITY_TRACKING_STD_VERTICAL = 0.005
-COM_VELOCITY_TRACKING_WEIGHT = 0.05
-
 # Measured: scores the zero-residual baseline 0.57, a p90 push landing 0.05.
 DCM_STD = 0.05
 DCM_STABILITY_WEIGHT = 1.0
@@ -234,26 +227,6 @@ def _make_env_cfg(
     # Sized by gradient scale: -2000 was a 1000x outlier that floored the LR.
     "termination_penalty": RewardTermCfg(func=envs_mdp.is_terminated, weight=-200.0),
     "upright": RewardTermCfg(func=envs_mdp.flat_orientation_l2, weight=-2.0),
-    "zmp_tracking": RewardTermCfg(
-      func=mdp.zmp_tracking,
-      weight=ZMP_TRACKING_WEIGHT,
-      params={
-        "std": ZMP_TRACKING_STD,
-        "sensor_names": mdp.GROUND_CONTACT_SENSORS,
-        "asset_cfg": SceneEntityCfg("robot"),
-        "action_name": "mc_rtc_residual",
-      },
-    ),
-    "com_velocity_tracking": RewardTermCfg(
-      func=mdp.com_velocity_tracking,
-      weight=COM_VELOCITY_TRACKING_WEIGHT,
-      params={
-        "std": COM_VELOCITY_TRACKING_STD,
-        "std_vertical": COM_VELOCITY_TRACKING_STD_VERTICAL,
-        "asset_cfg": SceneEntityCfg("robot"),
-        "action_name": "mc_rtc_residual",
-      },
-    ),
     # The objective: divergence from the support, which mc_rtc's plan-matching
     # cannot buy itself. docs/reward-shaping.md#dcm_stability
     "dcm_stability": RewardTermCfg(
@@ -381,6 +354,10 @@ def _make_env_cfg(
     "zmp_grounded": MetricsTermCfg(func=mdp.zmp_grounded, params=dict(metric_params)),
     # No `action_name`: this one compares against the support, not against a plan.
     "gate_mean": MetricsTermCfg(func=mdp.gate_mean),
+    "com_velocity_error": MetricsTermCfg(
+      func=mdp.com_velocity_error,
+      params={"asset_cfg": SceneEntityCfg("robot"), "action_name": "mc_rtc_residual"},
+    ),
     "dcm_error": MetricsTermCfg(
       func=mdp.dcm_error,
       params={

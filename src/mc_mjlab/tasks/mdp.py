@@ -475,6 +475,29 @@ class com_velocity_tracking:
     )
 
 
+class com_velocity_error:
+  """Distance from the controller's commanded CoM velocity, m/s."""
+
+  # The one term negative in every comparison: keep it as the canary for a policy
+  # fighting the plan. docs/reward-shaping.md#com_velocity_error
+
+  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+    self._root_body_id = env.scene[cfg.params["asset_cfg"].name].indexing.root_body_id
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg,
+    action_name: str = "mc_rtc_residual",
+  ) -> torch.Tensor:
+    del asset_cfg  # Resolved at init.
+    term = _residual_term(env, action_name)
+    error = env.sim.data.subtree_linvel[:, self._root_body_id] - term.controller_vector(
+      "control_com_vel"
+    )
+    return torch.linalg.vector_norm(error, dim=1)
+
+
 class dcm_error:
   """Distance from the divergent component of motion to the centre of pressure."""
 
