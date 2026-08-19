@@ -28,6 +28,9 @@ one period in exchange for overlapping the solve with the GPU sim.
   before this repo's `etc/mc_rtc.yaml`, so its own `Enabled:` entry is
   overridden — but anything it sets that the repo file does not will apply
   silently. Check it before blaming the repo config.
+- Residual-balance checkpoints embed the project/user mc_rtc YAML, the selected
+  installed controller YAML, and PD gains. The custom runner rejects a mismatch;
+  do not bypass that check and call the result an evaluation of the same policy.
 - The mjlab dependency source is a per-machine choice (README "mjlab
   dependency"): PyPI by default, or an editable `../mjlab` checkout via a
   `[tool.uv.sources]` block that must NOT be committed. `uv.lock` is
@@ -174,6 +177,10 @@ From mjlab down to mc_rtc:
   and `register_mjlab_task` takes built cfgs, so `import mjlab` now builds this
   repo's env cfgs — without a sourced mc_rtc workspace mjlab's loader reports
   that as a `[WARN]` plus traceback rather than failing.
+- `tasks/residual_balance/residual_balance_runner.py` — snapshots external base
+  controller inputs into the run directory and every checkpoint, and validates
+  them on load. Position and torque registrations use distinct full task ids as
+  experiment names, so automatic resume cannot cross control modes.
 - `robots/<ROBOT>/<robot>_constants.py` — per-robot constants: spec loading
   (collisions disabled by default, geom groups 2=visual/3=collision/4=sites),
   actuator configs, stance initial state, PD-gains path. The three are

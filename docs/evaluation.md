@@ -150,6 +150,14 @@ means reconstructing the cfg it trained under. A `git worktree` at the right com
 plus `PYTHONPATH=<worktree>/src:$PYTHONPATH` shadows the installed package without
 touching the working tree or any live run. Two things bite:
 
+New residual-balance checkpoints embed their complete base-controller provenance
+under `infos/base_controller_provenance`: the project and user mc_rtc YAML, the
+installed selected-controller YAML, and the PD gains, each with its source and
+SHA-256 digest. Readable copies also live under the run's
+`base_controller_config/`. Loading refuses a mismatch, because evaluating the
+same residual against a changed base is a different policy. The manual procedure
+below remains necessary for checkpoints created before this runner existed.
+
 - **Prepend to `PYTHONPATH`, never replace it.** The mc_rtc bindings arrive on it
   from the sourced workspace; clobbering it fails at `import mc_rbdyn`.
 - **Copy `etc/mc_rtc.yaml` into the worktree.** It is untracked, so the worktree
