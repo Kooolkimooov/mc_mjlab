@@ -266,6 +266,29 @@ and cannot say whether the critic is fitting anything.
 cost, one extra forward pass over the rollout per iteration, against ~99% of
 iteration time spent in mc_rtc collection.
 
+## Training budget
+
+**Current:** `POLICY_STEPS_PER_ENV = 128_000`. `max_iterations` is derived from it
+and `num_steps_per_env` rather than typed: `128_000 / 256 = 500`, the same 500 as
+before.
+
+Iteration counts are not comparable once the rollout length moves, and this task
+has moved it three times:
+
+| configuration | calculation | steps/env |
+| --- | --- | --- |
+| previous | 96 x 500 | 48,000 |
+| current | 256 x 500 | 128,000 |
+| matched short run | 256 x 188 | 48,128 |
+
+So a screening comparison against the earlier era wants ~48,000 steps per env,
+and only a promising setting is worth the full 128,000.
+
+Every run records what it was given: `training_budget.json` beside the run's
+`base_controller_config/` snapshot, and `infos["training_budget"]` in every
+checkpoint. Both carry `policy_steps_per_env` and `total_transitions`, since the
+second also moves with `num_envs`.
+
 ## Run 2026-08-14_19-14-46_std-floor
 
 Stopped by SIGINT at 3320 of 15000 iterations because the residual turned out to
