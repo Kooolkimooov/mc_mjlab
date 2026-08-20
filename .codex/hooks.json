@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 '/home/martin/git/mc_mjlab/.codex/hooks/check_prose.py'",
+            "timeout": 15,
+            "statusMessage": "Checking prose budget"
+          }
+        ]
+      }
+    ]
+  }
+}
