@@ -233,6 +233,39 @@ approximately equally dense in experience: every 5120 policy steps per env now,
 against 4800 before. Iteration numbers across the two configurations are not
 sample-count comparable.
 
+## Training diagnostics
+
+**Current:** four scalars under `Diagnostics/`, from
+`residual_balance_diagnostics.ppo_diagnostics`. rsl_rl logs three losses and the
+learning rate and nothing else, and `learn()` exposes no hook, so the runner
+wraps the one `Logger.log` call each iteration makes and writes them there.
+
+| scalar | what it answers |
+| --- | --- |
+| `approx_kl` | how far the policy moved over the whole rollout |
+| `clip_fraction` | share of samples whose likelihood ratio left the `clip_param` band |
+| `explained_variance` | `1 - Var(returns - values) / Var(returns)`; 0 is a mean predictor |
+| `action_saturation` | share of action components at `RAW_CLIP` |
+
+All four are read off the rollout *after* `PPO.update()` returns, which is safe
+because `RolloutStorage.clear()` resets the write cursor and nothing else: the
+buffers stay intact until the next `act()` overwrites them.
+
+**`approx_kl` is not the KL the schedule reacts to.** The adaptive schedule
+compares a *per-minibatch* KL against `desired_kl` before each gradient step and
+can move the rate four times per iteration; this scalar is the end-of-iteration
+divergence over every sample. They answer different questions — "was the step
+size safe" against "how far did we go" — and the second was the one no run had.
+
+**Why they were added:** the learning rate is the control that has decided every
+run here (see the note at the top of this file), and its input was never
+recorded. `explained_variance` is the other half: `Loss/value` is in task units
+and cannot say whether the critic is fitting anything.
+
+**Re-measure if:** nothing — these are instruments, not constants. But note the
+cost, one extra forward pass over the rollout per iteration, against ~99% of
+iteration time spent in mc_rtc collection.
+
 ## Run 2026-08-14_19-14-46_std-floor
 
 Stopped by SIGINT at 3320 of 15000 iterations because the residual turned out to

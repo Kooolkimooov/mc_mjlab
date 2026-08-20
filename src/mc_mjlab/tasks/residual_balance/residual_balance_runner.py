@@ -10,6 +10,9 @@ from pathlib import Path
 
 from mjlab.rl import MjlabOnPolicyRunner
 
+from mc_mjlab.tasks.residual_balance.residual_balance_diagnostics import (
+  ppo_diagnostics,
+)
 from mc_mjlab.utils.mc_rtc_config import get_controller_name
 
 
@@ -91,8 +94,24 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
   def __init__(self, env, train_cfg: dict, log_dir=None, device: str = "cpu") -> None:
     super().__init__(env, train_cfg, log_dir, device)
     self._controller_provenance = collect_controller_provenance(env)
+    # rsl_rl's `learn()` offers no per-iteration hook, so the one logging call it
+    # makes is where the diagnostics attach. docs/ppo.md#training-diagnostics
+    self.logger.log = self._log_with_diagnostics(self.logger.log)
     if log_dir is not None and int(os.environ.get("RANK", "0")) == 0:
       _materialize_provenance(self._controller_provenance, Path(log_dir))
+
+  def _log_with_diagnostics(self, log):
+    """Wrap the logger so every iteration also records the PPO diagnostics."""
+
+    def logging_call(*args, **kwargs):
+      writer = self.logger.writer
+      iteration = kwargs.get("it", args[0] if args else None)
+      if writer is not None and iteration is not None:
+        for name, value in ppo_diagnostics(self.alg).items():
+          writer.add_scalar(f"Diagnostics/{name}", value, iteration)
+      return log(*args, **kwargs)
+
+    return logging_call
 
   def save(self, path: str, infos=None) -> None:
     """Embed controller inputs in every checkpoint as well as the run directory."""
