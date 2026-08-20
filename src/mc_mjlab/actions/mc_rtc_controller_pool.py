@@ -17,6 +17,7 @@ from typing import Literal
 import numpy as np
 
 from mc_mjlab.actions.mc_rtc_controller_host import (
+  STATUS_WORKER_FAILED,
   ControllerHost,
   HostMetadata,
   IoLayout,
@@ -388,9 +389,11 @@ class ControllerPool:
     return env_indices
 
   def _mark_failed(self, env_indices: list[int]) -> None:
-    """Report the given envs failed via the output status column."""
+    """Report the given envs lost with their worker, via the output status column."""
     assert self._layout is not None
-    self.out_np[np.asarray(env_indices, dtype=np.intp), self._layout.status_off] = 1.0
+    self.out_np[np.asarray(env_indices, dtype=np.intp), self._layout.status_off] = (
+      STATUS_WORKER_FAILED
+    )
 
   def close(self) -> None:
     """Stop the workers and release the shared blocks."""

@@ -9,7 +9,12 @@ import mujoco
 import numpy as np
 import torch
 
-from mc_mjlab.actions.mc_rtc_controller_host import HostMetadata, IoLayout
+from mc_mjlab.actions.mc_rtc_controller_host import (
+  STATUS_QP_FAILED,
+  STATUS_WORKER_FAILED,
+  HostMetadata,
+  IoLayout,
+)
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -299,10 +304,15 @@ class ControllerIoBinding:
 
   def read_controller_failed(
     self, out_np: np.ndarray, env_indices: list[int]
-  ) -> torch.Tensor:
-    """Bool per env: did that controller's QP give up on the last step?"""
-    failed = out_np[env_indices, self.layout.status_off] != 0.0
-    return torch.tensor(failed, dtype=torch.bool, device=self._device)
+  ) -> tuple[torch.Tensor, torch.Tensor]:
+    """``(QP gave up, worker died)`` per env -- terminal and truncating in turn."""
+    status = out_np[env_indices, self.layout.status_off]
+    return (
+      torch.tensor(status == STATUS_QP_FAILED, dtype=torch.bool, device=self._device),
+      torch.tensor(
+        status == STATUS_WORKER_FAILED, dtype=torch.bool, device=self._device
+      ),
+    )
 
   def _fill_joint_columns(self, in_np: np.ndarray) -> None:
     """Write encoder/velocity/torque columns of the input block (all envs)."""

@@ -284,6 +284,12 @@ Cross-cutting invariants:
   escape hatch as above — `MC_MJLAB_PRINT_RESIDUAL=<n>` retunes the interval,
   0 silences it. The viewers cannot show this themselves: they only surface
   *reward* and *metrics* manager terms, never actions.
+- A controller *worker* dying is not a controller failure: the status column
+  carries three values, and `controller_worker_failed` is configured
+  `time_out=True` so those episodes truncate and bootstrap instead of paying the
+  `-200` termination penalty for the pool's bad luck. Dropping that flag silently
+  teaches the critic that infrastructure noise is a fall.
+  docs/coupling.md#worker-failure-is-a-truncation
 - Neither logged family of curves means what it looks like. Every
   `Episode_Reward/*` is an episode *sum*, and those correlate with episode
   length at r = +0.98 — they move when the robot survives longer, not when it

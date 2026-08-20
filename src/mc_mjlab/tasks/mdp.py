@@ -36,6 +36,15 @@ def controller_failed(
   return _residual_term(env, action_name).controller_failed
 
 
+def controller_worker_failed(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """End envs whose controller *process* died -- as a truncation, not a failure."""
+  # Correlated across a worker's envs and unrelated to the action, so it must be
+  # configured `time_out=True`. docs/coupling.md#worker-failure-is-a-truncation
+  return _residual_term(env, action_name).controller_worker_failed
+
+
 def action_l2(env: ManagerBasedRlEnv) -> torch.Tensor:
   """Squared magnitude of the residual action, saturating where the clip does."""
   # Past the clip a larger raw action has no physical effect, so paying more for it

@@ -112,6 +112,14 @@ def _planned_zmp(robot: Any) -> Any:
   )
 
 
+#: Values of the output block's status column, in order of severity.
+STATUS_OK = 0.0
+#: The controller's own QP gave up: the policy's problem, and a real terminal state.
+STATUS_QP_FAILED = 1.0
+#: The hosting process died or wedged: exogenous, so the task truncates instead.
+STATUS_WORKER_FAILED = 2.0
+
+
 # Per-env 3-vectors, read off the *control* robot -- not the canonical one
 # every other read here uses. docs/coupling.md#vector_outputs
 VECTOR_OUTPUTS: dict[str, Callable[[Any], Any]] = {
@@ -517,10 +525,12 @@ class ControllerHost:
     controller = self._controllers[local]
     row = in_arr[env_id]
 
-    # Uninitialized covers a respawned worker's rebuilt controllers: their
-    # envs read as failed until their next reset takes the init() path.
+    # Uninitialized covers a respawned worker's rebuilt controllers, which is an
+    # infrastructure failure, not this env's QP giving up.
     if self._failed[local] or not self._initialized[local]:
-      out_arr[env_id][layout.status_off] = 1.0
+      out_arr[env_id][layout.status_off] = (
+        STATUS_QP_FAILED if self._failed[local] else STATUS_WORKER_FAILED
+      )
       return
 
     controller.setEncoderValues(self._expand(row[0:T], self._default_encoders))
@@ -619,7 +629,7 @@ class ControllerHost:
 
     mbc = controller.robot().mbc
     out_row = out_arr[env_id]
-    out_row[layout.status_off] = 0.0 if ok else 1.0
+    out_row[layout.status_off] = STATUS_OK if ok else STATUS_QP_FAILED
     for c, attr in enumerate(self._output_attrs):
       values = getattr(mbc, attr)
       base = c * T

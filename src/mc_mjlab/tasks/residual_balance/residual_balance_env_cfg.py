@@ -290,6 +290,12 @@ def _make_env_cfg(
     "controller_failed": TerminationTermCfg(
       func=mdp.controller_failed, params={"action_name": "mc_rtc_residual"}
     ),
+    # `time_out=True` is the point: exogenous, so bootstrap, and no fall penalty.
+    "controller_worker_failed": TerminationTermCfg(
+      func=mdp.controller_worker_failed,
+      params={"action_name": "mc_rtc_residual"},
+      time_out=True,
+    ),
   }
 
   events = {

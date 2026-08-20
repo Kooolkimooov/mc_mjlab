@@ -13,7 +13,7 @@ import torch
 from mjlab.envs.mdp.actions.actions import BaseAction, BaseActionCfg
 from mjlab.utils.lab_api.string import resolve_matching_names
 
-from mc_mjlab.actions.mc_rtc_controller_host import HostMetadata
+from mc_mjlab.actions.mc_rtc_controller_host import STATUS_OK, HostMetadata
 from mc_mjlab.actions.mc_rtc_controller_io_binding import (
   ControllerIoBinding,
   apply_reference_pd_gains,
@@ -295,6 +295,10 @@ class McRtcResidualActionBase(BaseAction):
     self.controller_failed = torch.zeros(
       self.num_envs, dtype=torch.bool, device=self.device
     )
+    # Apart from the QP latch: losing a worker is exogenous, so the task truncates.
+    self.controller_worker_failed = torch.zeros(
+      self.num_envs, dtype=torch.bool, device=self.device
+    )
 
   # ---- Pipeline. ----
 
@@ -312,11 +316,13 @@ class McRtcResidualActionBase(BaseAction):
       new_vectors = self._io.read_controller_vectors(self._out_np, env_indices)
       for v, values in new_vectors.items():
         self._controller_vectors[v][env_indices_t] = values
-    # Latch (not assign): the flag must survive until this env is reset, even
+    # Latch (not assign): the flags must survive until this env is reset, even
     # though the substeps in between keep collecting.
-    self.controller_failed[env_indices_t] |= self._io.read_controller_failed(
+    qp_failed, worker_failed = self._io.read_controller_failed(
       self._out_np, env_indices
     )
+    self.controller_failed[env_indices_t] |= qp_failed
+    self.controller_worker_failed[env_indices_t] |= worker_failed
 
   # ---- Introspection (the task's mdp terms read the reference through this). ----
 
@@ -420,9 +426,10 @@ class McRtcResidualActionBase(BaseAction):
     self._has_staged_control[env_indices_t] = False
     for values in self._controller_vectors.values():
       values[env_indices_t] = 0.0
-    # The pool has re-initialized these controllers, so clear the latch too.
+    # The pool has re-initialized these controllers, so clear the latches too.
     self.controller_failed[env_indices_t] = False
-    self._out_np[env_indices, self._io.layout.status_off] = 0.0
+    self.controller_worker_failed[env_indices_t] = False
+    self._out_np[env_indices, self._io.layout.status_off] = STATUS_OK
 
   def apply_actions(self) -> None:
     substep_in_period = self._steps_since_run % self.cfg.frameskip

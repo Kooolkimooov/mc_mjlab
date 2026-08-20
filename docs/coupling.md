@@ -225,6 +225,36 @@ QP giving up is the normal end of a fall, and it must cost one episode. The host
 latches it and lets the trainer terminate the env; the last good outputs stay in
 the block for the substeps still to come.
 
+### Worker failure is a truncation
+
+**Current:** the status column carries three values, not two —
+`STATUS_OK`, `STATUS_QP_FAILED` and `STATUS_WORKER_FAILED` (`mc_rtc_controller_host`).
+The action term latches them into `controller_failed` and
+`controller_worker_failed`, and the task maps them to two termination terms of
+which only the second is `time_out=True`.
+
+**Why they must not be one flag.** A dead or wedged worker takes down every env
+assigned to it at once, for reasons the policy did not cause and cannot avoid.
+Folded into `controller_failed` it was a normal terminal state: the whole batch
+paid `termination_penalty` (`-200`) and the value target was cut to the reward,
+teaching the critic that some states are worth -200 for reasons not in the
+observation. As a truncation the value bootstraps off the final observation and
+no penalty is charged, which is the standard treatment of an exogenous time limit
+(Pardo et al. 2018, *Time Limits in Reinforcement Learning*).
+
+Both are still counted, separately, as `Episode_Termination/controller_failed`
+and `Episode_Termination/controller_worker_failed`. A run where the second is not
+~0 is a run whose comparison needs that number quoted beside it: those episodes
+are shorter for infrastructure reasons.
+
+Which code writes which value:
+
+| writer | value | when |
+| --- | --- | --- |
+| `ControllerHost.step_env` | `STATUS_QP_FAILED` | `run()` returned false, and every step after until reset |
+| `ControllerHost.step_env` | `STATUS_WORKER_FAILED` | controller rebuilt by a respawn, not yet re-`init()`ed |
+| `ControllerPool._mark_failed` | `STATUS_WORKER_FAILED` | the worker died or timed out; marks all of its envs |
+
 ## Console output
 
 mc_rtc's terminal logging is hardwired C++ spdlog, so silencing requires
