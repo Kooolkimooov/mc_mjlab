@@ -133,6 +133,18 @@ Where each kind of writing lives:
 verbatim when moving them: a paraphrase that drops the sample size is worth much
 less than the original.
 
+# Commit messages
+
+Keep them concise: a subject line plus a 2-4 line body carrying the one number
+or reason the diff does not show. Everything longer belongs in `docs/` under a
+grep-able `##` heading.
+
+**Never** put a `Claude-Session:` line, a session id, a `claude.ai` URL, or a
+"Generated with Claude Code" line in a commit message — they outlive the session
+and stay in `git log` forever. `Co-Authored-By: Claude Opus 5
+<noreply@anthropic.com>` is wanted and stays. This holds for messages carried
+through a history rewrite too: strip the session line rather than preserve it.
+
 # Architecture
 
 From mjlab down to mc_rtc:
