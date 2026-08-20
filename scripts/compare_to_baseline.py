@@ -6,9 +6,11 @@ import argparse
 import csv
 import math
 import statistics
+import sys
 import time
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
 import torch
 from mjlab.envs import ManagerBasedRlEnv
@@ -18,6 +20,38 @@ from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import _make_env_c
 from mc_mjlab.tasks.residual_balance.residual_balance_ppo_cfg import (
   residual_balance_ppo_cfg,
 )
+
+#: Where every comparison's CSV and printed report land, beside the training logs
+#: they score. Kept out of a scratch dir: these are the record's raw data.
+COMPARISON_DIR = Path("logs/comparisons")
+
+
+class _Tee:
+  """Write the report to the terminal and to the run's log file at once."""
+
+  def __init__(self, stream, path: Path) -> None:
+    self._stream = stream
+    # Line-buffered, so a killed run still leaves everything it printed.
+    self._file = path.open("w", buffering=1)
+
+  def write(self, text: str) -> int:
+    self._stream.write(text)
+    return self._file.write(text)
+
+  def flush(self) -> None:
+    self._stream.flush()
+    self._file.flush()
+
+  def __getattr__(self, name: str):
+    # `isatty`, `fileno` and friends: mjlab colourises on the first and mc_rtc's
+    # fd redirection needs the second, so this must stay a real stdout otherwise.
+    return getattr(self._stream, name)
+
+
+def output_stem(checkpoint: str) -> str:
+  """``<run directory>_<model>``: unique per checkpoint, sorted beside its siblings."""
+  path = Path(checkpoint)
+  return f"{path.parent.name}_{path.stem}"
 
 
 def _describe(values: Sequence[float]) -> dict[str, float]:
@@ -328,13 +362,28 @@ def main() -> None:
     ),
   )
   p.add_argument(
+    "--out-dir",
+    default=str(COMPARISON_DIR),
+    metavar="PATH",
+    help="directory for the per-episode CSV and the printed report; both are "
+    "named after the checkpoint, so a rerun overwrites only its own pair",
+  )
+  p.add_argument(
     "--dump",
     default=None,
     metavar="PATH",
-    help="write every episode of both arms to this CSV (arm, env, nth_in_env, "
-    "length, termination flags, reward terms) for analysis the table omits",
+    help="override the CSV path (arm, env, nth_in_env, length, termination "
+    "flags, reward terms); by default it lands in --out-dir",
   )
   args = p.parse_args()
+
+  out_dir = Path(args.out_dir)
+  out_dir.mkdir(parents=True, exist_ok=True)
+  stem = output_stem(args.checkpoint)
+  dump_path = Path(args.dump) if args.dump else out_dir / f"{stem}.csv"
+  # Replaced wholesale rather than wrapped in redirect_stdout: mc_rtc prints
+  # through fd 1 regardless, and this keeps the report and its header together.
+  sys.stdout = _Tee(sys.stdout, out_dir / f"{stem}.log")
 
   cfg = _make_env_cfg(
     control=args.control,
@@ -390,20 +439,19 @@ def main() -> None:
   )
   env.close()
 
-  if args.dump:
-    with open(args.dump, "w", newline="") as fh:
-      w = csv.writer(fh)
-      w.writerow(
-        ["arm", "env", "nth_in_env", "length"] + list(term_names) + list(reward_terms)
-      )
-      for arm in (base, pol):
-        for e in arm.episodes:
-          w.writerow(
-            [arm.label, e.env_id, e.nth, e.length]
-            + [e.terms[n] for n in term_names]
-            + [e.rewards[n] for n in reward_terms]
-          )
-    print(f"[compare] per-episode rows -> {args.dump}")
+  with open(dump_path, "w", newline="") as fh:
+    w = csv.writer(fh)
+    w.writerow(
+      ["arm", "env", "nth_in_env", "length"] + list(term_names) + list(reward_terms)
+    )
+    for arm in (base, pol):
+      for e in arm.episodes:
+        w.writerow(
+          [arm.label, e.env_id, e.nth, e.length]
+          + [e.terms[n] for n in term_names]
+          + [e.rewards[n] for n in reward_terms]
+        )
+  print(f"[compare] per-episode rows -> {dump_path}")
 
   if not base.episodes or not pol.episodes:
     print("[compare] an arm finished no episodes; raise --minutes")
