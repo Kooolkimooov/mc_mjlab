@@ -164,6 +164,46 @@ below remains necessary for checkpoints created before this runner existed.
   gets the *committed* `MainRobot`, and a different robot means a different joint
   count and a `size mismatch` that looks exactly like a stale-checkpoint error.
 
+## validate_dcm_objective.py
+
+The gate the DCM objective has to pass **before** a training run, not after:
+does the reward score a walking robot and a standing one alike, and does a push
+still collapse it? No checkpoint is involved — every arm runs a zero residual.
+
+```sh
+uv run python scripts/validate_dcm_objective.py                     # ~1 min/regime
+uv run python scripts/validate_dcm_objective.py --residual-level 0  # skip arm 3
+```
+
+Three arms, identical but for the controller and the residual:
+
+| arm | config | residual |
+| --- | --- | --- |
+| `walking` | `etc/mc_rtc.yaml` as it stands | zero |
+| `standing` | the same, with `Enabled: Posture` written to a temp copy | zero |
+| `walking+residual` | as `walking` | full-scale, alternating signs |
+
+Nothing in the repo is touched to get the standing arm: `posture_config` rewrites
+the one `Enabled:` line into `--out-dir`, and `_make_env_cfg(mc_rtc_yaml=...)`
+takes it from there.
+
+What each block of the output answers:
+
+- **the quantile table** — the nominal error distribution, which is what sizes
+  `DCM_STD`; the printed `std = q / sqrt(-log s)` line inverts the kernel for a
+  target score `s` at quantile `q`.
+- **corrected against legacy** — the same samples scored with and without the
+  commanded offset, so the correction's effect is visible rather than assumed.
+- **standing edge over walking** — the defect the correction exists for. Read it
+  at the `DCM_STD` actually configured, not at the friendliest column.
+- **error by speed deficit** — the decisive one. It bins the *walking* arm by
+  `measured - commanded` CoM speed: a term that pays a robot for resisting its
+  own gait shows its lowest error in the "slower than commanded" band.
+- **error by time since a push** — the disturbance response, and the profile that
+  sizes `RECOVERY_WINDOW_S`.
+- **residual authority over the target** — the residual must not be able to earn
+  reward by moving the *reference* instead of the state.
+
 ## probe_residual_authority.py
 
 Answers a different question, and the one to ask first when a reward looks blind:

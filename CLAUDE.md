@@ -59,6 +59,8 @@ uv run play  Mc-Mjlab-Residual-Balance-Logisticcontroller-Ismpc-Hrp5P-Position \
 # can run beside a training job.
 uv run python scripts/compare_to_baseline.py --checkpoint <model.pt>
 uv run python scripts/probe_residual_authority.py --level 1.0
+# The DCM objective's own gate: standing must not outscore walking (~1 min/regime).
+uv run python scripts/validate_dcm_objective.py
 uv run ruff format && uv run ruff check --fix    # format + lint
 uv run ty check                                  # type check (56 pre-existing
                                                  # diagnostics: unresolvable

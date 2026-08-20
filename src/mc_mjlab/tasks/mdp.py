@@ -283,18 +283,21 @@ class _ZmpSensors:
   def dcm_offset(
     self,
     env: ManagerBasedRlEnv,
+    action_name: str = "mc_rtc_residual",
     min_normal_force: float = 20.0,
     plane_height: float = 0.0,
   ) -> tuple[torch.Tensor, torch.Tensor]:
-    """``(distance from the divergent component to the CoP, vertical force)``."""
-    # LIPM: d(xi)/dt = omega * (xi - CoP), so this norm *is* the divergence rate.
+    """``(distance from the *commanded* divergent-component offset, vertical force)``."""
+    # LIPM: d(xi)/dt = omega * (xi - CoP), and walking at v needs xi - CoP = v/omega,
+    # so the offset is scored against the commanded one, never against zero.
     measured, normal_force = self.measured_offset(env, min_normal_force, plane_height)
     data = env.sim.data
     com = data.subtree_com[:, self.root_body_id]
     com_vel = data.subtree_linvel[:, self.root_body_id]
-    omega = torch.sqrt(GRAVITY / com[:, 2].clamp(min=MIN_COM_HEIGHT))
-    capture = com_vel[:, :2] / omega.unsqueeze(-1)
-    return torch.linalg.vector_norm(capture - measured, dim=1), normal_force
+    commanded = _residual_term(env, action_name).controller_vector("control_com_vel")
+    omega = torch.sqrt(GRAVITY / com[:, 2].clamp(min=MIN_COM_HEIGHT)).unsqueeze(-1)
+    offset = (com_vel[:, :2] - commanded[:, :2]) / omega - measured
+    return torch.linalg.vector_norm(offset, dim=1), normal_force
 
 
 #: Per-env ``_ZmpSensors``, keyed weakly so they die with their env.
@@ -534,11 +537,14 @@ class dcm_error:
     env: ManagerBasedRlEnv,
     sensor_names: tuple[str, ...],
     asset_cfg: SceneEntityCfg,
+    action_name: str = "mc_rtc_residual",
     min_normal_force: float = 20.0,
     plane_height: float = 0.0,
   ) -> torch.Tensor:
     del sensor_names, asset_cfg  # Resolved at init.
-    error, normal_force = self._sensors.dcm_offset(env, min_normal_force, plane_height)
+    error, normal_force = self._sensors.dcm_offset(
+      env, action_name, min_normal_force, plane_height
+    )
     return error * (normal_force >= min_normal_force)
 
 
@@ -556,11 +562,14 @@ class dcm_stability:
     std: float,
     sensor_names: tuple[str, ...],
     asset_cfg: SceneEntityCfg,
+    action_name: str = "mc_rtc_residual",
     min_normal_force: float = 20.0,
     plane_height: float = 0.0,
   ) -> torch.Tensor:
     del sensor_names, asset_cfg  # Resolved at init.
-    error, normal_force = self._sensors.dcm_offset(env, min_normal_force, plane_height)
+    error, normal_force = self._sensors.dcm_offset(
+      env, action_name, min_normal_force, plane_height
+    )
     return torch.exp(-torch.square(error / std)) * (normal_force >= min_normal_force)
 
 
@@ -753,11 +762,14 @@ class recovery_dcm:
     sensor_names: tuple[str, ...],
     asset_cfg: SceneEntityCfg,
     push_term_name: str = "push_robot",
+    action_name: str = "mc_rtc_residual",
     min_normal_force: float = 20.0,
     plane_height: float = 0.0,
   ) -> torch.Tensor:
     del sensor_names, asset_cfg, push_term_name  # Resolved at init.
-    error, normal_force = self._sensors.dcm_offset(env, min_normal_force, plane_height)
+    error, normal_force = self._sensors.dcm_offset(
+      env, action_name, min_normal_force, plane_height
+    )
     age = _age_since_push(env, self._push)
     gate = (age >= 1) & (age <= round(window_s / env.step_dt))
     return (

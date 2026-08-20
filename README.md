@@ -25,6 +25,7 @@ etc/
 scripts/
   compare_to_baseline.py      # score a checkpoint against the zero-residual controller
   probe_residual_authority.py # can the residual move the centre of pressure at all?
+  validate_dcm_objective.py   # does the DCM reward score standing and walking alike?
   demos/run_test_mc_rtc.sh    # launcher: play --agent zero on the zero-residual task
 ```
 
@@ -150,6 +151,8 @@ and those correlate with episode length at r = +0.98.
 uv run python scripts/compare_to_baseline.py --checkpoint <path/to/model_*.pt>
 # Can a constant residual move the centre of pressure at all?
 uv run python scripts/probe_residual_authority.py --level 1.0
+# Does the DCM objective still prefer standing to walking? (no checkpoint needed)
+uv run python scripts/validate_dcm_objective.py
 ```
 
 `compare_to_baseline.py` steps both arms in one run and takes a fixed number of

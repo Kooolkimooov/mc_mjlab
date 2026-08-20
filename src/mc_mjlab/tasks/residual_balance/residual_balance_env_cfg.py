@@ -234,8 +234,8 @@ def _make_env_cfg(
     # Sized by gradient scale: -2000 was a 1000x outlier that floored the LR.
     "termination_penalty": RewardTermCfg(func=envs_mdp.is_terminated, weight=-200.0),
     "upright": RewardTermCfg(func=envs_mdp.flat_orientation_l2, weight=-2.0),
-    # The objective: divergence from the support, which mc_rtc's plan-matching
-    # cannot buy itself. docs/reward-shaping.md#dcm_stability
+    # The objective: divergence from the *commanded* one, which mc_rtc's
+    # plan-matching cannot buy itself. docs/reward-shaping.md#dcm_stability
     "dcm_stability": RewardTermCfg(
       func=mdp.dcm_stability,
       weight=DCM_STABILITY_WEIGHT,
@@ -243,6 +243,7 @@ def _make_env_cfg(
         "std": DCM_STD,
         "sensor_names": mdp.GROUND_CONTACT_SENSORS,
         "asset_cfg": SceneEntityCfg("robot"),
+        "action_name": "mc_rtc_residual",
       },
     ),
     "recovery_dcm": RewardTermCfg(
@@ -254,6 +255,7 @@ def _make_env_cfg(
         "sensor_names": mdp.GROUND_CONTACT_SENSORS,
         "asset_cfg": SceneEntityCfg("robot"),
         "push_term_name": "push_robot",
+        "action_name": "mc_rtc_residual",
       },
     ),
     "angular_momentum": RewardTermCfg(
@@ -364,19 +366,12 @@ def _make_env_cfg(
   metrics = {
     "zmp_error": MetricsTermCfg(func=mdp.zmp_error, params=dict(metric_params)),
     "zmp_grounded": MetricsTermCfg(func=mdp.zmp_grounded, params=dict(metric_params)),
-    # No `action_name`: this one compares against the support, not against a plan.
     "gate_mean": MetricsTermCfg(func=mdp.gate_mean),
     "com_velocity_error": MetricsTermCfg(
       func=mdp.com_velocity_error,
       params={"asset_cfg": SceneEntityCfg("robot"), "action_name": "mc_rtc_residual"},
     ),
-    "dcm_error": MetricsTermCfg(
-      func=mdp.dcm_error,
-      params={
-        "sensor_names": mdp.GROUND_CONTACT_SENSORS,
-        "asset_cfg": SceneEntityCfg("robot"),
-      },
-    ),
+    "dcm_error": MetricsTermCfg(func=mdp.dcm_error, params=dict(metric_params)),
   }
 
   # Solver settings follow mc_mujoco's HRP5Pmain.xml, as in the demo.

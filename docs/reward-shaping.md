@@ -109,13 +109,62 @@ kept as a diagnostic. See `Pruning the agreement rewards` below.
 
 **Current:** weight `1.0`, `DCM_STD = 0.05` (measured, see below). The task's
 primary dense reward since 2026-08-17, replacing the plan-matching pair.
+**Command-relative since 2026-08-19** — the correction below is the whole of that
+change.
 
 **What it scores.** With the divergent component of motion
 `xi = com_xy + com_vel_xy / omega` and `omega = sqrt(g / com_z)`, the linear
 inverted pendulum gives `d(xi)/dt = omega * (xi - CoP)`. So `norm(xi - CoP)` is
-not a proxy for instability — it **is** the divergence rate, in metres. The reward
-is `exp(-(error/std)^2)`, gated on the feet carrying load exactly as
-`zmp_tracking` is.
+not a proxy for instability — it **is** the divergence rate, in metres. But
+steady walking at `v` *requires* `xi - CoP = v / omega`: that offset is what
+produces the motion, not an error. The scored quantity is therefore
+
+```text
+error = norm( (com_vel_xy - commanded_com_vel_xy) / omega - (CoP - com)_xy )
+```
+
+with the command taken from the controller's own control robot
+(`controller_vector("control_com_vel")`, the same reference `com_velocity_error`
+uses). The reward is `exp(-(error/std)^2)`, gated on the feet carrying load
+exactly as `zmp_tracking` is. Standing is unaffected by the correction — its
+command is zero to four decimals — so this is purely a walking-side change.
+
+**What it bought, measured 2026-08-19** by
+[validate_dcm_objective.py](evaluation.md#validate_dcm_objectivepy), 16 envs x
+1200 steps per regime, zero residual, 17,599 grounded samples:
+
+| walking arm | mean | median | p75 | p90 | p99 |
+| --- | --- | --- | --- | --- | --- |
+| corrected | 0.0388 | 0.0317 | 0.0483 | 0.0666 | 0.1501 |
+
+At `DCM_STD = 0.05` the walking score rises from **0.538 to 0.611** while standing
+stays at 0.785, so the standing edge falls from **+45.9% to +28.4%**. A second run
+that day, same settings, read +51.2% -> +34.4%. The correction removes roughly a
+third of the bias and **does not** meet the 10%-band gate the proposal set; see
+*dcm_stability standing bias* below for why that band was the wrong test and what
+the right one says.
+
+**The test that does decide it** bins the walking arm by how far the measured CoM
+speed sits from the commanded one — the gradient a residual can actually move:
+
+| measured - commanded, m/s | n | corrected | legacy |
+| --- | --- | --- | --- |
+| slower than -0.05 | 242 | 0.0936 | 0.0624 |
+| -0.05 .. -0.02 | 1189 | 0.0624 | 0.0581 |
+| -0.02 .. +0.02 | 15506 | **0.0322** | **0.0399** |
+| +0.02 .. +0.05 | 291 | 0.0596 | 0.0789 |
+| faster than +0.05 | 371 | 0.1842 | 0.2256 |
+
+Lagging the command by >0.05 m/s now costs **2.91x** the on-command error, against
+**1.56x** before. That is the defect closing: the term used to be nearly
+indifferent to a robot dragging its own gait, and now charges it. The minimum sits
+at the commanded speed rather than at zero velocity, which is the whole point.
+
+**The reference is not perfectly exogenous, and that is the residual risk.** A
+full-scale alternating residual moved the commanded speed by -9.2% in one run and
++0.5% in the other, against error differences of 2-3x across the bands above. So
+the residual can nudge the target it is scored against, but two orders less than
+it can move the state. Re-check with `--residual-level` if `residual_scale` grows.
 
 **Why it replaced plan-matching.** `zmp_tracking` and `com_velocity_tracking`
 score the measured state against mc_rtc's *own plan*, which the stabilizer QP is
@@ -156,15 +205,46 @@ where its model disagrees with the sim.
 **It reuses `_ZmpSensors` entirely.** `measured_offset` already returns
 `CoP - CoM` in xy, so `xi - CoP = com_vel_xy/omega - measured_offset` and no new
 sensor plumbing was needed. `measured_offset` is now the memoised call (five terms
-read it per step), rather than `offset_error` as before.
+read it per step), rather than `offset_error` as before. The command-relative
+form only subtracts one more term inside `dcm_offset`, which is why `dcm_error`,
+`dcm_stability` and `recovery_dcm` all moved together and all now take
+`action_name`.
 
 ## DCM_STD
 
 **Current:** `0.05` — measured off the zero-residual baseline, not copied from
-`ZMP_TRACKING_STD` despite landing on the same number.
+`ZMP_TRACKING_STD` despite landing on the same number. **Re-estimated 2026-08-19
+against the corrected error and kept**, which is not the same as retaining it by
+default:
 
-Measured 2026-08-17, zero action, 16 envs x 2500 steps, 40000 grounded samples
-(fully grounded throughout). The DCM-to-CoP distance runs:
+| corrected walking error | mean | median | p75 | p90 | p99 |
+| --- | --- | --- | --- | --- | --- |
+| 16 envs x 1200 steps, n=17,599 | 0.0388 | 0.0317 | 0.0483 | 0.0666 | 0.1501 |
+
+| `std` | baseline mean score | headroom | score at p90 | score at a 0.10 m push peak |
+| --- | --- | --- | --- | --- |
+| 0.04 | 0.512 | 0.488 | 0.062 | 0.002 |
+| **0.05** | **0.611** | **0.389** | **0.174** | **0.018** |
+| 0.06 | 0.686 | 0.314 | 0.291 | 0.062 |
+| 0.08 | 0.786 | 0.214 | 0.500 | 0.210 |
+
+The 2026-08-17 criteria were a baseline mean score near 0.57 with real headroom
+left, and a p90 disturbance collapsing the payment. The corrected error is a
+little smaller than the old one, so `0.05` now scores 0.611 with 39% headroom
+rather than 0.571 with 43% — inside the same band. Restoring 0.571 exactly would
+take `std = 0.046` (the printed `q / sqrt(-log s)` line reads 0.0423 off the
+median, which is the score-of-the-median, not the mean-of-the-score). That is
+within the noise of the choice and would confound the objective change it is
+meant to isolate, so it was not made.
+
+**`0.08` is what the 10% standing-edge band would require, and it is too wide.**
+It pays 0.50 at the nominal p90 and 0.21 at a push peak — the early-warning
+property this term exists for, gone. The band was rejected on that trade; see the
+standing-bias section.
+
+The original measurement, kept because it sized the constant: 2026-08-17, zero
+action, 16 envs x 2500 steps, 40000 grounded samples (fully grounded throughout),
+on the **pre-correction** error:
 
 | mean | median | p75 | p90 | p99 |
 | --- | --- | --- | --- | --- |
@@ -289,6 +369,18 @@ enter the high-paying state.
   short rather than long. Note the **secondary bump at 1.2-1.4 s** (1.8-1.9x),
   absent from the old profile — most likely the first footstep after the push,
   and a reason not to shorten the window below ~1.5 s.
+- **2026-08-19 — `2.0` holds on the corrected DCM error too**, which is what the
+  term now scores. From `validate_dcm_objective.py`, 16 envs x 1200 steps, ~135-165
+  samples per 100 ms bin, settled level 0.035 m:
+
+  | since push | 0.0s | 0.2s | 0.5s | 0.9s | 1.4s | 2.0s | 2.1s | 2.5s |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | mean error | 0.068 | 0.100 | 0.066 | 0.097 | 0.077 | 0.053 | 0.033 | 0.034 |
+
+  The same secondary bump appears, later and larger (0.8-1.0 s, 2.8x settled), and
+  the error drops to settled exactly at the 2.0 s boundary. The peak is at 0.2 s
+  rather than at the kick because the corrected error measures the *disagreement
+  with the command*, which the impulse takes a moment to produce.
 
 ## termination_penalty
 
@@ -743,6 +835,33 @@ steady LIPM walking `xi - CoP ~ v / omega`, so penalising
 `abs(norm(xi - CoP) - norm(v_cmd) / omega)` targets zero offset when standing and
 `v/omega` when walking, and the bias disappears. Not done here: it is a change to
 the objective, and three of them are already stacked in the run testing the gate.
+
+**Done 2026-08-19, as a vector difference rather than the scalar one above** (the
+vector form also penalises an offset pointing the wrong way). Two things the
+re-measurement settled, and they point in opposite directions:
+
+1. **The gradient the residual can move is fixed.** Lagging the commanded speed by
+   >0.05 m/s went from costing 1.56x the on-command error to costing 2.91x. The
+   term no longer sits near-flat while a policy drags its own gait — the table is
+   under `dcm_stability`.
+2. **The standing edge did not disappear: +45.9% -> +28.4% at `DCM_STD = 0.05`.**
+   The proposal's acceptance band was 10% and this misses it.
+
+**Why the remaining edge is not the same defect.** What is left is not a velocity
+preference — the command is subtracted — but a difficulty difference between two
+regimes: a standing robot's CoP sits almost exactly under its DCM (median error
+**0.0031 m**), while a walking one carries an irreducible ~0.032 m tracking error
+that agrees with the operating error in
+[residual-authority.md](residual-authority.md). A residual under a *walking*
+controller cannot collect the standing score by any action; it can only move along
+the within-episode gradient, which now points at the command.
+
+**And closing the last of it costs more than it is worth.** The band is met only
+at `std >= 0.08`, where a p90 disturbance still pays 0.50 and a push peak 0.21.
+That trades the term's early-warning property for a cross-controller comparison no
+policy can act on, so `0.05` stays. Re-open this if a *commanded-velocity
+curriculum* is ever added, where standing and walking become states of one
+episode.
 
 ## Known wrong sign
 
