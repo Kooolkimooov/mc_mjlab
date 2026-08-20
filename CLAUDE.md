@@ -292,6 +292,9 @@ Cross-cutting invariants:
   `-200` termination penalty for the pool's bad luck. Dropping that flag silently
   teaches the critic that infrastructure noise is a fall.
   docs/coupling.md#worker-failure-is-a-truncation
+- `fell_over` and `collapsed` are mutually exclusive labels (tilt wins), so their
+  shares add up; their *union* is unchanged, and hazard is still computed from the
+  union rather than by summing the two.
 - Neither logged family of curves means what it looks like. Every
   `Episode_Reward/*` is an episode *sum*, and those correlate with episode
   length at r = +0.98 — they move when the robot survives longer, not when it

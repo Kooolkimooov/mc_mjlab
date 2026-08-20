@@ -7,7 +7,7 @@ from weakref import WeakKeyDictionary
 
 import mujoco
 import torch
-from mjlab.envs.mdp import events
+from mjlab.envs.mdp import events, terminations
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.utils.lab_api.math import quat_apply_inverse
 
@@ -43,6 +43,20 @@ def controller_worker_failed(
   # Correlated across a worker's envs and unrelated to the action, so it must be
   # configured `time_out=True`. docs/coupling.md#worker-failure-is-a-truncation
   return _residual_term(env, action_name).controller_worker_failed
+
+
+def collapsed(
+  env: ManagerBasedRlEnv,
+  minimum_height: float,
+  limit_angle: float,
+  asset_cfg: SceneEntityCfg | None = None,
+) -> torch.Tensor:
+  """Root below ``minimum_height`` while still upright: a crouch, not a topple."""
+  # Exclusive with `bad_orientation` on purpose, so the two counters partition the
+  # balance failures; their union is what it always was.
+  cfg = asset_cfg or SceneEntityCfg("robot")
+  low = terminations.root_height_below_minimum(env, minimum_height, cfg)
+  return low & ~terminations.bad_orientation(env, limit_angle, cfg)
 
 
 def action_l2(env: ManagerBasedRlEnv) -> torch.Tensor:

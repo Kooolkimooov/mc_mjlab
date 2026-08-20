@@ -60,6 +60,10 @@ TORQUE_MARGIN_WEIGHT = -0.05
 TORQUE_SOFT_RATIO = 1.0
 TORQUE_MARGIN_STAGE_STEPS = (48_000, 96_000)
 
+# Tilt is checked first, so `collapsed` is the upright crouch alone.
+FALL_LIMIT_ANGLE = math.radians(45.0)
+COLLAPSE_HEIGHT_RATIO = 0.7
+
 ANGULAR_MOMENTUM_WEIGHT = -0.005
 FOOT_SLIP_WEIGHT = -1.0
 SOLE_VELOCIMETERS = ("left_foot_lin_vel", "right_foot_lin_vel")
@@ -282,12 +286,15 @@ def _make_env_cfg(
   terminations = {
     "time_out": TerminationTermCfg(func=envs_mdp.time_out, time_out=True),
     "fell_over": TerminationTermCfg(
-      func=envs_mdp.bad_orientation, params={"limit_angle": math.radians(45.0)}
+      func=envs_mdp.bad_orientation, params={"limit_angle": FALL_LIMIT_ANGLE}
     ),
     # Crouch-collapse keeps the trunk upright, so `fell_over` misses it.
     "collapsed": TerminationTermCfg(
-      func=envs_mdp.root_height_below_minimum,
-      params={"minimum_height": 0.7 * nominal_height},
+      func=mdp.collapsed,
+      params={
+        "minimum_height": COLLAPSE_HEIGHT_RATIO * nominal_height,
+        "limit_angle": FALL_LIMIT_ANGLE,
+      },
     ),
     "controller_failed": TerminationTermCfg(
       func=mdp.controller_failed, params={"action_name": "mc_rtc_residual"}

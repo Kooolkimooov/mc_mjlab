@@ -398,6 +398,35 @@ anyway.
   iteration 0 and never left it — 20899 iterations of no learning.
 - 2026-08-03 — reduced to -200.
 
+## collapsed
+
+**Current:** `mdp.collapsed` — root height below `0.7 * nominal` **and** trunk tilt
+within `FALL_LIMIT_ANGLE`, so it is exactly the upright crouch-collapse that
+`fell_over` (tilt past 45 degrees) does not catch. Before 2026-08-19 it was the
+height predicate alone.
+
+**The union is unchanged, so the learned task is unchanged:**
+
+```text
+old = fell_over OR height_low
+new = fell_over OR (height_low AND NOT fell_over) = fell_over OR height_low
+```
+
+Reset timing, value targets, `termination_penalty`, fall hazard and survival all
+stay where they were. What changes is only that a toppled robot — usually both
+tilted and low — now increments one counter instead of two.
+
+**Why it mattered.** `TerminationManager` ORs the non-timeout predicates and
+`is_terminated` reads that aggregate, so the overlap never doubled the `-200`.
+But it made the per-cause shares non-additive: `fell_over` + `collapsed` could
+exceed the fall rate, and the question the two counters exist to answer — is this
+policy trading a topple for a crouch — could not be read off them.
+
+**Historical numbers in `RUN_COMPARISONS.md` are the old, overlapping labels.**
+Their absolute shares are not comparable with post-2026-08-19 ones without
+re-evaluating. Fall hazard is computed from the union of the balance-failure
+predicates, never by summing the categories, and stays comparable either way.
+
 ## zmp_error and zmp_grounded
 
 **Current:** two metrics, read as a ratio.
