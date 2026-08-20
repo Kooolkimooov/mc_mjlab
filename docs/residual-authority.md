@@ -13,17 +13,19 @@ Set in `tasks/residual_balance/residual_balance_env_cfg.py`; applied in
 
 ## residual_scale
 
-**Current:** `0.01` rad for position control, `10.0` Nm for torque.
+**Current:** `0.20` rad for position control, `10.0` Nm for torque. The position
+value was raised at the user's request on 2026-08-20 and is **unmeasured**; it is a
+future-run default only, not a change to the running archived continuation.
 
 The bound is set in position units, but the actuators are unlimited on purpose
 (mc_mujoco parity, see `pd_actuator_configuration`), so what it really buys is
-torque: **0.01 rad through the real `PDgains_sim.dat` gains is 22-27% of every leg
-joint's hardware limit.** Measured over 64 s x 16 envs that is affordable —
-mc_rtc alone asks ~5% of the budget, and a saturated residual takes the worst
-joint (ankle pitch) to 0.64 of its limit without adding a single over-limit step.
+torque. The previous `0.01` rad bound was 22-27% of every leg joint's hardware
+limit; `0.20` rad can therefore request roughly 4.4-5.4x that limit before the
+torque-margin penalty responds. Do not call it safe until the authority probe and a
+short training smoke run have been repeated.
 
-**Re-measure before raising this.** Nothing in the sim clamps, so a residual that
-outgrows the hardware is invisible here and divergent on the robot.
+**Re-measure before using this in a training decision.** Nothing in the sim clamps,
+so a residual that outgrows the hardware is invisible here and divergent on the robot.
 
 **History:**
 - That warning was then ignored. A run at `0.1` (20899 iterations, 2026-07-31)
@@ -46,6 +48,9 @@ outgrows the hardware is invisible here and divergent on the robot.
   `runner.get_inference_policy()`, the distribution mean.
   The horizon half of that bundle *did* work and was kept; see
   [reward-shaping.md](reward-shaping.md#residual-harm-at-gamma099).
+- 2026-08-20 — raised to `0.20` at the user's request. This is a 20x authority
+  sweep, not an evidence-backed tuning decision; re-measure before interpreting a
+  training result as a benefit of the larger bound.
 
 ## residual_scales
 
