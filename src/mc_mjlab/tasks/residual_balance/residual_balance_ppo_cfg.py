@@ -36,6 +36,7 @@ def residual_balance_ppo_cfg(
         "init_std": 0.1,
         "std_type": "scalar",
         "std_range": (0.05, 0.30),
+        "learn_std": True,
       },
     ),
     critic=RslRlModelCfg(

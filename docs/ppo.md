@@ -119,6 +119,13 @@ floor for 54% of the last 500 iterations. Clamping sigma at roughly half
 The upper bound is the old worry, not the current one: at 0.005 entropy the std
 used to climb 0.2 -> 0.52 unchecked.
 
+## learn_std
+
+**Current:** `True`, rsl_rl's `GaussianDistribution` default, now written
+explicitly so Tyro exposes `--agent.actor.distribution-cfg.learn-std`. The
+residual-growth program uses `False` only for the `rg-fixedstd010` causal arm;
+it is not a proposed default.
+
 ## entropy_coef
 
 **Current:** `0.0005` — an order of magnitude below mjlab's locomotion configs

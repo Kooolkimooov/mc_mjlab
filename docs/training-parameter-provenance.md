@@ -101,6 +101,7 @@ The complete measurements are in [ppo.md](ppo.md).
 | CNN / RNN | disabled | Inherited | `cnn_cfg=None`, `rnn_type=None`; inherited recurrent dimensions and CNN sharing settings are inert. |
 | `init_std` | `0.1` | Local-design / measured check | Initial task chose `0.2`; lowered after a 500-iteration policy remained below baseline. The exact first `0.2` has no deeper recorded numeric root. |
 | `std_range` | `(0.05, 0.30)` | Local-measured | Added after std fell to `0.044` in one run and exceeded `0.5` in earlier runs. No upstream equivalent supplied these bounds. |
+| `learn_std` | `True` | Inherited / explicit | rsl_rl's `GaussianDistribution` default. Written explicitly so the fixed-standard-deviation diagnostic arm is selectable from the CLI. |
 | mean-head initialization | exactly zero | Local-measured | Makes iteration 0's deterministic action equal the zero-residual controller; fixes behavior not controlled by `init_std`. |
 
 ## Runner and training budget
