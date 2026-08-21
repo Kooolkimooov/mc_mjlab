@@ -13,19 +13,18 @@ Set in `tasks/residual_balance/residual_balance_env_cfg.py`; applied in
 
 ## residual_scale
 
-**Current:** `0.20` rad for position control, `10.0` Nm for torque. The position
-value was raised at the user's request on 2026-08-20 and is **unmeasured**; it is a
-future-run default only, not a change to the running archived continuation.
+**Current:** `0.01` rad for position control, `10.0` Nm for torque. The position
+value is the measured reference after both larger-authority experiments failed.
 
 The bound is set in position units, but the actuators are unlimited on purpose
 (mc_mujoco parity, see `pd_actuator_configuration`), so what it really buys is
-torque. The previous `0.01` rad bound was 22-27% of every leg joint's hardware
-limit; `0.20` rad can therefore request roughly 4.4-5.4x that limit before the
-torque-margin penalty responds. Do not call it safe until the authority probe and a
-short training smoke run have been repeated.
+torque. The `0.01` rad bound was 22-27% of every leg joint's hardware
+limit. The rejected `0.20` rad bound could request roughly 4.4-5.4x that limit
+before the torque-margin penalty responded.
 
-**Re-measure before using this in a training decision.** Nothing in the sim clamps,
-so a residual that outgrows the hardware is invisible here and divergent on the robot.
+**Re-measure if:** PD gains, torque limits or the residual joint set changes.
+Nothing in the sim clamps, so a residual that outgrows the hardware is invisible
+here and divergent on the robot.
 
 **History:**
 - That warning was then ignored. A run at `0.1` (20899 iterations, 2026-07-31)
@@ -48,9 +47,11 @@ so a residual that outgrows the hardware is invisible here and divergent on the 
   `runner.get_inference_policy()`, the distribution mean.
   The horizon half of that bundle *did* work and was kept; see
   [reward-shaping.md](reward-shaping.md#residual-harm-at-gamma099).
-- 2026-08-20 — raised to `0.20` at the user's request. This is a 20x authority
-  sweep, not an evidence-backed tuning decision; re-measure before interpreting a
-  training result as a benefit of the larger bound.
+- 2026-08-20 — raised to `0.20` for a 20x authority sweep. **Refuted and reverted
+  on 2026-08-21.** Across models 500, 960 and 999, deterministic per-step tracking
+  lost 13--35% against each checkpoint's own zero-residual arm. The deficit held
+  in every episode-length band, including survivors, while the final policy's
+  hazard was 1.27x baseline. More authority was actively harmful.
 
 ## residual_scales
 

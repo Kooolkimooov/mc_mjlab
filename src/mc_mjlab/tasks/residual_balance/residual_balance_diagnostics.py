@@ -10,7 +10,7 @@ from mc_mjlab.tasks.mdp import RAW_CLIP
 
 
 def ppo_diagnostics(alg: Any, saturation_level: float = RAW_CLIP) -> dict[str, float]:
-  """Policy movement, value fit and action saturation over the rollout just learned."""
+  """Policy movement, value fit and action composition over the rollout just learned."""
   storage = getattr(alg, "storage", None)
   # `update()` clears only the write cursor, so the rollout is still readable --
   # but it is gone one `act()` later, so this has to run before the next rollout.
@@ -18,8 +18,10 @@ def ppo_diagnostics(alg: Any, saturation_level: float = RAW_CLIP) -> dict[str, f
     return {}
   actor = alg.actor
   with torch.inference_mode():
+    policy_mean = storage.distribution_params[0]
+    rollout_actions = storage.actions
     old_params = tuple(p.flatten(0, 1) for p in storage.distribution_params)
-    actions = storage.actions.flatten(0, 1)
+    actions = rollout_actions.flatten(0, 1)
     old_log_prob = storage.actions_log_prob.flatten(0, 1).reshape(-1)
     values = storage.values.flatten(0, 1).reshape(-1)
     returns = storage.returns.flatten(0, 1).reshape(-1)
@@ -35,7 +37,31 @@ def ppo_diagnostics(alg: Any, saturation_level: float = RAW_CLIP) -> dict[str, f
       "clip_fraction": ((ratio - 1.0).abs() > alg.clip_param).float().mean().item(),
       "explained_variance": _explained_variance(values, returns),
       "action_saturation": (actions.abs() >= saturation_level).float().mean().item(),
+      "policy_mean_saturation": (policy_mean.abs() >= saturation_level)
+      .float()
+      .mean()
+      .item(),
+      "policy_mean_rms": _rms(policy_mean),
+      "sampled_action_rms": _rms(rollout_actions),
+      "exploration_rms": _rms(rollout_actions - policy_mean),
+      "policy_mean_rate_rms": _temporal_rms(policy_mean, storage.dones),
+      "sampled_action_rate_rms": _temporal_rms(rollout_actions, storage.dones),
     }
+
+
+def _rms(values: torch.Tensor) -> float:
+  """Root mean square over every component."""
+  return torch.sqrt(torch.mean(torch.square(values))).item()
+
+
+def _temporal_rms(values: torch.Tensor, dones: torch.Tensor) -> float:
+  """Root mean square temporal change without crossing episode resets."""
+  delta_sq = torch.square(values[1:] - values[:-1])
+  valid = ~dones[:-1].bool()
+  count = valid.sum() * values.shape[-1]
+  if count == 0:
+    return float("nan")
+  return torch.sqrt((delta_sq * valid).sum() / count).item()
 
 
 def _explained_variance(values: torch.Tensor, returns: torch.Tensor) -> float:

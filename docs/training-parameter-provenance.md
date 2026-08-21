@@ -159,7 +159,7 @@ the HRP5P asset, so there is no honest public per-line link for these exact valu
 | Parameter | Current | Root | Lineage and status |
 | --- | ---: | --- | --- |
 | residual joints | legs only | Local-design | First task used the robot's full residual set; changed to legs because this is balance/locomotion. Robot-specific exclusions remain inherited from `RobotModule`. |
-| position scale/clip | `±0.20` rad | User-directed / unmeasured | History `0.1→0.01→0.03→0.01→0.20`. The current 20× sweep was requested, not evidence-backed, and can request 4.4–5.4× hardware torque limits. |
+| position scale/clip | `±0.01` rad | Local-measured | History `0.1→0.01→0.03→0.01→0.20→0.01`. Both larger tests were harmful: `0.03` lost 20.6% tracking and `0.20` lost 13–35% across three checkpoints. |
 | torque scale/clip | `±10` Nm | Local-design | Channel-specific authority; exact numeric root is unresolved in Git notes. |
 | scale map | `{'.*': scale}` | Local safety design | Re-expresses the former scalar while ensuring every actuator is explicitly covered and clipped. |
 | raw clip point | `1.0` | Derived | `clip == scale`, so a unit raw action reaches the physical bound. |
@@ -303,8 +303,8 @@ Two audit hazards surfaced:
 1. The stale statement that `residual_rate` was still unclamped was corrected in
    `reward-shaping.md`; commit `8b80696` and current `mdp.action_rate_l2` clamp
    both actions at `RAW_CLIP`.
-2. The current position authority `0.20` rad invalidates safety measurements made
-   at `0.01` rad. It is explicitly an unmeasured sweep, not a validated default.
+2. The `0.20` rad authority sweep invalidated safety measurements made at `0.01`
+   rad and then lost 13–35% tracking. It was reverted rather than promoted.
 
 ## Source register
 

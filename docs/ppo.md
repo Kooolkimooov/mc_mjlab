@@ -235,7 +235,7 @@ sample-count comparable.
 
 ## Training diagnostics
 
-**Current:** four scalars under `Diagnostics/`, from
+**Current:** ten scalars under `Diagnostics/`, from
 `residual_balance_diagnostics.ppo_diagnostics`. rsl_rl logs three losses and the
 learning rate and nothing else, and `learn()` exposes no hook, so the runner
 wraps the one `Logger.log` call each iteration makes and writes them there.
@@ -245,9 +245,15 @@ wraps the one `Logger.log` call each iteration makes and writes them there.
 | `approx_kl` | how far the policy moved over the whole rollout |
 | `clip_fraction` | share of samples whose likelihood ratio left the `clip_param` band |
 | `explained_variance` | `1 - Var(returns - values) / Var(returns)`; 0 is a mean predictor |
-| `action_saturation` | share of action components at `RAW_CLIP` |
+| `action_saturation` | share of sampled action components at `RAW_CLIP` |
+| `policy_mean_saturation` | share of deterministic policy-mean components at `RAW_CLIP` |
+| `policy_mean_rms` | deterministic raw-action RMS over the collected states |
+| `sampled_action_rms` | sampled raw-action RMS seen by the environment |
+| `exploration_rms` | RMS of sampled action minus policy mean |
+| `policy_mean_rate_rms` | policy-mean temporal-change RMS, excluding resets |
+| `sampled_action_rate_rms` | sampled-action temporal-change RMS, excluding resets |
 
-All four are read off the rollout *after* `PPO.update()` returns, which is safe
+All ten are read off the rollout *after* `PPO.update()` returns, which is safe
 because `RolloutStorage.clear()` resets the write cursor and nothing else: the
 buffers stay intact until the next `act()` overwrites them.
 
@@ -261,6 +267,13 @@ size safe" against "how far did we go" — and the second was the one no run had
 run here (see the note at the top of this file), and its input was never
 recorded. `explained_variance` is the other half: `Loss/value` is in task units
 and cannot say whether the critic is fitting anything.
+
+The action decomposition was added after `residual_magnitude` climbed in every
+completed configuration. Episode reward sums cannot distinguish a growing
+deterministic correction from growing exploration, and their magnitude also
+moves with episode length. The RMS diagnostics read the rollout directly;
+their rate variants exclude the transition after a termination so reset jumps
+do not masquerade as policy jitter.
 
 **Re-measure if:** nothing — these are instruments, not constants. But note the
 cost, one extra forward pass over the rollout per iteration, against ~99% of
