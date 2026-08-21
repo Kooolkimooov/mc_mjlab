@@ -23,6 +23,7 @@ are *deciding* something, not when you are reading the line that implements it.
 | [ppo.md](ppo.md) | `init_std`, `std_range`, `entropy_coef`, `desired_kl`, `num_steps_per_env`, the training budget and diagnostics |
 | [training-parameter-provenance.md](training-parameter-provenance.md) | root source and history of every active and pruned training parameter |
 | [residual-growth.md](residual-growth.md) | `entropy_coef`, `learn_std` and `residual_magnitude` screening results |
+| [../MC_MJLAB_TRAINING_CONFIG_PROPOSAL_V3.md](../MC_MJLAB_TRAINING_CONFIG_PROPOSAL_V3.md) | recovery-only objective screen and adoption gate |
 | [observations.md](observations.md) | noise levels, the actor/critic split, the `controller_planned_*` terms |
 | [evaluation.md](evaluation.md) | how the measurement scripts avoid biasing a result |
 | [coupling.md](coupling.md) | action term, pool and host: interpolation, dispatch lag, reset ordering |
