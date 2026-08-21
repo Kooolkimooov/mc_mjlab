@@ -659,9 +659,9 @@ per-joint action was ~0.24 — well inside 1.0. The clamp changes the reward *on
 where the policy has already left the region its actions can affect, which is
 exactly the pathology.
 
-Note `residual_rate` (mjlab's `action_rate_l2`) is still on the unclamped raw
-action and has the same shape of exposure, though its weight is 10x smaller and it
-did not drive this failure.
+`residual_rate` had the same exposure until commit `8b80696`; the task now uses
+`mdp.action_rate_l2`, which clamps both the current and previous raw action at the
+same `RAW_CLIP` before differencing them.
 
 ## torque_margin
 
