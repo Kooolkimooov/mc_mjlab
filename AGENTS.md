@@ -141,8 +141,8 @@ grep-able `##` heading.
 
 **Never** put a `Codex-Session:` line, a session id, a `Codex.ai` URL, or a
 "Generated with Codex" line in a commit message — they outlive the session
-and stay in `git log` forever. `Co-Authored-By: Codex Opus 5
-<noreply@anthropic.com>` is wanted and stays. This holds for messages carried
+and stay in `git log` forever. `Co-Authored-By: Codex GPT-5
+<noreply@openai.com>` is wanted and stays. This holds for messages carried
 through a history rewrite too: strip the session line rather than preserve it.
 
 # Architecture
