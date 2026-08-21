@@ -97,7 +97,7 @@ models as fixed can carry no residual anywhere, and is dropped there. Filtering
 that set rather than taking the legs directly keeps the robot's carve-outs and
 refJointOrder ordering.
 
-## GATE_STRENGTH
+## gate_strength
 
 **Current:** `0.0` in the action term (a no-op), opted into by the task. How much
 authority to withhold from a residual pointing *against* the controller's own
@@ -167,7 +167,7 @@ policy trained without the gate, and once opposition costs authority the policy
 should learn to align. A gate whose measured attenuation stays flat across a run
 is one the policy is ignoring.
 
-## GATE_ALPHA_REF
+## gate_alpha_ref
 
 **Current:** `0.5` rad/s, measured. The norm of the controller's joint-velocity
 reference **over the 12 residual joints** — not the per-joint figure of ~0.4 rad/s

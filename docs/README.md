@@ -17,7 +17,7 @@ are *deciding* something, not when you are reading the line that implements it.
 
 | File | Covers |
 | --- | --- |
-| [difficulty.md](difficulty.md) | `PUSH_VELOCITY`, `PUSH_ANGULAR_VELOCITY`, `PUSH_WARMUP_S`, `WALK_WINDOW_S` |
+| [difficulty.md](difficulty.md) | `push_velocity`, `push_angular_velocity`, `warmup_s`, `episode_length_s` |
 | [reward-shaping.md](reward-shaping.md) | tracking weights and stds, the termination penalty, metrics, rejected ideas |
 | [residual-authority.md](residual-authority.md) | `residual_scale`, the per-joint partition, the torque budget |
 | [ppo.md](ppo.md) | `init_std`, `std_range`, `entropy_coef`, `desired_kl`, `num_steps_per_env`, the training budget and diagnostics |

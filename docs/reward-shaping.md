@@ -319,7 +319,7 @@ not a shaping term.
 
 **Re-measure if:** ground friction changes, or the baseline's slip level does.
 
-## RECOVERY_TRACKING_WEIGHT
+## recovery_dcm
 
 **Current:** `1.0`, with `RECOVERY_TRACKING_STD = DCM_STD` and
 `RECOVERY_WINDOW_S = 2.0`. The disturbance-gated half of the payment.

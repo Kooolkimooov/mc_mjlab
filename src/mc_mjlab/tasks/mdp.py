@@ -693,7 +693,7 @@ class push_and_record:
     ids = torch.arange(env.num_envs, device=env.device) if env_ids is None else env_ids
     if warmup_s > 0.0:
       # Suppress, do not reschedule: `EventManager` re-samples the countdown
-      # whenever this fires. docs/difficulty.md#push_warmup_s
+      # whenever this fires. docs/difficulty.md#warmup_s
       ids = ids[env.episode_length_buf[ids] * env.step_dt >= warmup_s]
       if ids.numel() == 0:
         return

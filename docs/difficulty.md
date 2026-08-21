@@ -7,7 +7,7 @@ task is actually calibrated against.
 
 Constants live in `src/mc_mjlab/tasks/residual_balance/residual_balance_env_cfg.py`.
 
-## PUSH_VELOCITY
+## push_velocity
 
 **Current:** `0.4` — the task's difficulty dial. Both directions ruin training:
 too gentle and mc_rtc never falls, so the best residual is no residual; too hard
@@ -53,13 +53,13 @@ are biased by 1/duration until runs are long relative to the cap — see
 - 2026-08-14 — briefly committed as `0.0`, which disabled every disturbance in
   the task; caught in review and amended back to 0.4.
 
-## PUSH_ANGULAR_VELOCITY
+## push_angular_velocity
 
 **Current:** `0.0` — the `roll`/`pitch` components of the push are off. It has
 been 0.0 since the task was introduced; the dial exists so angular disturbance
 can be added without restructuring the event term.
 
-## PUSH_WARMUP_S
+## warmup_s
 
 **Current:** `10.0` — how long an episode runs before pushes begin. The cadence
 is untouched: the term suppresses rather than reschedules, so pushes still arrive
@@ -86,7 +86,7 @@ never landed; see [evaluation.md](evaluation.md#binning-by-time-since-a-push).
 - Removing it makes the task easier (survival ~20% -> ~39% at a 60 s cap), which
   is why `WALK_WINDOW_S` grew alongside.
 
-## WALK_WINDOW_S
+## episode_length_s
 
 **Current:** `90.0` — how long the base controller actually walks, and therefore
 how long an episode is worth running. An episode running past the walk trains the

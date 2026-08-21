@@ -38,45 +38,12 @@ from mc_mjlab.robots.robots_registry import (
 )
 from mc_mjlab.tasks import mdp
 
-# Measured, not picked; docs/difficulty.md + docs/reward-shaping.md, keyed by name.
-PUSH_VELOCITY = 0.4
-PUSH_ANGULAR_VELOCITY = 0.0
-PUSH_WARMUP_S = 10.0
-
-# Tracks the *installed* FSM, which a workspace rebuild reverts.
-WALK_WINDOW_S = 90.0
-
-# Measured: scores the zero-residual baseline 0.57, a p90 push landing 0.05.
+# Only values used twice or more live here; the rest sit in the term that uses them.
 DCM_STD = 0.05
-DCM_STABILITY_WEIGHT = 1.0
-
-# RECOVERY_WINDOW_S rests on a profile taken before the probe was fixed.
-RECOVERY_TRACKING_STD = DCM_STD
-RECOVERY_TRACKING_WEIGHT = 1.0
-RECOVERY_WINDOW_S = 2.0
-
-# Measured: inert at baseline (0.00% of settled steps over limit), bites past it.
-TORQUE_MARGIN_WEIGHT = -0.05
-TORQUE_SOFT_RATIO = 1.0
-TORQUE_MARGIN_STAGE_STEPS = (48_000, 96_000)
-
-# Tilt is checked first, so `collapsed` is the upright crouch alone.
 FALL_LIMIT_ANGLE = math.radians(45.0)
-COLLAPSE_HEIGHT_RATIO = 0.7
-
-ANGULAR_MOMENTUM_WEIGHT = -0.005
-FOOT_SLIP_WEIGHT = -1.0
+TORQUE_MARGIN_WEIGHT = -0.05
 SOLE_VELOCIMETERS = ("left_foot_lin_vel", "right_foot_lin_vel")
-
-# 0: attenuation stayed flat over 1500 iterations and the tracking win vanished.
-GATE_STRENGTH = 0.0
-GATE_ALPHA_REF = 0.5
-# Measured |d_dot| rms over the baseline's load difference.
-PHASE_RATE_REF = 7.1
 CONTROLLER_HISTORY = 20
-
-# A viewer default: each env is its own ~70 MB controller, built serially.
-PLAY_NUM_ENVS = 1
 
 
 def _make_env_cfg(
@@ -84,9 +51,11 @@ def _make_env_cfg(
   num_envs: int = 128,
   num_workers: int | None = None,
   residual_scale: float | dict[str, float] | None = None,
-  episode_length_s: float = WALK_WINDOW_S,
-  push_velocity: float = PUSH_VELOCITY,
-  push_angular_velocity: float = PUSH_ANGULAR_VELOCITY,
+  # Tracks the *installed* FSM's walk, which a workspace rebuild reverts.
+  episode_length_s: float = 90.0,
+  # Difficulty dial; the baseline should almost always fail. docs/difficulty.md
+  push_velocity: float = 0.4,
+  push_angular_velocity: float = 0.0,
   console_output: Literal["none", "single", "all"] = "none",
   print_residual_every: int = 0,
   mc_rtc_yaml: Path = MC_RTC_YAML_PATH,
@@ -131,8 +100,9 @@ def _make_env_cfg(
       pd_gains_path=str(robot.pd_gains_path),
       scale=residual_scales,
       clip=residual_clip,
-      gate_strength=GATE_STRENGTH,
-      gate_alpha_ref=GATE_ALPHA_REF,
+      # 0.0: attenuation stayed flat over 1500 iterations and the win vanished.
+      gate_strength=0.0,
+      gate_alpha_ref=0.5,
       console_output=console_output,
       print_residual_every=print_residual_every,
     )
@@ -190,7 +160,8 @@ def _make_env_cfg(
       params={
         "sensor_names": mdp.GROUND_CONTACT_SENSORS,
         "asset_cfg": SceneEntityCfg("robot"),
-        "rate_ref": PHASE_RATE_REF,
+        # Measured |d_dot| rms over the baseline's load difference.
+        "rate_ref": 7.1,
       },
       history_length=CONTROLLER_HISTORY,
     ),
@@ -232,16 +203,16 @@ def _make_env_cfg(
     ),
   }
 
-  # Rewards. Weights are per second: the manager scales them by step_dt.
+  # Weights are per second: the manager scales each by step_dt.
   rewards = {
-    # Sized by gradient scale: -2000 was a 1000x outlier that floored the LR.
+    # -2000 was a 1000x gradient-scale outlier that floored the LR.
     "termination_penalty": RewardTermCfg(func=envs_mdp.is_terminated, weight=-200.0),
     "upright": RewardTermCfg(func=envs_mdp.flat_orientation_l2, weight=-2.0),
     # The objective: divergence from the *commanded* one, which mc_rtc's
     # plan-matching cannot buy itself. docs/reward-shaping.md#dcm_stability
     "dcm_stability": RewardTermCfg(
       func=mdp.dcm_stability,
-      weight=DCM_STABILITY_WEIGHT,
+      weight=1.0,
       params={
         "std": DCM_STD,
         "sensor_names": mdp.GROUND_CONTACT_SENSORS,
@@ -251,22 +222,21 @@ def _make_env_cfg(
     ),
     "recovery_dcm": RewardTermCfg(
       func=mdp.recovery_dcm,
-      weight=RECOVERY_TRACKING_WEIGHT,
+      weight=1.0,
       params={
-        "std": RECOVERY_TRACKING_STD,
-        "window_s": RECOVERY_WINDOW_S,
+        "std": DCM_STD,
+        # 2 s rests on a recovery profile taken before the probe was fixed.
+        "window_s": 2.0,
         "sensor_names": mdp.GROUND_CONTACT_SENSORS,
         "asset_cfg": SceneEntityCfg("robot"),
         "push_term_name": "push_robot",
         "action_name": "mc_rtc_residual",
       },
     ),
-    "angular_momentum": RewardTermCfg(
-      func=mdp.angular_momentum_l2, weight=ANGULAR_MOMENTUM_WEIGHT
-    ),
+    "angular_momentum": RewardTermCfg(func=mdp.angular_momentum_l2, weight=-0.005),
     "foot_slip": RewardTermCfg(
       func=mdp.foot_slip,
-      weight=FOOT_SLIP_WEIGHT,
+      weight=-1.0,
       params={
         "sensor_names": mdp.GROUND_CONTACT_SENSORS,
         "asset_cfg": SceneEntityCfg("robot"),
@@ -276,7 +246,7 @@ def _make_env_cfg(
     "torque_margin": RewardTermCfg(
       func=mdp.torque_margin,
       weight=TORQUE_MARGIN_WEIGHT,
-      params={"soft_ratio": TORQUE_SOFT_RATIO, "action_name": "mc_rtc_residual"},
+      params={"soft_ratio": 1.0, "action_name": "mc_rtc_residual"},
     ),
     "residual_magnitude": RewardTermCfg(func=mdp.action_l2, weight=-0.1),
     "residual_rate": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.1),
@@ -291,7 +261,7 @@ def _make_env_cfg(
     "collapsed": TerminationTermCfg(
       func=mdp.collapsed,
       params={
-        "minimum_height": COLLAPSE_HEIGHT_RATIO * nominal_height,
+        "minimum_height": 0.7 * nominal_height,
         "limit_angle": FALL_LIMIT_ANGLE,
       },
     ),
@@ -338,7 +308,7 @@ def _make_env_cfg(
           "roll": (-push_angular_velocity, push_angular_velocity),
           "pitch": (-push_angular_velocity, push_angular_velocity),
         },
-        "warmup_s": PUSH_WARMUP_S,
+        "warmup_s": 10.0,
       },
     ),
     "encoder_bias": EventTermCfg(
@@ -362,8 +332,8 @@ def _make_env_cfg(
         "reward_name": "torque_margin",
         "stages": [
           {"step": 0, "weight": TORQUE_MARGIN_WEIGHT},
-          {"step": TORQUE_MARGIN_STAGE_STEPS[0], "weight": TORQUE_MARGIN_WEIGHT * 4},
-          {"step": TORQUE_MARGIN_STAGE_STEPS[1], "weight": TORQUE_MARGIN_WEIGHT * 10},
+          {"step": 48_000, "weight": TORQUE_MARGIN_WEIGHT * 4},
+          {"step": 96_000, "weight": TORQUE_MARGIN_WEIGHT * 10},
         ],
       },
     )
@@ -415,7 +385,7 @@ def _make_env_cfg(
 
 def _apply_play_overrides(cfg: ManagerBasedRlEnvCfg) -> ManagerBasedRlEnvCfg:
   """Retune a training cfg for a viewer session."""
-  cfg.scene.num_envs = PLAY_NUM_ENVS
+  cfg.scene.num_envs = 1  # each env is its own ~70 MB controller, built serially
   cfg.episode_length_s = 1e10  # only a fall should end an episode
   cfg.observations["actor"].enable_corruption = False
   return cfg
