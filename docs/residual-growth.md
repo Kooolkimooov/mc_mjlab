@@ -71,3 +71,8 @@ reward operates on raw action and its physical meaning depends on those values.
 growth follows the learned deterministic policy rather than explicit entropy
 pressure alone; further PPO tuning is deferred in favor of examining the
 objective.
+
+The first objective follow-up is closed in
+[`MC_MJLAB_TRAINING_CONFIG_PROPOSAL_V3.md`](../MC_MJLAB_TRAINING_CONFIG_PROPOSAL_V3.md):
+recovery-only DCM shaping reduced deterministic residual magnitude 67.6% but
+worsened its own recovery score 8.14%, so it was not promoted.
