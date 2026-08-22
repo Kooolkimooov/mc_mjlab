@@ -22,6 +22,10 @@ the dither.
 uv run python scripts/compare_to_baseline.py --checkpoint logs/.../model_499.pt
 ```
 
+Reward-shape screens must be scored with their own width. Pass
+`--recovery-dcm-std` when it differs from the repository default; this changes
+only the reported recovery term, not the policy or simulated behavior.
+
 Two things it does that a naive A/B does not, both learned by getting them wrong
 first.
 

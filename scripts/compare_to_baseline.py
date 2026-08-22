@@ -354,6 +354,12 @@ def main() -> None:
   )
   p.add_argument("--device", default="cuda:0", help="torch device for the simulation")
   p.add_argument(
+    "--recovery-dcm-std",
+    type=float,
+    default=None,
+    help="override the recovery DCM width when evaluating a reward-shape screen",
+  )
+  p.add_argument(
     "--drop-obs",
     default="",
     help=(
@@ -391,6 +397,8 @@ def main() -> None:
     num_workers=args.num_workers,
     console_output="none",
   )
+  if args.recovery_dcm_std is not None:
+    cfg.rewards["recovery_dcm"].params["std"] = args.recovery_dcm_std
   # A checkpoint is only loadable against the observation space it was trained
   # on: the actor's first layer and its `obs_normalizer` are both sized by the
   # concatenated width, so adding an observation term retires every checkpoint
