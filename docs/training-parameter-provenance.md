@@ -267,6 +267,7 @@ See [difficulty.md](difficulty.md).
 | zero-referenced DCM | std `0.05`, weight `1.0` | Paper-form implemented incorrectly for walking | Corrected to command-relative DCM on 2026-08-20 because zero-relative scoring rewarded standing over commanded walking. |
 | coherence gate enabled | strength `1.0`, alpha ref `0.5` | Paper-form / local-measured | Disabled after 1500 iterations: mean attenuation changed only `+0.008` and its apparent tracking benefit disappeared. Code retained at strength zero. |
 | recovery-only DCM objective | nominal/recovery weights `0.0/4.0` | Local causal screen | Reduced deterministic residual magnitude 67.6% and kept hazard at 0.952, but recovery DCM itself fell 8.14%; no 500-iteration promotion. |
+| widened recovery-only DCM | nominal/recovery weights `0.0/4.0`, recovery std `0.10` | Local measured causal screen | Model 340 improved recovery 7.43% with hazard 0.691, but residual magnitude exceeded reference; by model 499 hazard reached 1.160. Failed the two-of-three full-run gate. |
 | residual scale `0.1` | position `0.1` rad | Initial local | Through real gains produced 220–270% hardware-limit authority; reverted to `0.01`. |
 | residual scale `0.03` | position `0.03` rad | Local authority probe | Intended to improve CoP authority; deterministic evaluation instead widened all tracking deficits, so reverted. |
 | termination penalty `-2000` | one terminal step | Unresolved initial local | Produced critic targets and KL behavior far outside dense-reward scale; reduced to `-200`. |

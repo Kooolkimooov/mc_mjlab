@@ -76,3 +76,9 @@ The first objective follow-up is closed in
 [`MC_MJLAB_TRAINING_CONFIG_PROPOSAL_V3.md`](../MC_MJLAB_TRAINING_CONFIG_PROPOSAL_V3.md):
 recovery-only DCM shaping reduced deterministic residual magnitude 67.6% but
 worsened its own recovery score 8.14%, so it was not promoted.
+
+The saturation follow-up in
+[`MC_MJLAB_TRAINING_CONFIG_PROPOSAL_V4.md`](../MC_MJLAB_TRAINING_CONFIG_PROPOSAL_V4.md)
+found a behaviorally useful model at iteration 340, but deterministic residual
+magnitude had already exceeded reference and continued growing until hazard was
+1.160 at iteration 499. The wider recovery objective was not adopted.

@@ -1,6 +1,6 @@
 # mc_mjlab recovery-width proposal V4
 
-**Status:** promoted to a 500-iteration run, 2026-08-24.
+**Status:** closed without adoption, 2026-08-24.
 
 ## Diagnosis
 
@@ -91,3 +91,29 @@ degradation. No checkpoint may have a significant recovery loss or hazard above
 1.10. Select the checkpoint by recovery DCM, then hazard, while requiring its
 deterministic magnitude cost to remain at least 50% below `rg-ref01` model 187.
 If the gate fails, keep the current objective and prune recovery std `0.10`.
+
+## Full-run result
+
+`obj-recovery010-full` completed 500 iterations from a fresh initialization.
+Fixed-K evaluation retained three episodes per environment for models 180 and
+340 and four for model 499, with 32 environments per arm throughout.
+
+| Model | Recovery DCM | Hazard ratio | Foot-slip cost | Upright cost | Magnitude cost/step | Decision |
+| ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 180 | -3.70% (p=0.428) | 1.026 | -0.91% (p=0.976) | +7.89% (p=0.594) | -0.0000230 | recovery gate failed |
+| 340 | +7.43% (p=0.134) | **0.691** | -16.2% (p=0.323) | -5.94% (p=0.659) | -0.0000866 | residual-size gate failed |
+| 499 | +1.88% (p=0.653) | **1.160** | -21.3% (p=0.136) | +9.56% (p=0.456) | -0.000161 | hazard gate failed |
+
+Only model 340 passes the behavioral gates. It also increased survival 15.6
+percentage points (environment-clustered p=0.0359) and episode duration 7.94 s
+(p=0.0666), so the wider recovery objective can teach a useful correction. But
+its deterministic magnitude cost is 6.8% larger than `rg-ref01`, not at least
+50% smaller as required. By model 499 the cost is 98.1% larger than reference
+and hazard has crossed the hard 1.10 limit.
+
+The two-of-three adoption rule therefore fails, and model 499 independently
+violates the rule that no checkpoint may exceed hazard 1.10. Do not adopt the
+`0.0/4.0`, recovery-std-`0.10` configuration. The result localizes the remaining
+problem: broad recovery shaping can improve recovery, but continued optimization
+again grows the deterministic residual until the physical benefit reverses.
+Keep the current objective and treat this configuration as pruned.
