@@ -123,8 +123,25 @@ def near_bound_fraction(
 def gate_mean(
   env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
 ) -> torch.Tensor:
-  """Coherence-gate factor, 1 where nothing is withheld."""
+  """Recovery-conditioned residual authority in 0..1."""
   return _residual_term(env, action_name).last_gate
+
+
+def detector_score(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """Calibrated transparent recovery score before temporal filtering."""
+  return _residual_term(env, action_name).detector_score
+
+
+def inactive_residual_violation(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """Peak executed residual where authority is exactly zero."""
+  term = _residual_term(env, action_name)
+  inactive = term.last_gate == 0.0
+  peak = term.executed_physical_action.abs().amax(dim=1)
+  return peak * inactive
 
 
 def controller_position_error(
@@ -725,6 +742,11 @@ class push_and_record:
       (env.num_envs,), self.NEVER, dtype=torch.long, device=env.device
     )
     self.last_push_vel = torch.zeros((env.num_envs, 3), device=env.device)
+    self.enabled = torch.ones(env.num_envs, device=env.device, dtype=torch.bool)
+
+  def disable(self, env_ids: torch.Tensor) -> None:
+    """Suppress scheduled pushes for selected calibration environments."""
+    self.enabled[env_ids] = False
 
   def __call__(
     self,
@@ -733,8 +755,12 @@ class push_and_record:
     velocity_range: dict[str, tuple[float, float]],
     asset_cfg: SceneEntityCfg | None = None,
     warmup_s: float = 0.0,
+    planar_speed: float | None = None,
   ) -> None:
     ids = torch.arange(env.num_envs, device=env.device) if env_ids is None else env_ids
+    ids = ids[self.enabled[ids]]
+    if ids.numel() == 0:
+      return
     if warmup_s > 0.0:
       # Suppress, do not reschedule: `EventManager` re-samples the countdown
       # whenever this fires. docs/difficulty.md#warmup_s
@@ -746,7 +772,13 @@ class push_and_record:
     # recorded: `root_link_vel_w` comes from `cvel`, which MuJoCo does not
     # recompute until the next forward, so a before/after difference reads zero.
     vel_w = asset.data.root_link_vel_w[ids]
-    delta = events._sample_se3_range(velocity_range, vel_w.shape, str(env.device))
+    if planar_speed is None:
+      delta = events._sample_se3_range(velocity_range, vel_w.shape, str(env.device))
+    else:
+      angle = 2.0 * torch.pi * torch.rand(len(ids), device=env.device)
+      delta = torch.zeros_like(vel_w)
+      delta[:, 0] = planar_speed * torch.cos(angle)
+      delta[:, 1] = planar_speed * torch.sin(angle)
     asset.write_root_link_velocity_to_sim(vel_w + delta, env_ids=ids)
     self.last_push_vel[ids] = quat_apply_inverse(
       asset.data.root_link_quat_w[ids], delta[:, :3]

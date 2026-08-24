@@ -70,11 +70,12 @@ change.
 ## RECOVERY_DETECTOR
 
 **Current:** Authority is a transparent monotonic score over command-relative
-DCM, base angular velocity, tilt, and total foot-load deviation. A calibration
-script fits feature normalization and a held-out threshold from zero-residual
-nominal and post-disturbance traces. The gate has a smooth attack and
-exponential decay with `0.5 s` time constant. Push schedule, runtime since
-push, and critic-only observations are forbidden inputs.
+DCM, base angular velocity, tilt, and total foot-load deviation. A calibrated
+base-angular-speed rise starts a bounded burst, and a nominal-score dwell rearms
+it. Dedicated zero-residual nominal and fixed-energy disturbance cohorts supply
+separate train and held-out traces. The gate has a smooth attack and exponential
+decay with `0.5 s` time constant. Push schedule, runtime since push, and
+critic-only observations are forbidden inputs.
 
 Acceptance requires nominal duty at most `5%`, at least `80%` recall within
 `2 s` after disturbance, and fewer than `1%` activations persisting more than
@@ -89,6 +90,8 @@ distribution changes.
 **History:**
 - 2026-08-24 — DCM alone overlaps nominal walking; the multi-feature detector
   replaces the whole-vector coherence gate.
+- 2026-08-24 — accepted held-out calibration at 0.000% nominal duty, 96.825%
+  two-second recovery recall, and 0.000% late activation (n=4620/882).
 
 ## SELECTIVE_AUTHORITY
 

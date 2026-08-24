@@ -300,3 +300,23 @@ actually paid on.
 
 See `RECOVERY_TRACKING_WEIGHT` in [reward-shaping.md](reward-shaping.md) for the
 profile itself and the caveat that the recorded numbers predate these fixes.
+
+## calibrate_recovery_detector.py
+
+Fits the deployable residual-authority detector from dedicated zero-disturbance
+and fixed-energy disturbed cohorts, with even environments used for fitting and
+odd environments held out. A failed held-out gate still writes a temporary JSON
+when fitting succeeds, but it must not replace `etc/recovery_detector.json`.
+
+```sh
+uv run python scripts/calibrate_recovery_detector.py \
+  --output /tmp/recovery_detector.json --trace-out /tmp/recovery_trace.pt
+uv run python scripts/calibrate_recovery_detector.py \
+  --output /tmp/recovery_detector.json --trace-in /tmp/recovery_trace.pt
+uv run python scripts/verify_live_recovery_detector.py
+```
+
+The trace replay is the fast path for filter-only changes. Acceptance requires
+nominal mean authority at most 5%, at least 80% recovery samples above 5%
+authority in the first 2 s, and fewer than 1% above 5% after 2 s. The live check
+then drives nonzero action to assert exact inactive residual zeroing.

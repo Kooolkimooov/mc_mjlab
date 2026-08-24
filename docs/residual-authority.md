@@ -104,11 +104,44 @@ models as fixed can carry no residual anywhere, and is dropped there. Filtering
 that set rather than taking the legs directly keeps the robot's carve-outs and
 refJointOrder ordering.
 
-## gate_strength
+## recovery_detector_path
 
-**Current:** `0.0` in the action term (a no-op), opted into by the task. How much
-authority to withhold from a residual pointing *against* the controller's own
-commanded joint velocity.
+**Current:** `etc/recovery_detector.json`. Residual authority is zero until a
+deployable sensor detector opens it. Its monotonic magnitude score is the maximum
+normalized command-relative DCM error, base angular speed, tilt, and total
+foot-load deviation. A calibrated rise in base angular speed starts a smooth,
+bounded recovery burst; another burst requires `0.5 s` back inside the calibrated
+nominal-score envelope. The push schedule, time since push, and critic-only
+observations are not action inputs.
+
+`scripts/calibrate_recovery_detector.py` uses separate nominal and disturbed
+environment cohorts, splits both into train and held-out environments, and uses a
+fixed-magnitude `0.4 m/s` planar kick with uniform direction. It also asserts that
+the independently implemented detector DCM agrees with `mdp._ZmpSensors` within
+`0.1 mm` at every recorded step.
+
+The accepted 2026-08-24 calibration used 16 environments x 1500 steps:
+
+| split | nominal duty | recovery recall, first 2 s | authority >5% after 2 s |
+| --- | ---: | ---: | ---: |
+| train | 0.364% (n=4496) | 98.993% (n=993) | 0.000% |
+| held out | 0.000% (n=4620) | 96.825% (n=882) | 0.000% |
+
+The filter attacks in `0.1 s`, decays with a `0.5 s` time constant, and hard-cuts
+each burst at `2.0 s`. `scripts/verify_live_recovery_detector.py` drove nonzero
+actions through the simulator and measured maximum authority `1.000`, mean
+authority `7.338%` under fixed-energy kicks, and exactly zero executed residual
+while inactive.
+
+**Re-measure if:** the gait, command speed, sensor model, control period, robot,
+or disturbance-energy distribution changes.
+
+## Removed coherence gate
+
+**Removed 2026-08-24.** This whole-vector coherence gate was a no-op at
+`gate_strength = 0.0` and is superseded by `recovery_detector_path`. The history
+below records why directional gating was considered and the measurements made
+before removal.
 
 `scale` and `clip` bound **how much** the residual may do. This bounds **where and
 when**, which the literature says matters far more. Jayasinghe et al. ablate a
@@ -127,7 +160,7 @@ gated on the post-push window by `recovery_dcm`; the *action* has never been gat
 at all, so the residual acts on every step including the ~90% of nominal walking
 where it can gain nothing and can still lose something.
 
-**The shape**, in `McRtcResidualActionBase._coherence_gate`:
+**The removed shape** was:
 
 ```
 cos    = <residual, alpha> / (|residual| |alpha|)
@@ -174,11 +207,11 @@ policy trained without the gate, and once opposition costs authority the policy
 should learn to align. A gate whose measured attenuation stays flat across a run
 is one the policy is ignoring.
 
-## gate_alpha_ref
+## Removed coherence alpha reference
 
-**Current:** `0.5` rad/s, measured. The norm of the controller's joint-velocity
-reference **over the 12 residual joints** — not the per-joint figure of ~0.4 rad/s
-in `CLAUDE.md`, which is a different quantity.
+**Removed 2026-08-24 with `gate_strength`.** Its historical value was `0.5`
+rad/s, measured from the norm of the controller's joint-velocity reference over
+the 12 residual joints.
 
 Measured over the same 60000 env-steps: mean 0.848, median 0.845, p25 0.514,
 p75 1.222, p90 1.390. There is no idle mode to speak of — even the 25th percentile

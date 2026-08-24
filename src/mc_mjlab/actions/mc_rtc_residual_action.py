@@ -19,6 +19,7 @@ from mc_mjlab.actions.mc_rtc_controller_io_binding import (
   apply_reference_pd_gains,
 )
 from mc_mjlab.actions.mc_rtc_controller_pool import ControllerPool
+from mc_mjlab.recovery_authority import RecoveryAuthority
 from mc_mjlab.robots import mc_rtc_robot_configuration as mc_rtc
 
 if TYPE_CHECKING:
@@ -86,15 +87,9 @@ class McRtcResidualActionCfg(BaseActionCfg):
   output. In-process hosting falls back to per-call fd guards; a threaded
   in-process pool honors "single" only at construction/reset."""
 
-  gate_strength: float = 0.0
-  """How much authority to withhold from a residual opposing the controller's own
-  commanded joint velocity, in 0..1. 0 disables the gate, which is the default so
-  no task changes behaviour without opting in. It can only remove authority."""
-
-  gate_alpha_ref: float = 1.0
-  """Norm of the controller's joint-velocity reference over the residual joints at
-  which the gait counts as fully active, rad/s. Below it the gate relaxes: an idle
-  joint has no commanded direction to oppose."""
+  recovery_detector_path: str | None = None
+  """Calibration JSON for recovery-conditioned authority; ``None`` gives full
+  authority for compatibility and detector calibration runs."""
 
 
 class McRtcResidualActionBase(BaseAction):
@@ -160,6 +155,13 @@ class McRtcResidualActionBase(BaseAction):
     self._out_np = self._pool.out_np
 
     self._alloc_interpolation_buffers()
+    self._recovery_authority = (
+      RecoveryAuthority(env, self, cfg.recovery_detector_path)
+      if cfg.recovery_detector_path is not None
+      else None
+    )
+    if self._recovery_authority is not None:
+      self._last_gate.zero_()
 
   # ---- Construction helpers. ----
 
@@ -386,20 +388,6 @@ class McRtcResidualActionBase(BaseAction):
         f"term's `controller_vectors` (have: {sorted(self._controller_vectors)})"
       ) from None
 
-  def _coherence_gate(
-    self, residual: torch.Tensor, alpha: torch.Tensor
-  ) -> torch.Tensor:
-    """Per-env factor shrinking a residual that opposes the commanded velocity."""
-    # `active` must stay: at a reversal alpha -> 0 and the cosine is pure noise.
-    speed = torch.linalg.vector_norm(alpha, dim=1)
-    cosine = torch.sum(residual * alpha, dim=1) / (
-      torch.linalg.vector_norm(residual, dim=1) * speed + 1e-9
-    )
-    active = torch.tanh(speed / self.cfg.gate_alpha_ref)
-    gate = 1.0 - self.cfg.gate_strength * torch.relu(-cosine) * active
-    self._last_gate = gate
-    return gate
-
   def consume_torque_peak(self) -> torch.Tensor:
     """Peak |joint torque| since the last call, over the target joints; resets it."""
     peak = self._torque_peak.clone()
@@ -443,8 +431,15 @@ class McRtcResidualActionBase(BaseAction):
 
   @property
   def last_gate(self) -> torch.Tensor:
-    """Most recent coherence gate, ones where it is disabled."""
+    """Most recent recovery authority in 0..1."""
     return self._last_gate
+
+  @property
+  def detector_score(self) -> torch.Tensor:
+    """Most recent calibrated detector score, zeros when disabled."""
+    if self._recovery_authority is None:
+      return torch.zeros_like(self._last_gate)
+    return self._recovery_authority.score
 
   @property
   def residual_ids(self) -> torch.Tensor | None:
@@ -470,6 +465,8 @@ class McRtcResidualActionBase(BaseAction):
   def process_actions(self, actions: torch.Tensor) -> None:
     self._previous_executed_physical.copy_(self._executed_physical)
     super().process_actions(actions)
+    if self._recovery_authority is not None:
+      self._last_gate.copy_(self._recovery_authority.update())
     if self._print_every:
       self._print_pending = True
 
@@ -486,10 +483,12 @@ class McRtcResidualActionBase(BaseAction):
       env_ids = slice(None)
 
     self._torque_peak[env_ids] = 0.0
-    self._last_gate[env_ids] = 1.0
+    self._last_gate[env_ids] = 0.0 if self._recovery_authority is not None else 1.0
     self._executed_physical[env_ids] = 0.0
     self._previous_executed_physical[env_ids] = 0.0
     self._projection_mask[env_ids] = False
+    if self._recovery_authority is not None:
+      self._recovery_authority.reset(env_ids)
 
     if isinstance(env_ids, slice):
       env_indices = list(range(self.num_envs))[env_ids]
@@ -567,15 +566,7 @@ class McRtcResidualActionBase(BaseAction):
 
     self._steps_since_run += 1
 
-    residual = self._processed_actions
-    self._last_gate.fill_(1.0)
-    if self.cfg.gate_strength > 0.0:
-      # Interpolated, not `controller_reference`: that is the next target, not this
-      # substep's. docs/residual-authority.md#gate_strength
-      alpha = interpolated_control["alpha"]
-      if self._residual_ids is not None:
-        alpha = alpha[:, self._residual_ids]
-      residual = residual * self._coherence_gate(residual, alpha).unsqueeze(-1)
+    residual = self._processed_actions * self._last_gate.unsqueeze(-1)
 
     # Scatter a restricted residual into the full target width (non-matched
     # joints get 0, i.e. pure mc_rtc tracking).

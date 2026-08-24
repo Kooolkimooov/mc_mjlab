@@ -1,0 +1,73 @@
+{
+  "feature_names": [
+    "dcm_error",
+    "base_ang_speed",
+    "tilt",
+    "load_deviation"
+  ],
+  "centers": [
+    0.06165746599435806,
+    0.10167978703975677,
+    0.022879483178257942,
+    0.07157829403877258
+  ],
+  "scales": [
+    0.04649996757507324,
+    0.08400224149227142,
+    0.02464352361857891,
+    0.05000000074505806
+  ],
+  "threshold": 0.15569332242012024,
+  "activation_span": 1.673812359571457,
+  "attack_s": 0.1,
+  "decay_tau_s": 0.5,
+  "cutoff": 0.001,
+  "max_active_s": 2.0,
+  "rearm_s": 0.5,
+  "rearm_score": 0.06817013025283813,
+  "onset_feature": "base_ang_speed",
+  "onset_delta": 0.039787039160728455,
+  "calibration": {
+    "seed": 42,
+    "num_envs": 16,
+    "steps": 1500,
+    "push_velocity": 0.4,
+    "accepted": true,
+    "train": {
+      "nominal_duty": 0.0036425828002393246,
+      "recovery_recall": 0.9899294972419739,
+      "late_activation": 0.0,
+      "nominal_samples": 4496,
+      "recovery_samples": 993
+    },
+    "heldout": {
+      "nominal_duty": 0.0,
+      "recovery_recall": 0.9682539701461792,
+      "late_activation": 0.0,
+      "nominal_samples": 4620,
+      "recovery_samples": 882
+    },
+    "feature_quantiles": {
+      "dcm_error": {
+        "nominal_q95": 0.06165746599435806,
+        "recovery_q80": 0.1081574335694313,
+        "scale": 0.04649996757507324
+      },
+      "base_ang_speed": {
+        "nominal_q95": 0.10167978703975677,
+        "recovery_q80": 0.1856820285320282,
+        "scale": 0.08400224149227142
+      },
+      "tilt": {
+        "nominal_q95": 0.022879483178257942,
+        "recovery_q80": 0.04752300679683685,
+        "scale": 0.02464352361857891
+      },
+      "load_deviation": {
+        "nominal_q95": 0.07157829403877258,
+        "recovery_q80": 0.08552265167236328,
+        "scale": 0.05000000074505806
+      }
+    }
+  }
+}

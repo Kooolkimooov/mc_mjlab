@@ -24,7 +24,7 @@ from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.terrains import TerrainEntityCfg
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 
-from mc_mjlab import MC_RTC_YAML_PATH
+from mc_mjlab import MC_RTC_YAML_PATH, REPO_ROOT
 from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionActionCfg,
 )
@@ -39,11 +39,12 @@ from mc_mjlab.robots.robots_registry import (
 from mc_mjlab.tasks import mdp
 
 # Only values used twice or more live here; the rest sit in the term that uses them.
-DCM_STD = 0.05
+DCM_STD = 0.10
 FALL_LIMIT_ANGLE = math.radians(45.0)
 TORQUE_MARGIN_WEIGHT = -0.05
 SOLE_VELOCIMETERS = ("left_foot_lin_vel", "right_foot_lin_vel")
 CONTROLLER_HISTORY = 20
+RECOVERY_DETECTOR_PATH = REPO_ROOT / "etc" / "recovery_detector.json"
 
 
 def _make_env_cfg(
@@ -59,6 +60,7 @@ def _make_env_cfg(
   console_output: Literal["none", "single", "all"] = "none",
   print_residual_every: int = 0,
   mc_rtc_yaml: Path = MC_RTC_YAML_PATH,
+  recovery_detector_path: Path | None = RECOVERY_DETECTOR_PATH,
 ) -> ManagerBasedRlEnvCfg:
   """Build the residual balance env cfg for the config's ``MainRobot``."""
   robot_name, robot = get_main_robot_spec(mc_rtc_yaml)
@@ -100,9 +102,9 @@ def _make_env_cfg(
       pd_gains_path=str(robot.pd_gains_path),
       scale=residual_scales,
       clip=residual_clip,
-      # 0.0: attenuation stayed flat over 1500 iterations and the win vanished.
-      gate_strength=0.0,
-      gate_alpha_ref=0.5,
+      recovery_detector_path=(
+        str(recovery_detector_path) if recovery_detector_path is not None else None
+      ),
       console_output=console_output,
       print_residual_every=print_residual_every,
     )
@@ -212,7 +214,7 @@ def _make_env_cfg(
     # plan-matching cannot buy itself. docs/reward-shaping.md#dcm_stability
     "dcm_stability": RewardTermCfg(
       func=mdp.dcm_stability,
-      weight=1.0,
+      weight=0.0,
       params={
         "std": DCM_STD,
         "sensor_names": mdp.GROUND_CONTACT_SENSORS,
@@ -222,7 +224,7 @@ def _make_env_cfg(
     ),
     "recovery_dcm": RewardTermCfg(
       func=mdp.recovery_dcm,
-      weight=1.0,
+      weight=4.0,
       params={
         "std": DCM_STD,
         # 2 s rests on a recovery profile taken before the probe was fixed.
@@ -351,6 +353,10 @@ def _make_env_cfg(
     "zmp_error": MetricsTermCfg(func=mdp.zmp_error, params=dict(metric_params)),
     "zmp_grounded": MetricsTermCfg(func=mdp.zmp_grounded, params=dict(metric_params)),
     "gate_mean": MetricsTermCfg(func=mdp.gate_mean),
+    "detector_score": MetricsTermCfg(func=mdp.detector_score, reduce="max"),
+    "inactive_residual_violation": MetricsTermCfg(
+      func=mdp.inactive_residual_violation, reduce="max"
+    ),
     "projection_fraction": MetricsTermCfg(func=mdp.projection_fraction),
     "near_bound_fraction": MetricsTermCfg(func=mdp.near_bound_fraction),
     "executed_residual_l2": MetricsTermCfg(func=mdp.action_l2),

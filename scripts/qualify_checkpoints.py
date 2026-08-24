@@ -336,7 +336,7 @@ def _episode_value(episode: Episode, name: str) -> float:
     active = episode.metrics.get("recovery_active", 0.0)
     return episode.metrics.get(name, 0.0) / active if active > 0.0 else float("nan")
   if name == "gate_duty":
-    return 1.0 - episode.metrics["gate_mean"]
+    return episode.metrics["gate_mean"]
   if name == "residual_rms":
     return math.sqrt(max(0.0, episode.metrics["executed_residual_l2"]))
   return episode.metrics[name]

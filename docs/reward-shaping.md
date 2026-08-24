@@ -107,8 +107,10 @@ kept as a diagnostic. See `Pruning the agreement rewards` below.
 
 ## dcm_stability
 
-**Current:** weight `1.0`, `DCM_STD = 0.05` (measured, see below). The task's
-primary dense reward since 2026-08-17, replacing the plan-matching pair.
+**Current:** weight `0.0`, `DCM_STD = 0.10`. Nominal DCM remains a metric and
+detector feature, but no longer pays the policy during ordinary walking. The
+recovery-only term carries the objective, while qualification gates gait quality
+lexicographically.
 **Command-relative since 2026-08-19** — the correction below is the whole of that
 change.
 
@@ -212,10 +214,11 @@ form only subtracts one more term inside `dcm_offset`, which is why `dcm_error`,
 
 ## DCM_STD
 
-**Current:** `0.05` — measured off the zero-residual baseline, not copied from
-`ZMP_TRACKING_STD` despite landing on the same number. **Re-estimated 2026-08-19
-against the corrected error and kept**, which is not the same as retaining it by
-default:
+**Current:** `0.10`, paired with nominal DCM weight `0` and recovery DCM weight
+`4.0`. This is the critique roadmap's starting point for a recovery-conditioned
+objective; final promotion still depends on no-push gait and safety gates. The
+historical `0.05` measurement below remains the provenance of the earlier dense
+objective.
 
 | corrected walking error | mean | median | p75 | p90 | p99 |
 | --- | --- | --- | --- | --- | --- |
@@ -321,7 +324,7 @@ not a shaping term.
 
 ## recovery_dcm
 
-**Current:** `1.0`, with `RECOVERY_TRACKING_STD = DCM_STD` and
+**Current:** `4.0`, with `RECOVERY_TRACKING_STD = DCM_STD = 0.10` and
 `RECOVERY_WINDOW_S = 2.0`. The disturbance-gated half of the payment.
 
 **2026-08-17 — the term is now `mdp.recovery_dcm`, not `recovery_tracking`.** The

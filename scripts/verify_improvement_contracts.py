@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import torch
 from tensordict import TensorDict
 
+from mc_mjlab.recovery_authority import (
+  RecoveryCalibration,
+  RecoveryFilter,
+  detector_target,
+)
 from mc_mjlab.residual_safety import project_residual
 from mc_mjlab.tasks.squashed_gaussian import SquashedGaussianDistribution
 from mc_mjlab.tasks.zero_init_actor import ZeroInitMLPModel, mean_head_magnitude
@@ -75,11 +81,43 @@ def verify_projection() -> None:
   assert torch.equal(zero_target, nominal.clamp(lower, upper))
 
 
+def verify_recovery_detector() -> None:
+  """Check monotonic scoring, sensor onset, bounded duration, and exact cutoff."""
+  path = Path(__file__).parents[1] / "etc" / "recovery_detector.json"
+  calibration = RecoveryCalibration.from_json(path)
+  centers = torch.tensor(calibration.centers)
+  scales = torch.tensor(calibration.scales)
+  nominal = centers.unsqueeze(0)
+  score, target = detector_target(nominal, calibration)
+  assert float(score) == 0.0 and float(target) == 0.0
+  for index in range(len(centers)):
+    disturbed = nominal.clone()
+    disturbed[:, index] += scales[index] * (
+      calibration.threshold + calibration.activation_span + 0.1
+    )
+    raised_score, raised_target = detector_target(disturbed, calibration)
+    assert float(raised_score) > float(score)
+    assert float(raised_target) == 1.0
+
+  recovery_filter = RecoveryFilter(1, "cpu", calibration)
+  dt = 0.02
+  for _ in range(math.ceil(calibration.rearm_s / dt) + 1):
+    authority = recovery_filter.update(score, nominal[:, 1], target, dt)
+  assert float(authority) == 0.0
+  onset = nominal[:, 1] + calibration.onset_delta + 0.01
+  authority = recovery_filter.update(onset, onset, torch.ones(1), dt)
+  assert 0.0 < float(authority) < 1.0
+  for _ in range(math.ceil(calibration.max_active_s / dt)):
+    authority = recovery_filter.update(onset, onset, torch.ones(1), dt)
+  assert float(authority) == 0.0
+
+
 def main() -> None:
   """Run every local improvement-contract assertion."""
   verify_distribution()
   verify_zero_initialization()
   verify_projection()
+  verify_recovery_detector()
   print("improvement contract assertions passed")
 
 
