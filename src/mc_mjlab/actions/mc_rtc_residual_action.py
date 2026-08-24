@@ -19,6 +19,7 @@ from mc_mjlab.actions.mc_rtc_controller_io_binding import (
   apply_reference_pd_gains,
 )
 from mc_mjlab.actions.mc_rtc_controller_pool import ControllerPool
+from mc_mjlab.robots import mc_rtc_robot_configuration as mc_rtc
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -191,26 +192,70 @@ class McRtcResidualActionBase(BaseAction):
   def _setup_residual(self, cfg: McRtcResidualActionCfg) -> None:
     """Slice scale/offset/clip down to the residual actuator subset."""
     self._residual_ids: torch.Tensor | None = None
-    # Before the early return; an all-joints residual needs it too.
     self._last_gate = torch.ones(self.num_envs, device=self.device)
     self._torque_peak = torch.zeros(
       self.num_envs, self._num_targets, device=self.device
     )
-    if cfg.residual_actuator_names is None:
-      return
-    ids, _ = resolve_matching_names(cfg.residual_actuator_names, self._target_names)
-    self._residual_ids = torch.tensor(ids, device=self.device, dtype=torch.long)
-    self._action_dim = len(ids)
-    self._raw_actions = torch.zeros(self.num_envs, self._action_dim, device=self.device)
-    self._processed_actions = torch.zeros_like(self._raw_actions)
-    if isinstance(self._scale, torch.Tensor):
-      self._scale = self._scale[:, ids]
-    if isinstance(self._offset, torch.Tensor):
-      self._offset = self._offset[:, ids]
-    if cfg.clip is not None:
-      self._clip = self._clip[:, ids]
-    self._residual_full = torch.zeros(
-      self.num_envs, self._num_targets, device=self.device
+    if cfg.residual_actuator_names is not None:
+      ids, _ = resolve_matching_names(cfg.residual_actuator_names, self._target_names)
+      self._residual_ids = torch.tensor(ids, device=self.device, dtype=torch.long)
+      self._action_dim = len(ids)
+      self._raw_actions = torch.zeros(
+        self.num_envs, self._action_dim, device=self.device
+      )
+      self._processed_actions = torch.zeros_like(self._raw_actions)
+      if isinstance(self._scale, torch.Tensor):
+        self._scale = self._scale[:, ids]
+      if isinstance(self._offset, torch.Tensor):
+        self._offset = self._offset[:, ids]
+      if cfg.clip is not None:
+        self._clip = self._clip[:, ids]
+      self._residual_full = torch.zeros(
+        self.num_envs, self._num_targets, device=self.device
+      )
+    self._physical_scale = (
+      self._scale.abs().clone()
+      if isinstance(self._scale, torch.Tensor)
+      else torch.full_like(self._raw_actions, abs(self._scale))
+    )
+    if bool((self._physical_scale <= 0.0).any()):
+      raise ValueError("residual action scales must be non-zero")
+    self._executed_physical = torch.zeros_like(self._raw_actions)
+    self._previous_executed_physical = torch.zeros_like(self._raw_actions)
+    self._projection_mask = torch.zeros_like(self._raw_actions, dtype=torch.bool)
+    self._setup_hardware_bounds()
+
+  def _setup_hardware_bounds(self) -> None:
+    """Resolve RobotModule position, velocity, and effort bounds to target order."""
+    position = mc_rtc.get_position_bounds(self._mc_rtc_robot_name)
+    velocity = mc_rtc.get_velocity_bounds(self._mc_rtc_robot_name)
+    effort = mc_rtc.get_effort_bounds(self._mc_rtc_robot_name)
+    self._position_lower, self._position_upper = self._bound_tensors(*position)
+    self._velocity_lower, self._velocity_upper = self._bound_tensors(*velocity)
+    self._effort_lower, self._effort_upper = self._bound_tensors(*effort)
+
+  def _bound_tensors(
+    self, lower: dict[str, float], upper: dict[str, float]
+  ) -> tuple[torch.Tensor, torch.Tensor]:
+    """Convert lower/upper maps to broadcastable tensors in target order."""
+    required = (
+      self._target_names
+      if self._residual_ids is None
+      else [self._target_names[i] for i in self._residual_ids.tolist()]
+    )
+    missing = [n for n in required if n not in lower or n not in upper]
+    if missing:
+      raise KeyError(
+        f"the mc_rtc RobotModule reports no bounds for residual joints {missing}; "
+        "feasibility cannot be enforced"
+      )
+    return (
+      torch.tensor(
+        [lower.get(n, -float("inf")) for n in self._target_names], device=self.device
+      ).unsqueeze(0),
+      torch.tensor(
+        [upper.get(n, float("inf")) for n in self._target_names], device=self.device
+      ).unsqueeze(0),
     )
 
   def _setup_residual_printing(self, cfg: McRtcResidualActionCfg) -> None:
@@ -222,6 +267,7 @@ class McRtcResidualActionBase(BaseAction):
     self._print_every = max(0, every)
     self._print_countdown = 0
     self._print_header_pending = True
+    self._print_pending = False
     if not self._print_every:
       return
     ids = self._residual_ids
@@ -243,7 +289,7 @@ class McRtcResidualActionBase(BaseAction):
       return
     self._print_countdown = self._print_every - 1
 
-    values = self._processed_actions[0].detach().cpu().tolist()
+    values = self._executed_physical[0].detach().cpu().tolist()
     if self._print_header_pending:
       # Lazily, on the first line: a header printed at construction would be
       # buried under mc_rtc's own startup logging long before the first frame.
@@ -362,8 +408,38 @@ class McRtcResidualActionBase(BaseAction):
 
   @property
   def processed_action(self) -> torch.Tensor:
-    """Residual after scale and clip, before the coherence gate."""
+    """Requested physical residual after scale and clip."""
     return self._processed_actions
+
+  @property
+  def requested_normalized_action(self) -> torch.Tensor:
+    """Policy request in normalized action coordinates."""
+    return self._raw_actions
+
+  @property
+  def requested_physical_action(self) -> torch.Tensor:
+    """Physical request after affine processing and clip."""
+    return self._processed_actions
+
+  @property
+  def executed_physical_action(self) -> torch.Tensor:
+    """Physical residual delivered after authority and feasibility projection."""
+    return self._executed_physical
+
+  @property
+  def executed_normalized_action(self) -> torch.Tensor:
+    """Executed physical residual divided by its configured scale."""
+    return self._executed_physical / self._physical_scale
+
+  @property
+  def previous_executed_normalized_action(self) -> torch.Tensor:
+    """Executed normalized residual from the preceding policy step."""
+    return self._previous_executed_physical / self._physical_scale
+
+  @property
+  def projection_mask(self) -> torch.Tensor:
+    """Per-residual-joint mask where feasibility changed the gated request."""
+    return self._projection_mask
 
   @property
   def last_gate(self) -> torch.Tensor:
@@ -385,16 +461,17 @@ class McRtcResidualActionBase(BaseAction):
   @abc.abstractmethod
   def _apply_control(
     self, interpolated_control: dict[str, torch.Tensor], residual: torch.Tensor
-  ) -> None:
-    """Write actuator targets from the interpolated controller outputs."""
+  ) -> tuple[torch.Tensor, torch.Tensor]:
+    """Write targets and return full-width executed residual and projection mask."""
     raise NotImplementedError
 
   # ---- ActionTerm API. ----
 
   def process_actions(self, actions: torch.Tensor) -> None:
+    self._previous_executed_physical.copy_(self._executed_physical)
     super().process_actions(actions)
     if self._print_every:
-      self._print_residual()
+      self._print_pending = True
 
   def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
     super().reset(env_ids=env_ids)
@@ -409,6 +486,10 @@ class McRtcResidualActionBase(BaseAction):
       env_ids = slice(None)
 
     self._torque_peak[env_ids] = 0.0
+    self._last_gate[env_ids] = 1.0
+    self._executed_physical[env_ids] = 0.0
+    self._previous_executed_physical[env_ids] = 0.0
+    self._projection_mask[env_ids] = False
 
     if isinstance(env_ids, slice):
       env_indices = list(range(self.num_envs))[env_ids]
@@ -487,6 +568,7 @@ class McRtcResidualActionBase(BaseAction):
     self._steps_since_run += 1
 
     residual = self._processed_actions
+    self._last_gate.fill_(1.0)
     if self.cfg.gate_strength > 0.0:
       # Interpolated, not `controller_reference`: that is the next target, not this
       # substep's. docs/residual-authority.md#gate_strength
@@ -502,4 +584,13 @@ class McRtcResidualActionBase(BaseAction):
       self._residual_full[:, self._residual_ids] = residual
       residual = self._residual_full
 
-    self._apply_control(interpolated_control, residual)
+    executed, projected = self._apply_control(interpolated_control, residual)
+    if self._residual_ids is None:
+      self._executed_physical.copy_(executed)
+      self._projection_mask.copy_(projected)
+    else:
+      self._executed_physical.copy_(executed[:, self._residual_ids])
+      self._projection_mask.copy_(projected[:, self._residual_ids])
+    if self._print_pending:
+      self._print_residual()
+      self._print_pending = False

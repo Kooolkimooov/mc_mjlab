@@ -12,6 +12,7 @@ from mc_mjlab.actions.mc_rtc_residual_action import (
   McRtcResidualActionBase,
   McRtcResidualActionCfg,
 )
+from mc_mjlab.residual_safety import project_residual
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -61,7 +62,7 @@ class McRtcResidualJointTorqueAction(McRtcResidualActionBase):
 
   def _apply_control(
     self, interpolated_control: dict[str, torch.Tensor], residual: torch.Tensor
-  ) -> None:
+  ) -> tuple[torch.Tensor, torch.Tensor]:
     torque = interpolated_control["tau"]
     pd_torque = self._kp * (
       interpolated_control["q"]
@@ -69,5 +70,9 @@ class McRtcResidualJointTorqueAction(McRtcResidualActionBase):
     ) + self._kd * (
       interpolated_control["alpha"] - self._entity.data.joint_vel[:, self._target_ids]
     )
-    effort = torch.where(torque != 0.0, torque, pd_torque) + residual
+    nominal = torch.where(torque != 0.0, torque, pd_torque)
+    effort, executed, projected = project_residual(
+      nominal, residual, self._effort_lower, self._effort_upper
+    )
     self._entity.set_joint_effort_target(effort, joint_ids=self._target_ids)
+    return executed, projected

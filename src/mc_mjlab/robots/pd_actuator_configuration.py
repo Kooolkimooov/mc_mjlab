@@ -32,19 +32,24 @@ def get_pd_actuator_cfgs(
   *,
   natural_freq: float = NATURAL_FREQ,
   damping_ratio: float = DAMPING_RATIO,
-  effort_limit: float = EFFORT_LIMIT,
+  effort_limit: float | dict[str, float] = EFFORT_LIMIT,
 ) -> tuple[IdealPdActuatorCfg, ...]:
   """One ``IdealPdActuatorCfg`` per joint, gains from the natural-frequency model."""
 
   def armature_of(name: str) -> float:
     return armature[name] if isinstance(armature, dict) else armature
 
+  def effort_limit_of(name: str) -> float:
+    if isinstance(effort_limit, dict):
+      return effort_limit.get(name, EFFORT_LIMIT)
+    return effort_limit
+
   return tuple(
     IdealPdActuatorCfg(
       target_names_expr=(name,),
       stiffness=armature_of(name) * natural_freq**2,
       damping=2 * damping_ratio * armature_of(name) * natural_freq,
-      effort_limit=effort_limit,
+      effort_limit=effort_limit_of(name),
     )
     for name in joints
   )

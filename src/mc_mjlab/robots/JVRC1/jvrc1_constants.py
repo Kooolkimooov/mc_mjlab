@@ -148,7 +148,11 @@ def get_robot_cfg(coupled_fingers: bool = JVRC1_COUPLED_FINGERS) -> EntityCfg:
   )
 
   articulation = EntityArticulationInfoCfg(
-    actuators=get_pd_actuator_cfgs(joints, get_armature_from_spec(spec, joints)),
+    actuators=get_pd_actuator_cfgs(
+      joints,
+      get_armature_from_spec(spec, joints),
+      effort_limit=mc_rtc.get_effort_limits(JVRC1_MC_RTC_MODULE_NAME),
+    ),
     soft_joint_pos_limit_factor=0.99,
   )
 

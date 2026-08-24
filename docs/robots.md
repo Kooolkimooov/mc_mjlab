@@ -87,13 +87,13 @@ with per-joint gains derived from the reflected rotor inertia the MJCF already
 carries. Those defaults are then overwritten by `PDgains_sim.dat` at action-term
 init — see [coupling.md](coupling.md#invariants-and-traps).
 
-Actuators are **unclamped**, like mc_mujoco's PD torque (its motors set
-`forcelimited=false`): with the real gains, nominal limits would saturate
-constantly and change the stabilizer's behaviour.
-`mc_rtc_robot_configuration.get_effort_limits` has the real per-joint torque
-scale, kept out of the actuators on purpose. That is also why nothing in the sim
-clamps a too-large residual — see
-[residual-authority.md](residual-authority.md#residual_scale).
+Actuators are hard-clamped at the mc_rtc RobotModule effort limits. The settled
+zero-residual baseline reaches only `0.133/0.203/0.229/0.40` of those limits at
+median/p90/p99/max, so the clamp is inert after the reset transient. The torque
+action also clamps explicitly, making the safety boundary independent of the
+actuator implementation. HRP5P finger bounds are empty in the module; those
+upper-body joints retain the unclamped actuator fallback and are excluded from
+the robot's residual-capable joint set.
 
 ## additional_sensors_configuration
 

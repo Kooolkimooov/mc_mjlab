@@ -32,9 +32,8 @@ def residual_balance_ppo_cfg(
       activation="elu",
       obs_normalization=True,
       distribution_cfg={
-        "class_name": "GaussianDistribution",
+        "class_name": ("mc_mjlab.tasks.squashed_gaussian:SquashedGaussianDistribution"),
         "init_std": 0.1,
-        "std_type": "scalar",
         "std_range": (0.05, 0.30),
         "learn_std": True,
       },

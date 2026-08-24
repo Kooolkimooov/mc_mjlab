@@ -31,11 +31,10 @@ output layer after construction. Defined in `tasks/zero_init_actor.py`, selected
 through rsl_rl's documented `"module.path:Attr"` form, so nothing is patched.
 
 **Why it exists.** rsl_rl never initializes the actor's mean head. `MLPModel`
-calls `distribution.init_mlp_weights`, but `GaussianDistribution` — the scalar-std
-class this task uses — inherits the base no-op, because it keeps std in a separate
-`nn.Parameter` and has no std rows to zero. (The implementation that *does* zero
-std rows belongs to `HeteroscedasticGaussianDistribution`, which is not in use
-here.) So the output layer keeps `nn.Linear`'s default init.
+calls `distribution.init_mlp_weights`, but the local
+`SquashedGaussianDistribution` inherits the base no-op because it keeps std in a
+separate `nn.Parameter` and has no std rows to zero. So the output layer keeps
+`nn.Linear`'s default init unless `ZeroInitMLPModel` clears it.
 
 Measured on this exact actor — 284 obs, hidden `(512, 256, 128)`, ELU, unit-variance
 inputs, which is what `obs_normalization = True` delivers:
@@ -106,7 +105,11 @@ count down, 0.02 may already be enough.
 
 ## std_range
 
-**Current:** `(0.05, 0.30)`.
+**Current:** `(0.05, 0.30)` on one learned scalar latent standard deviation shared
+by every residual joint. The action is `tanh(latent)`, so every stochastic and
+deterministic request lies inside the normalized action bounds. Log probability
+includes the tanh Jacobian, KL is the equivalent latent-Normal KL, and entropy
+uses a transformed Monte Carlo estimate.
 
 The floor is aimed at the learning rate as much as at exploration. The adaptive
 schedule halves the rate whenever measured KL exceeds 2x `desired_kl`, and for
@@ -121,7 +124,7 @@ used to climb 0.2 -> 0.52 unchecked.
 
 ## learn_std
 
-**Current:** `True`, rsl_rl's `GaussianDistribution` default, now written
+**Current:** `True` in the local `SquashedGaussianDistribution`, now written
 explicitly so Tyro exposes `--agent.actor.distribution-cfg.learn-std`. The
 residual-growth program uses `False` only for the `rg-fixedstd010` causal arm;
 it is not a proposed default.
@@ -252,8 +255,8 @@ wraps the one `Logger.log` call each iteration makes and writes them there.
 | `approx_kl` | how far the policy moved over the whole rollout |
 | `clip_fraction` | share of samples whose likelihood ratio left the `clip_param` band |
 | `explained_variance` | `1 - Var(returns - values) / Var(returns)`; 0 is a mean predictor |
-| `action_saturation` | share of sampled action components at `RAW_CLIP` |
-| `policy_mean_saturation` | share of deterministic policy-mean components at `RAW_CLIP` |
+| `action_saturation` | share of sampled action components with `abs(action) >= 0.99` |
+| `policy_mean_saturation` | share of deterministic tanh-mean components with `abs(mean) >= 0.99` |
 | `policy_mean_rms` | deterministic raw-action RMS over the collected states |
 | `sampled_action_rms` | sampled raw-action RMS seen by the environment |
 | `exploration_rms` | RMS of sampled action minus policy mean |

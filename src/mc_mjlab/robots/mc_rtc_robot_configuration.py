@@ -40,7 +40,12 @@ def get_residual_joints(
 ) -> tuple[str, ...]:
   """The actuated joints minus those excluded from the RL residual."""
   excluded = set(non_actuated) | set(non_residual)
-  return tuple(j for j in get_ref_joint_order(name) if j not in excluded)
+  bounded = set.intersection(
+    *(set(_one_dof_bounds(name, i)) for i in range(6))
+  )
+  return tuple(
+    j for j in get_ref_joint_order(name) if j not in excluded and j in bounded
+  )
 
 
 def get_default_root_position(name: str) -> tuple[float, float, float]:
@@ -239,10 +244,35 @@ def get_mobile_joints(name: str) -> tuple[str, ...]:
   return tuple(j for j in get_ref_joint_order(name) if j not in fixed)
 
 
-def get_effort_limits(name: str) -> dict[str, float]:
-  """Per-joint nominal torque limits (upper tau bound), 1-DoF joints only."""
+def _one_dof_bounds(name: str, index: int) -> dict[str, float]:
+  """One scalar RobotModule bound table decoded to joint names."""
   return {
     _decode_joint_key(key): float(value[0])
-    for key, value in get_robot_module(name).bounds()[5].items()
+    for key, value in get_robot_module(name).bounds()[index].items()
     if len(value) == 1
+  }
+
+
+def get_position_bounds(name: str) -> tuple[dict[str, float], dict[str, float]]:
+  """Per-joint lower and upper position bounds for 1-DoF joints."""
+  return _one_dof_bounds(name, 0), _one_dof_bounds(name, 1)
+
+
+def get_velocity_bounds(name: str) -> tuple[dict[str, float], dict[str, float]]:
+  """Per-joint lower and upper velocity bounds for 1-DoF joints."""
+  return _one_dof_bounds(name, 2), _one_dof_bounds(name, 3)
+
+
+def get_effort_bounds(name: str) -> tuple[dict[str, float], dict[str, float]]:
+  """Per-joint lower and upper effort bounds for 1-DoF joints."""
+  return _one_dof_bounds(name, 4), _one_dof_bounds(name, 5)
+
+
+def get_effort_limits(name: str) -> dict[str, float]:
+  """Per-joint symmetric effort magnitudes enclosing both module bounds."""
+  lower, upper = get_effort_bounds(name)
+  return {
+    joint: max(abs(value), abs(upper[joint]))
+    for joint, value in lower.items()
+    if joint in upper
   }

@@ -59,22 +59,20 @@ def collapsed(
   return low & ~terminations.bad_orientation(env, limit_angle, cfg)
 
 
-def action_l2(env: ManagerBasedRlEnv) -> torch.Tensor:
-  """Squared magnitude of the residual action, saturating where the clip does."""
-  # Past the clip a larger raw action has no physical effect, so paying more for it
-  # is a runaway: it diverged a run. docs/reward-shaping.md#action_l2
-  action = env.action_manager.action.clamp(-RAW_CLIP, RAW_CLIP)
+def action_l2(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """Squared magnitude of the normalized residual actually delivered."""
+  action = _residual_term(env, action_name).executed_normalized_action
   return torch.sum(torch.square(action), dim=1)
 
 
-def action_rate_l2(env: ManagerBasedRlEnv) -> torch.Tensor:
-  """Squared change in the residual action, saturating where the clip does."""
-  # mjlab's version charges the raw action unboundedly, the same runaway
-  # `action_l2` was clamped for. docs/reward-shaping.md#action_l2
-  manager = env.action_manager
-  delta = manager.action.clamp(-RAW_CLIP, RAW_CLIP) - manager.prev_action.clamp(
-    -RAW_CLIP, RAW_CLIP
-  )
+def action_rate_l2(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """Squared policy-step change in normalized residual actually delivered."""
+  term = _residual_term(env, action_name)
+  delta = term.executed_normalized_action - term.previous_executed_normalized_action
   return torch.sum(torch.square(delta), dim=1)
 
 
@@ -87,11 +85,39 @@ def _restrict(term: McRtcResidualActionBase, values: torch.Tensor) -> torch.Tens
 def executed_action(
   env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
 ) -> torch.Tensor:
-  """The residual as actually applied, gate included -- not the raw request."""
-  # `last_action` is the network's intent; the gate scales it on ~59% of steps, so
-  # the policy's own history would misreport its dynamics. docs/observations.md
-  term = _residual_term(env, action_name)
-  return term.processed_action * term.last_gate.unsqueeze(-1)
+  """The physical residual actually delivered to the actuator target."""
+  return _residual_term(env, action_name).executed_physical_action
+
+
+def requested_normalized_action(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """The bounded policy request before physical scaling."""
+  return _residual_term(env, action_name).requested_normalized_action
+
+
+def requested_physical_action(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """The physical residual requested before gating and feasibility projection."""
+  return _residual_term(env, action_name).requested_physical_action
+
+
+def projection_fraction(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """Fraction of residual joints changed by feasibility projection this step."""
+  return _residual_term(env, action_name).projection_mask.float().mean(dim=1)
+
+
+def near_bound_fraction(
+  env: ManagerBasedRlEnv,
+  action_name: str = "mc_rtc_residual",
+  threshold: float = 0.99,
+) -> torch.Tensor:
+  """Fraction of normalized policy requests within ``1-threshold`` of a bound."""
+  action = _residual_term(env, action_name).requested_normalized_action
+  return (action.abs() >= threshold).float().mean(dim=1)
 
 
 def gate_mean(
@@ -169,9 +195,6 @@ GRAVITY = 9.81
 
 #: Floor under the CoM height, so a collapsed robot cannot divide omega by ~0.
 MIN_COM_HEIGHT = 0.1
-
-#: Raw action at which the residual clip binds, given `clip` is set to `scale`.
-RAW_CLIP = 1.0
 
 
 def _wrench_sensor(mj_model, suffix: str, sensor_type: int) -> tuple[int, int]:

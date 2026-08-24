@@ -6,10 +6,8 @@ from typing import Any
 
 import torch
 
-from mc_mjlab.tasks.mdp import RAW_CLIP
 
-
-def ppo_diagnostics(alg: Any, saturation_level: float = RAW_CLIP) -> dict[str, float]:
+def ppo_diagnostics(alg: Any, saturation_level: float = 0.99) -> dict[str, float]:
   """Policy movement, value fit and action composition over the rollout just learned."""
   storage = getattr(alg, "storage", None)
   # `update()` clears only the write cursor, so the rollout is still readable --
@@ -18,7 +16,9 @@ def ppo_diagnostics(alg: Any, saturation_level: float = RAW_CLIP) -> dict[str, f
     return {}
   actor = alg.actor
   with torch.inference_mode():
-    policy_mean = storage.distribution_params[0]
+    policy_mean = actor.distribution.deterministic_output(
+      storage.distribution_params[0]
+    )
     rollout_actions = storage.actions
     old_params = tuple(p.flatten(0, 1) for p in storage.distribution_params)
     actions = rollout_actions.flatten(0, 1)

@@ -16,15 +16,16 @@ Set in `tasks/residual_balance/residual_balance_env_cfg.py`; applied in
 **Current:** `0.01` rad for position control, `10.0` Nm for torque. The position
 value is the measured reference after both larger-authority experiments failed.
 
-The bound is set in position units, but the actuators are unlimited on purpose
-(mc_mujoco parity, see `pd_actuator_configuration`), so what it really buys is
-torque. The `0.01` rad bound was 22-27% of every leg joint's hardware
+The bound is set in position units, so what it really buys is torque. The
+actuators and torque action now enforce RobotModule hardware bounds, and the
+position action projects requested targets into the module's position limits.
+The `0.01` rad bound was 22-27% of every leg joint's hardware
 limit. The rejected `0.20` rad bound could request roughly 4.4-5.4x that limit
 before the torque-margin penalty responded.
 
 **Re-measure if:** PD gains, torque limits or the residual joint set changes.
-Nothing in the sim clamps, so a residual that outgrows the hardware is invisible
-here and divergent on the robot.
+The projection rate is now reported explicitly; a non-zero settled rate means
+the configured authority asks for action the hardware cannot deliver.
 
 **History:**
 - That warning was then ignored. A run at `0.1` (20899 iterations, 2026-07-31)
@@ -85,6 +86,11 @@ reachable by omission.
 Note the resolution is against every actuator matched by `actuator_names`, not
 just `residual_joints`; the residual subset is sliced out afterwards in
 `_setup_residual`.
+
+The action term exposes the bounded normalized request, scaled physical request,
+executed physical residual, authority gate, and feasibility mask separately.
+Rewards use the executed residual divided by this scale, so projection cannot
+hide a large request or charge an action that was never delivered.
 
 ## residual_joints
 

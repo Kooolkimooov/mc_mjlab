@@ -627,7 +627,16 @@ which is what the task's terminations and `base_progress_tanh` read instead.
 
 ## action_l2
 
-**Current:** weight `-0.1`, on the raw action **clamped to `RAW_CLIP = 1.0`**.
+**Current:** weight `-0.1`, on the normalized residual actually delivered after
+tanh squashing, physical scaling, authority gating, and feasibility projection.
+`residual_rate` differences the same executed quantity across policy steps.
+
+This makes the penalty invariant to per-joint physical scales and prevents both
+failure modes of reconstructing execution from raw action: paying for an action
+projection removed, and missing a large request because a later clip hid it.
+
+**History:**
+- 2026-08-24 — replaced raw clipped action accounting with action-term telemetry.
 
 The clamp is not cosmetic — it fixes a runaway that destroyed a run. The residual
 is hard-clipped, and because the env cfg sets `clip` equal to `scale`, the clip
@@ -659,24 +668,23 @@ per-joint action was ~0.24 — well inside 1.0. The clamp changes the reward *on
 where the policy has already left the region its actions can affect, which is
 exactly the pathology.
 
-`residual_rate` had the same exposure until commit `8b80696`; the task now uses
-`mdp.action_rate_l2`, which clamps both the current and previous raw action at the
-same `RAW_CLIP` before differencing them.
+`residual_rate` had the same exposure until commit `8b80696`; that intermediate
+fix clamped both raw actions before differencing them and is retained here only
+as history.
 
 ## torque_margin
 
 **Current:** weight `-0.05` **provisional**, ramped x4 at iteration 500 and x10 at
-1000 by the `torque_margin_weight` curriculum. `TORQUE_SOFT_RATIO = 1.0`.
+1000 by the `torque_margin_weight` curriculum. The soft ratio is `0.8`; the hard
+RobotModule limit is `1.0` in both the actuator and torque action.
 
 **Why it exists: the measurement was already in the repo and nothing acted on it.**
 [residual-authority.md](residual-authority.md#residual_scale) records that
 `residual_scale = 0.01` through the real `PDgains_sim.dat` gains is **22-27% of
 every leg joint's hardware limit**, and that a saturated residual takes ankle pitch
 to **0.64** of its limit. Nothing enforced any of it. The position clip bounds the
-*offset*, not the torque it produces, and `EFFORT_LIMIT` is deliberately `inf`
-(mc_mujoco parity, see `pd_actuator_configuration`) so MuJoCo will not clamp
-either. A residual that outgrows the actuators is invisible in sim and divergent
-on the robot.
+*offset*, not the torque it produces. The hard clamp now makes an overlarge
+request visible through projection telemetry rather than divergent on hardware.
 
 Both halves already existed unwired: `mc_rtc_robot_configuration.get_effort_limits`
 reads per-joint limits straight from the mc_rtc `RobotModule`, and
@@ -693,8 +701,8 @@ cost = sum_j log1p(relu(peak|tau_j| / limit_j - SOFT_RATIO))
   anything sampled at the policy rate. The action term peak-holds it; note
   `apply_action` runs *before* `sim.step`, so the accumulator trails by one substep
   and the reward folds in its own read to cover the last of the window.
-- **`SOFT_RATIO = 1.0`, the limit itself.** leo_mjlab ran 0.7 and moved to 1.0
-  deliberately — charging below the limit made the policy timid.
+- **`soft_ratio = 0.8`.** This leaves a measured 4x gap above the settled p99
+  while giving PPO a gradient before the non-negotiable hard clamp at 1.0.
 - **`log1p`, not square.** A soft knee, so one saturated joint cannot swamp the
   objective the way `angular_momentum` did at its first weight.
 - **Residual joints only.** The documented hazard is the leg joints, which are

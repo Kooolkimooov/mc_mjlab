@@ -11,6 +11,7 @@ from mc_mjlab.actions.mc_rtc_residual_action import (
   McRtcResidualActionBase,
   McRtcResidualActionCfg,
 )
+from mc_mjlab.residual_safety import project_residual
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -43,10 +44,15 @@ class McRtcResidualJointPositionAction(McRtcResidualActionBase):
 
   def _apply_control(
     self, interpolated_control: dict[str, torch.Tensor], residual: torch.Tensor
-  ) -> None:
+  ) -> tuple[torch.Tensor, torch.Tensor]:
     bias = self._entity.data.encoder_bias[:, self._target_ids]
-    target = interpolated_control["q"] + residual - bias
+    nominal = interpolated_control["q"] - bias
+    target, executed, projected = project_residual(
+      nominal, residual, self._position_lower, self._position_upper
+    )
     self._entity.set_joint_position_target(target, joint_ids=self._target_ids)
     self._entity.set_joint_velocity_target(
-      interpolated_control["alpha"], joint_ids=self._target_ids
+      interpolated_control["alpha"].clamp(self._velocity_lower, self._velocity_upper),
+      joint_ids=self._target_ids,
     )
+    return executed, projected

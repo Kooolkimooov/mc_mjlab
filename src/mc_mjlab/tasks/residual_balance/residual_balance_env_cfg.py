@@ -246,10 +246,18 @@ def _make_env_cfg(
     "torque_margin": RewardTermCfg(
       func=mdp.torque_margin,
       weight=TORQUE_MARGIN_WEIGHT,
-      params={"soft_ratio": 1.0, "action_name": "mc_rtc_residual"},
+      params={"soft_ratio": 0.8, "action_name": "mc_rtc_residual"},
     ),
-    "residual_magnitude": RewardTermCfg(func=mdp.action_l2, weight=-0.1),
-    "residual_rate": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.1),
+    "residual_magnitude": RewardTermCfg(
+      func=mdp.action_l2,
+      weight=-0.1,
+      params={"action_name": "mc_rtc_residual"},
+    ),
+    "residual_rate": RewardTermCfg(
+      func=mdp.action_rate_l2,
+      weight=-0.1,
+      params={"action_name": "mc_rtc_residual"},
+    ),
   }
 
   terminations = {
@@ -343,6 +351,8 @@ def _make_env_cfg(
     "zmp_error": MetricsTermCfg(func=mdp.zmp_error, params=dict(metric_params)),
     "zmp_grounded": MetricsTermCfg(func=mdp.zmp_grounded, params=dict(metric_params)),
     "gate_mean": MetricsTermCfg(func=mdp.gate_mean),
+    "projection_fraction": MetricsTermCfg(func=mdp.projection_fraction),
+    "near_bound_fraction": MetricsTermCfg(func=mdp.near_bound_fraction),
     "com_velocity_error": MetricsTermCfg(
       func=mdp.com_velocity_error,
       params={"asset_cfg": SceneEntityCfg("robot"), "action_name": "mc_rtc_residual"},
