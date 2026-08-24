@@ -1,6 +1,6 @@
 # mc_mjlab recovery-width proposal V4
 
-**Status:** screening.
+**Status:** promoted to a 500-iteration run, 2026-08-24.
 
 ## Diagnosis
 
@@ -52,3 +52,42 @@ degrade significantly, and worker failures remain truncations. Failure keeps the
 current objective and prunes recovery std `0.10`; it does not authorize another
 width or kernel search.
 
+## Screen result
+
+`obj-recovery010` completed 188 iterations. Its last-60 `policy_mean_rms` was
+`0.02648`, 43.6% below `rg-ref01`, and its slope was `-0.0001046`: deterministic
+residual growth reversed over the selection window. Policy-mean rate RMS was
+35.5% lower than reference.
+
+The model-187 comparison retained four episodes for each of 32 environments per
+arm. Fixed-K, environment-clustered results were:
+
+| Quantity | Policy against zero residual | Environment-clustered p |
+| --- | ---: | ---: |
+| recovery DCM, std 0.10 | **+1.03%** | 0.807 |
+| nominal DCM, std 0.05 | +0.81% | 0.664 |
+| fall-hazard ratio | **0.845** | -- |
+| episode duration | +3.30 s | 0.344 |
+| survival | +6.25 pp | 0.223 |
+| foot-slip cost | +23.6% | 0.273 |
+| upright cost | -7.21% | 0.495 |
+| controller-worker truncations | 0 vs 1 episode | 0.325 |
+
+Deterministic magnitude cost was `-0.0000144` per step at weight `-0.1`, 82.3%
+smaller than `rg-ref01`. The recovery score is only a small, unresolved gain,
+but non-negative was the registered screen gate; hazard and residual size both
+move strongly in the desired direction. The configuration therefore qualifies
+for the full run.
+
+## Full-run gate
+
+Train `obj-recovery010-full` from a fresh initialization for 500 iterations with
+the same seed, 128 environments and 30 workers. Evaluate models 180, 340 and 499
+with the same width-matched deterministic comparison.
+
+Adopt the configuration only if at least two checkpoints have non-negative
+recovery DCM, hazard ratio at most 1.10, and no significant foot-slip or upright
+degradation. No checkpoint may have a significant recovery loss or hazard above
+1.10. Select the checkpoint by recovery DCM, then hazard, while requiring its
+deterministic magnitude cost to remain at least 50% below `rg-ref01` model 187.
+If the gate fails, keep the current objective and prune recovery std `0.10`.
