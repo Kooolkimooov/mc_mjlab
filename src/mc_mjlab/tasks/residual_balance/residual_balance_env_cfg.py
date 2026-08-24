@@ -353,11 +353,39 @@ def _make_env_cfg(
     "gate_mean": MetricsTermCfg(func=mdp.gate_mean),
     "projection_fraction": MetricsTermCfg(func=mdp.projection_fraction),
     "near_bound_fraction": MetricsTermCfg(func=mdp.near_bound_fraction),
+    "executed_residual_l2": MetricsTermCfg(func=mdp.action_l2),
+    "max_effort_ratio": MetricsTermCfg(
+      func=mdp.max_effort_ratio,
+      params={"action_name": "mc_rtc_residual"},
+      reduce="max",
+      per_substep=True,
+    ),
     "com_velocity_error": MetricsTermCfg(
       func=mdp.com_velocity_error,
       params={"asset_cfg": SceneEntityCfg("robot"), "action_name": "mc_rtc_residual"},
     ),
     "dcm_error": MetricsTermCfg(func=mdp.dcm_error, params=dict(metric_params)),
+    "recovery_dcm_error": MetricsTermCfg(
+      func=mdp.recovery_dcm_error,
+      params={**metric_params, "window_s": 2.0, "push_term_name": "push_robot"},
+    ),
+    "recovery_active": MetricsTermCfg(
+      func=mdp.recovery_active,
+      params={
+        "sensor_names": mdp.GROUND_CONTACT_SENSORS,
+        "asset_cfg": SceneEntityCfg("robot"),
+        "window_s": 2.0,
+        "push_term_name": "push_robot",
+      },
+    ),
+    "foot_slip": MetricsTermCfg(
+      func=mdp.foot_slip,
+      params={
+        "sensor_names": mdp.GROUND_CONTACT_SENSORS,
+        "asset_cfg": SceneEntityCfg("robot"),
+        "velocimeter_names": SOLE_VELOCIMETERS,
+      },
+    ),
   }
 
   # Solver settings follow mc_mujoco's HRP5Pmain.xml, as in the demo.

@@ -147,6 +147,42 @@ the argmin, and compare that checkpoint plus one much later. Two reads bracket t
 trajectory — a single one cannot distinguish "still improving" from "peaked and
 decaying", and those call for opposite decisions about run length.
 
+## qualify_checkpoints.py
+
+The promotion path scores **every saved validation checkpoint**, supplied as
+individual paths, a run directory, or globs. It writes raw paired episodes to
+`qualification.csv` and configuration, clustered statistics, Holm-adjusted
+p-values, gate failures, and the selected checkpoint to `qualification.json`.
+
+```sh
+uv run python scripts/qualify_checkpoints.py logs/.../run_dir \
+  --seed 42 --seed 43 --seed 44 --out-dir logs/qualification/run_name
+```
+
+The default scenarios are nominal walking, the historical velocity kick, a
+force-based finite impulse, and a held-out robust impulse with stage-one
+inertia/CoM/friction perturbations. Episode counts are fixed per env and arm;
+wall time never decides which episodes enter the result.
+
+Each env runs a crossover: baseline and policy alternate, with starting arm
+balanced across env ids. Disturbance timing, planar direction, equivalent delta
+velocity, duration, and application height are deterministic functions of seed,
+scenario, env, pair, and occurrence. Both arms of a pair therefore see the same
+schedule and the same controller instance and startup encoder bias. Statistics
+cluster pairs within env; with multiple evaluation seeds they aggregate envs
+within seed and place the confidence interval across seeds.
+
+Safety and nominal gates run before ranking. Passing checkpoints are ranked
+lexicographically by recovery, hazard, then residual use. The test set is not an
+input to this command: run it only after `selected` is fixed, and only for that
+checkpoint.
+
+`scripts/generate_clean_checkpoint.py` creates a provenance-bearing untrained
+checkpoint in the current policy format for smoke tests. It does not translate
+old Gaussian checkpoints. Those remain valid only in a worktree containing their
+original actor, observation layout, and controller inputs; generating new
+validation checkpoints from the current tree is the clean migration path.
+
 ## Comparing a checkpoint whose config has moved on
 
 Checkpoints die whenever the observation width changes, so scoring an older one

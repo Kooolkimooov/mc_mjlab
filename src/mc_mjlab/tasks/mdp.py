@@ -692,6 +692,27 @@ class torque_margin:
     return torch.sum(torch.log1p(over), dim=1) * settled
 
 
+class max_effort_ratio:
+  """Maximum residual-joint actuator effort divided by its hardware limit."""
+
+  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+    term = _residual_term(env, cfg.params.get("action_name", "mc_rtc_residual"))
+    ids = term.residual_ids
+    cols = list(range(len(term.target_names))) if ids is None else ids.tolist()
+    limits = mc_rtc.get_effort_limits(term.cfg.mc_rtc_robot_name)
+    self._cols = torch.tensor(cols, device=env.device, dtype=torch.long)
+    self._limits = torch.tensor(
+      [limits[term.target_names[i]] for i in cols], device=env.device
+    )
+
+  def __call__(
+    self, env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+  ) -> torch.Tensor:
+    term = _residual_term(env, action_name)
+    effort = env.scene[term.cfg.entity_name].data.qfrc_actuator[:, term.target_ids]
+    return (effort[:, self._cols].abs() / self._limits).amax(dim=1)
+
+
 class push_and_record:
   """``push_by_setting_velocity``, plus a record of when it last fired."""
 
@@ -781,6 +802,18 @@ def last_push_velocity(
   return term.last_push_vel * within
 
 
+def record_disturbance(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor,
+  equivalent_velocity_b: torch.Tensor,
+  term_name: str = "push_robot",
+) -> None:
+  """Record a deterministic external disturbance for recovery terms."""
+  term = _push_term(env, term_name)
+  term.last_push_vel[env_ids] = equivalent_velocity_b
+  term.last_push_step[env_ids] = env.common_step_counter
+
+
 class recovery_dcm:
   """``dcm_stability``, paid only in the window after a push."""
 
@@ -812,3 +845,57 @@ class recovery_dcm:
     return (
       torch.exp(-torch.square(error / std)) * gate * (normal_force >= min_normal_force)
     )
+
+
+class recovery_dcm_error:
+  """Command-relative DCM error during a recorded recovery window."""
+
+  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+    self._sensors = _zmp_sensors(
+      env, cfg.params["sensor_names"], cfg.params["asset_cfg"].name
+    )
+    self._push = _push_term(env, cfg.params.get("push_term_name", "push_robot"))
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    window_s: float,
+    sensor_names: tuple[str, ...],
+    asset_cfg: SceneEntityCfg,
+    push_term_name: str = "push_robot",
+    action_name: str = "mc_rtc_residual",
+    min_normal_force: float = 20.0,
+    plane_height: float = 0.0,
+  ) -> torch.Tensor:
+    del sensor_names, asset_cfg, push_term_name
+    error, normal_force = self._sensors.dcm_offset(
+      env, action_name, min_normal_force, plane_height
+    )
+    age = _age_since_push(env, self._push)
+    active = (age >= 1) & (age <= round(window_s / env.step_dt))
+    return error * active * (normal_force >= min_normal_force)
+
+
+class recovery_active:
+  """Grounded indicator for the recorded post-disturbance recovery window."""
+
+  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+    self._sensors = _zmp_sensors(
+      env, cfg.params["sensor_names"], cfg.params["asset_cfg"].name
+    )
+    self._push = _push_term(env, cfg.params.get("push_term_name", "push_robot"))
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    window_s: float,
+    sensor_names: tuple[str, ...],
+    asset_cfg: SceneEntityCfg,
+    push_term_name: str = "push_robot",
+    min_normal_force: float = 20.0,
+  ) -> torch.Tensor:
+    del sensor_names, asset_cfg, push_term_name
+    normal_force = self._sensors.normal_forces(env).sum(dim=1)
+    age = _age_since_push(env, self._push)
+    active = (age >= 1) & (age <= round(window_s / env.step_dt))
+    return active * (normal_force >= min_normal_force)

@@ -1,0 +1,619 @@
+"""Qualify every validation checkpoint on paired deterministic scenarios."""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import glob
+import json
+import math
+import random
+import re
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+import torch
+from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
+from mjlab.envs.mdp import dr
+from mjlab.managers.event_manager import EventTermCfg
+from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.rl import RslRlVecEnvWrapper
+from mjlab.utils.lab_api.math import quat_apply
+
+from mc_mjlab.tasks import mdp
+from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import _make_env_cfg
+from mc_mjlab.tasks.residual_balance.residual_balance_ppo_cfg import (
+  residual_balance_ppo_cfg,
+)
+from mc_mjlab.tasks.residual_balance.residual_balance_runner import (
+  ResidualBalanceOnPolicyRunner,
+)
+
+SCENARIOS = ("nominal", "current_kick", "finite_impulse", "robust")
+
+
+@dataclass
+class Episode:
+  """One fixed-schedule episode and its accumulated outputs."""
+
+  checkpoint: str
+  scenario: str
+  seed: int
+  env_id: int
+  pair: int
+  arm: str
+  length: int
+  terminations: dict[str, int]
+  rewards: dict[str, float]
+  metrics: dict[str, float]
+
+
+def resolve_checkpoints(inputs: list[str]) -> list[Path]:
+  """Expand checkpoint paths, directories, and globs in iteration order."""
+  paths: set[Path] = set()
+  for value in inputs:
+    path = Path(value)
+    if path.is_dir():
+      paths.update(path.glob("model_*.pt"))
+    elif any(char in value for char in "*?["):
+      paths.update(Path(item) for item in glob.glob(value))
+    elif path.is_file():
+      paths.add(path)
+    else:
+      raise FileNotFoundError(f"checkpoint input matches nothing: {value}")
+
+  def key(path: Path) -> tuple[str, int, str]:
+    match = re.search(r"model_(\d+)$", path.stem)
+    return (str(path.parent), int(match.group(1)) if match else -1, path.name)
+
+  return sorted((path.resolve() for path in paths), key=key)
+
+
+def scenario_cfg(name: str, seed: int, args) -> ManagerBasedRlEnvCfg:
+  """Build a deterministic qualification cfg for one scenario."""
+  cfg = _make_env_cfg(
+    control=args.control,
+    num_envs=args.num_envs,
+    num_workers=args.num_workers,
+    push_velocity=0.0,
+    console_output="none",
+  )
+  cfg.seed = seed
+  cfg.auto_reset = False
+  cfg.episode_length_s = args.episode_length_s
+  cfg.events["push_robot"].interval_range_s = (1.0e9, 1.0e9)
+  cfg.events["reset_base"].params["pose_range"] = {}
+  if name == "robust":
+    cfg.events["robust_inertia"] = EventTermCfg(
+      func=dr.pseudo_inertia,
+      mode="startup",
+      params={
+        "alpha_range": (0.5 * math.log(0.95), 0.5 * math.log(1.05)),
+        "t_range": (-0.005, 0.005),
+        "asset_cfg": SceneEntityCfg("robot"),
+      },
+    )
+    cfg.events["robust_friction"] = EventTermCfg(
+      func=dr.geom_friction,
+      mode="startup",
+      params={
+        "ranges": (0.9, 1.1),
+        "operation": "scale",
+        "asset_cfg": SceneEntityCfg("robot"),
+      },
+    )
+  return cfg
+
+
+class PairedDisturbances:
+  """Apply a deterministic schedule shared by both arms of each episode pair."""
+
+  def __init__(self, env, scenario: str, seed: int) -> None:
+    self.env = env
+    self.scenario = scenario
+    self.seed = seed
+    self.asset = env.scene["robot"]
+    self.remaining = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+    self.force = torch.zeros(env.num_envs, 1, 3, device=env.device)
+    self.torque = torch.zeros_like(self.force)
+
+  def before_step(
+    self, active: torch.Tensor, pairs: list[int], episode_steps: torch.Tensor
+  ) -> None:
+    """Expire wrenches and trigger disturbances at fixed episode ages."""
+    expired = (self.remaining == 0) & (self.force.square().sum(dim=(1, 2)) > 0.0)
+    if bool(expired.any()):
+      self._write_zeros(expired.nonzero(as_tuple=False).flatten())
+    if self.scenario != "nominal":
+      first = round(10.0 / self.env.step_dt)
+      interval = round(6.0 / self.env.step_dt)
+      due = (
+        active & (episode_steps >= first) & ((episode_steps - first) % interval == 0)
+      )
+      ids = due.nonzero(as_tuple=False).flatten()
+      if ids.numel():
+        occurrences = ((episode_steps[ids] - first) // interval).tolist()
+        self._trigger(ids, pairs, occurrences)
+
+  def after_step(self) -> None:
+    """Advance the finite-wrench duration by one policy step."""
+    self.remaining.clamp_min_(0)
+    self.remaining -= (self.remaining > 0).long()
+
+  def clear(self, env_ids: torch.Tensor) -> None:
+    """Clear any finite wrench before resetting an environment."""
+    if env_ids.numel():
+      self._write_zeros(env_ids)
+
+  def _trigger(
+    self, env_ids: torch.Tensor, pairs: list[int], occurrences: list[int]
+  ) -> None:
+    delta_b = torch.zeros(len(env_ids), 3, device=self.env.device)
+    durations = torch.zeros(len(env_ids), device=self.env.device)
+    heights = torch.zeros(len(env_ids), device=self.env.device)
+    for row, (env_id, occurrence) in enumerate(
+      zip(env_ids.tolist(), occurrences, strict=True)
+    ):
+      rng = random.Random(
+        self.seed * 1_000_003
+        + env_id * 10_007
+        + pairs[env_id] * 101
+        + occurrence * 17
+        + sum(map(ord, self.scenario))
+      )
+      angle = rng.uniform(-math.pi, math.pi)
+      dv = rng.uniform(0.50, 0.60) if self.scenario == "robust" else 0.40
+      delta_b[row, :2] = torch.tensor(
+        [dv * math.cos(angle), dv * math.sin(angle)], device=self.env.device
+      )
+      durations[row] = rng.uniform(0.08, 0.20)
+      heights[row] = rng.uniform(0.0, 0.25)
+    if self.scenario == "current_kick":
+      self._velocity_kick(env_ids, delta_b)
+    else:
+      self._finite_impulse(env_ids, delta_b, durations, heights)
+    mdp.record_disturbance(self.env, env_ids, delta_b)
+
+  def _velocity_kick(self, env_ids: torch.Tensor, delta_b: torch.Tensor) -> None:
+    quat = self.asset.data.root_link_quat_w[env_ids]
+    delta_w = quat_apply(quat, delta_b)
+    velocity = self.asset.data.root_link_vel_w[env_ids].clone()
+    velocity[:, :3] += delta_w
+    self.asset.write_root_link_velocity_to_sim(velocity, env_ids=env_ids)
+
+  def _finite_impulse(
+    self,
+    env_ids: torch.Tensor,
+    delta_b: torch.Tensor,
+    durations: torch.Tensor,
+    heights: torch.Tensor,
+  ) -> None:
+    quat = self.asset.data.root_link_quat_w[env_ids]
+    delta_w = quat_apply(quat, delta_b)
+    body_ids = self.asset.indexing.body_ids
+    mass = self.env.sim.model.body_mass[env_ids][:, body_ids].sum(dim=1)
+    force = mass.unsqueeze(-1) * delta_w / durations.unsqueeze(-1)
+    offset_b = torch.zeros_like(force)
+    offset_b[:, 2] = heights
+    offset_w = quat_apply(quat, offset_b)
+    torque = torch.cross(offset_w, force, dim=1)
+    self.force[env_ids, 0] = force
+    self.torque[env_ids, 0] = torque
+    self.remaining[env_ids] = torch.ceil(durations / self.env.step_dt).long()
+    self.asset.write_external_wrench_to_sim(
+      self.force[env_ids], self.torque[env_ids], env_ids=env_ids, body_ids=[0]
+    )
+
+  def _write_zeros(self, env_ids: torch.Tensor) -> None:
+    zeros = torch.zeros(len(env_ids), 1, 3, device=self.env.device)
+    self.asset.write_external_wrench_to_sim(zeros, zeros, env_ids=env_ids, body_ids=[0])
+    self.force[env_ids] = 0.0
+    self.torque[env_ids] = 0.0
+    self.remaining[env_ids] = 0
+
+
+def _metric_snapshot(env, done: torch.Tensor) -> dict[str, list[float]]:
+  """Read true episode metric reductions before reset clears their buffers."""
+  manager = env.metrics_manager
+  counts = manager._step_count[done].float().clamp(min=1.0)
+  output: dict[str, list[float]] = {}
+  for index, name in enumerate(manager.active_terms):
+    reduce = manager._term_cfgs[index].reduce
+    if reduce == "max":
+      values = manager._episode_max[name][done]
+    elif reduce == "last":
+      values = manager._step_values[done, index]
+    else:
+      values = manager._episode_sums[name][done] / counts
+    output[name] = values.tolist()
+  return output
+
+
+def _reset_done(env, env_ids: torch.Tensor) -> None:
+  """Recycle envs without appending an extra observation-history frame."""
+  env._reset_idx(env_ids)
+  env.scene.write_data_to_sim()
+  env.sim.forward()
+
+
+def run_checkpoint(checkpoint: Path, scenario: str, seed: int, args) -> list[Episode]:
+  """Run one checkpoint and scenario to a fixed paired episode count."""
+  torch.manual_seed(seed)
+  cfg = scenario_cfg(scenario, seed, args)
+  env = ManagerBasedRlEnv(cfg, device=args.device)
+  wrapped = RslRlVecEnvWrapper(env)
+  runner = ResidualBalanceOnPolicyRunner(
+    wrapped, asdict(residual_balance_ppo_cfg()), device=args.device
+  )
+  runner.load(
+    str(checkpoint),
+    load_cfg={"actor": True},
+    strict=True,
+    map_location=args.device,
+  )
+  policy = runner.get_inference_policy(device=args.device)
+  disturbances = PairedDisturbances(env, scenario, seed)
+  counts = [[0, 0] for _ in range(env.num_envs)]
+  current_policy = torch.tensor(
+    [bool(env_id % 2) for env_id in range(env.num_envs)],
+    dtype=torch.bool,
+    device=env.device,
+  )
+  active = torch.ones(env.num_envs, dtype=torch.bool, device=env.device)
+  pairs = [0] * env.num_envs
+  action = torch.zeros(
+    env.num_envs, env.action_manager.total_action_dim, device=env.device
+  )
+  episodes: list[Episode] = []
+  term_names = env.termination_manager.active_terms
+  reward_names = env.reward_manager.active_terms
+  env.reset()
+  while bool(active.any()):
+    disturbances.before_step(active, pairs, env.episode_length_buf)
+    action.zero_()
+    if bool((current_policy & active).any()):
+      with torch.inference_mode():
+        proposed = policy(wrapped.get_observations())
+      action[current_policy & active] = proposed[current_policy & active]
+    _, _, terminated, time_outs, _ = env.step(action)
+    disturbances.after_step()
+    done = (terminated | time_outs).nonzero(as_tuple=False).flatten()
+    if done.numel() == 0:
+      continue
+    metric_values = _metric_snapshot(env, done)
+    reward_values = {
+      name: env.reward_manager._episode_sums[name][done].tolist()
+      for name in reward_names
+    }
+    termination_values = {
+      name: env.termination_manager.get_term(name)[done].tolist() for name in term_names
+    }
+    lengths = env.episode_length_buf[done].tolist()
+    for row, env_id in enumerate(done.tolist()):
+      if not bool(active[env_id]):
+        continue
+      arm_index = int(current_policy[env_id])
+      episodes.append(
+        Episode(
+          checkpoint=str(checkpoint),
+          scenario=scenario,
+          seed=seed,
+          env_id=env_id,
+          pair=pairs[env_id],
+          arm="policy" if arm_index else "baseline",
+          length=int(lengths[row]),
+          terminations={
+            name: int(termination_values[name][row]) for name in term_names
+          },
+          rewards={name: float(reward_values[name][row]) for name in reward_names},
+          metrics={name: float(metric_values[name][row]) for name in metric_values},
+        )
+      )
+      counts[env_id][arm_index] += 1
+      if min(counts[env_id]) >= args.episodes_per_env:
+        active[env_id] = False
+      else:
+        current_policy[env_id] = not current_policy[env_id]
+        pairs[env_id] = counts[env_id][int(current_policy[env_id])]
+    disturbances.clear(done)
+    _reset_done(env, done)
+  env.close()
+  return episodes
+
+
+def _episode_value(episode: Episode, name: str) -> float:
+  """Derive one qualification quantity from an episode record."""
+  if name == "hazard":
+    return float(
+      any(
+        episode.terminations.get(term, 0)
+        for term in ("fell_over", "collapsed", "controller_failed")
+      )
+    )
+  if name == "worker_failure":
+    return float(episode.terminations.get("controller_worker_failed", 0))
+  if name == "recovery_dcm_error":
+    active = episode.metrics.get("recovery_active", 0.0)
+    return episode.metrics.get(name, 0.0) / active if active > 0.0 else float("nan")
+  if name == "gate_duty":
+    return 1.0 - episode.metrics["gate_mean"]
+  if name == "residual_rms":
+    return math.sqrt(max(0.0, episode.metrics["executed_residual_l2"]))
+  return episode.metrics[name]
+
+
+def _normal_stats(values: list[float]) -> dict[str, float]:
+  """Mean, cluster standard error, interval, and two-sided normal p-value."""
+  values = [value for value in values if math.isfinite(value)]
+  if not values:
+    return {key: float("nan") for key in ("mean", "sem", "ci_low", "ci_high", "p")}
+  mean = sum(values) / len(values)
+  if len(values) == 1:
+    sem = float("nan")
+  else:
+    variance = sum((value - mean) ** 2 for value in values) / (len(values) - 1)
+    sem = math.sqrt(variance / len(values))
+  radius = 1.959963985 * sem
+  p = math.erfc(abs(mean / sem) / math.sqrt(2.0)) if sem > 0.0 else float("nan")
+  return {
+    "mean": mean,
+    "sem": sem,
+    "ci_low": mean - radius,
+    "ci_high": mean + radius,
+    "p": p,
+  }
+
+
+def summarize(episodes: list[Episode]) -> dict:
+  """Compute paired, environment-clustered scenario summaries."""
+  names = (
+    "hazard",
+    "worker_failure",
+    "dcm_error",
+    "recovery_dcm_error",
+    "com_velocity_error",
+    "zmp_error",
+    "foot_slip",
+    "projection_fraction",
+    "near_bound_fraction",
+    "max_effort_ratio",
+    "gate_duty",
+    "residual_rms",
+  )
+  grouped: dict[tuple[int, int, int, str], Episode] = {
+    (episode.seed, episode.env_id, episode.pair, episode.arm): episode
+    for episode in episodes
+  }
+  summary: dict[str, dict] = {}
+  for name in names:
+    arm_values = {"baseline": [], "policy": []}
+    env_differences: dict[tuple[int, int], list[float]] = {}
+    for seed, env_id, pair, arm in grouped:
+      if arm != "baseline":
+        continue
+      baseline = grouped[(seed, env_id, pair, "baseline")]
+      policy = grouped.get((seed, env_id, pair, "policy"))
+      if policy is None:
+        continue
+      base_value = _episode_value(baseline, name)
+      policy_value = _episode_value(policy, name)
+      if not math.isfinite(base_value) or not math.isfinite(policy_value):
+        continue
+      arm_values["baseline"].append(base_value)
+      arm_values["policy"].append(policy_value)
+      env_differences.setdefault((seed, env_id), []).append(policy_value - base_value)
+    env_clusters = {
+      key: sum(values) / len(values) for key, values in env_differences.items()
+    }
+    seed_clusters: dict[int, list[float]] = {}
+    for (seed, _), value in env_clusters.items():
+      seed_clusters.setdefault(seed, []).append(value)
+    if len(seed_clusters) > 1:
+      clusters = [sum(values) / len(values) for values in seed_clusters.values()]
+      cluster_level = "seed"
+    else:
+      clusters = list(env_clusters.values())
+      cluster_level = "environment"
+    paired = _normal_stats(clusters)
+    base_mean = (
+      sum(arm_values["baseline"]) / len(arm_values["baseline"])
+      if arm_values["baseline"]
+      else float("nan")
+    )
+    policy_mean = (
+      sum(arm_values["policy"]) / len(arm_values["policy"])
+      if arm_values["policy"]
+      else float("nan")
+    )
+    summary[name] = {
+      "baseline": base_mean,
+      "policy": policy_mean,
+      "paired": paired,
+      "relative": paired["mean"] / base_mean if base_mean else float("nan"),
+      "clusters": len(clusters),
+      "cluster_level": cluster_level,
+    }
+  _holm_adjust(summary)
+  return summary
+
+
+def _holm_adjust(summary: dict[str, dict]) -> None:
+  """Attach Holm-adjusted p-values across the scenario's reported comparisons."""
+  finite = sorted(
+    (
+      (values["paired"]["p"], name)
+      for name, values in summary.items()
+      if math.isfinite(values["paired"]["p"])
+    )
+  )
+  running = 0.0
+  total = len(finite)
+  for rank, (p_value, name) in enumerate(finite):
+    running = max(running, min(1.0, (total - rank) * p_value))
+    summary[name]["paired"]["p_holm"] = running
+
+
+def promotion(checkpoint_summaries: dict[str, dict]) -> dict:
+  """Apply safety/nominal gates before lexicographic recovery ranking."""
+  reasons: list[str] = []
+  for scenario, summary in checkpoint_summaries.items():
+    if summary["worker_failure"]["baseline"] or summary["worker_failure"]["policy"]:
+      reasons.append(f"{scenario}: controller worker failure invalidated the run")
+    if summary["max_effort_ratio"]["policy"] > 1.0001:
+      reasons.append(f"{scenario}: hard effort ratio exceeds 1")
+    if summary["projection_fraction"]["policy"] >= 0.001:
+      reasons.append(f"{scenario}: projection is at least 0.1%")
+    if summary["near_bound_fraction"]["policy"] >= 0.01:
+      reasons.append(f"{scenario}: near-bound activity is at least 1%")
+  nominal = checkpoint_summaries.get("nominal")
+  if nominal is not None:
+    if nominal["gate_duty"]["policy"] > 0.05:
+      reasons.append("nominal: authority duty exceeds 5%")
+    base = nominal["com_velocity_error"]["baseline"]
+    upper = nominal["com_velocity_error"]["paired"]["ci_high"]
+    if base and upper / base >= 0.05:
+      reasons.append("nominal: CoM velocity upper-CI regression is at least 5%")
+    for name in ("zmp_error", "foot_slip"):
+      values = nominal[name]
+      base = values["baseline"]
+      paired = values["paired"]
+      if not base:
+        continue
+      sampling_floor = 2.0 * paired["sem"] / base
+      limit = max(0.05, sampling_floor) if math.isfinite(sampling_floor) else 0.05
+      if paired["ci_high"] / base >= limit:
+        reasons.append(f"nominal: {name} upper-CI regression exceeds its gate")
+  recovery = checkpoint_summaries.get("finite_impulse")
+  if recovery is not None:
+    base = recovery["recovery_dcm_error"]["baseline"]
+    paired = recovery["recovery_dcm_error"]["paired"]
+    if base and (-paired["mean"] / base < 0.05 or paired["ci_high"] >= 0.0):
+      reasons.append("finite impulse: recovery DCM improvement gate failed")
+  hazards = [summary["hazard"] for summary in checkpoint_summaries.values()]
+  total_base = sum(item["baseline"] for item in hazards)
+  total_policy = sum(item["policy"] for item in hazards)
+  hazard_ratio = (
+    total_policy / total_base if total_base else (1.0 if not total_policy else math.inf)
+  )
+  if hazard_ratio > 0.90:
+    reasons.append("overall hazard ratio exceeds 0.90")
+  for scenario, summary in checkpoint_summaries.items():
+    base = summary["hazard"]["baseline"]
+    policy = summary["hazard"]["policy"]
+    ratio = policy / base if base else (1.0 if not policy else math.inf)
+    if ratio > 1.10:
+      reasons.append(f"{scenario}: hazard ratio exceeds 1.10")
+  recovery_gain = (
+    -recovery["recovery_dcm_error"]["relative"] if recovery is not None else -math.inf
+  )
+  residual = sum(
+    summary["residual_rms"]["policy"] for summary in checkpoint_summaries.values()
+  ) / max(1, len(checkpoint_summaries))
+  return {
+    "eligible": not reasons,
+    "reasons": reasons,
+    "rank": [recovery_gain, -hazard_ratio, -residual],
+    "hazard_ratio": hazard_ratio,
+  }
+
+
+def write_outputs(episodes: list[Episode], report: dict, out_dir: Path) -> None:
+  """Write raw paired episodes to CSV and complete summaries to JSON."""
+  out_dir.mkdir(parents=True, exist_ok=True)
+  term_names = sorted({name for episode in episodes for name in episode.terminations})
+  reward_names = sorted({name for episode in episodes for name in episode.rewards})
+  metric_names = sorted({name for episode in episodes for name in episode.metrics})
+  with (out_dir / "qualification.csv").open("w", newline="") as stream:
+    writer = csv.writer(stream)
+    writer.writerow(
+      ["checkpoint", "scenario", "seed", "env", "pair", "arm", "length"]
+      + [f"termination/{name}" for name in term_names]
+      + [f"reward/{name}" for name in reward_names]
+      + [f"metric/{name}" for name in metric_names]
+    )
+    for episode in episodes:
+      writer.writerow(
+        [
+          episode.checkpoint,
+          episode.scenario,
+          episode.seed,
+          episode.env_id,
+          episode.pair,
+          episode.arm,
+          episode.length,
+        ]
+        + [episode.terminations.get(name, 0) for name in term_names]
+        + [episode.rewards.get(name, float("nan")) for name in reward_names]
+        + [episode.metrics.get(name, float("nan")) for name in metric_names]
+      )
+  (out_dir / "qualification.json").write_text(
+    json.dumps(report, indent=2, allow_nan=True) + "\n"
+  )
+
+
+def main() -> None:
+  """Qualify checkpoint inputs and select only among candidates passing gates."""
+  parser = argparse.ArgumentParser(
+    description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter
+  )
+  parser.add_argument("checkpoints", nargs="+", help="checkpoint paths, dirs, or globs")
+  parser.add_argument("--scenario", action="append", choices=SCENARIOS)
+  parser.add_argument("--episodes-per-env", type=int, default=2)
+  parser.add_argument("--num-envs", type=int, default=8)
+  parser.add_argument("--num-workers", type=int, default=6)
+  parser.add_argument("--episode-length-s", type=float, default=90.0)
+  parser.add_argument("--seed", type=int, action="append")
+  parser.add_argument("--control", choices=("position", "torque"), default="position")
+  parser.add_argument("--device", default="cuda:0")
+  parser.add_argument("--out-dir", type=Path, default=Path("logs/qualification"))
+  args = parser.parse_args()
+  checkpoints = resolve_checkpoints(args.checkpoints)
+  scenarios = args.scenario or list(SCENARIOS)
+  seeds = args.seed or [42]
+  episodes: list[Episode] = []
+  summaries: dict[str, dict] = {}
+  for checkpoint in checkpoints:
+    print(f"[qualify] {checkpoint}", flush=True)
+    by_scenario: dict[str, dict] = {}
+    for scenario in scenarios:
+      print(f"[qualify]   {scenario}", flush=True)
+      result = []
+      for seed in seeds:
+        print(f"[qualify]     seed {seed}", flush=True)
+        result.extend(run_checkpoint(checkpoint, scenario, seed, args))
+      episodes.extend(result)
+      by_scenario[scenario] = summarize(result)
+    gate = promotion(by_scenario)
+    summaries[str(checkpoint)] = {"scenarios": by_scenario, "promotion": gate}
+    print(
+      f"[qualify]   {'PASS' if gate['eligible'] else 'FAIL'}: "
+      + ("all gates" if gate["eligible"] else "; ".join(gate["reasons"])),
+      flush=True,
+    )
+  eligible = [
+    (values["promotion"]["rank"], checkpoint)
+    for checkpoint, values in summaries.items()
+    if values["promotion"]["eligible"]
+  ]
+  selected = max(eligible)[1] if eligible else None
+  report = {
+    "config": {
+      "seeds": seeds,
+      "scenarios": scenarios,
+      "episodes_per_env": args.episodes_per_env,
+      "num_envs": args.num_envs,
+      "episode_length_s": args.episode_length_s,
+    },
+    "checkpoints": summaries,
+    "selected": selected,
+    "selection_rule": "safety and nominal gates, then recovery/hazard/residual",
+  }
+  write_outputs(episodes, report, args.out_dir)
+  print(f"[qualify] selected: {selected or 'none'}")
+  print(
+    f"[qualify] outputs: {args.out_dir / 'qualification.csv'} and qualification.json"
+  )
+
+
+if __name__ == "__main__":
+  main()

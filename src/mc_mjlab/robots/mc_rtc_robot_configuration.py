@@ -40,9 +40,7 @@ def get_residual_joints(
 ) -> tuple[str, ...]:
   """The actuated joints minus those excluded from the RL residual."""
   excluded = set(non_actuated) | set(non_residual)
-  bounded = set.intersection(
-    *(set(_one_dof_bounds(name, i)) for i in range(6))
-  )
+  bounded = set.intersection(*(set(_one_dof_bounds(name, i)) for i in range(6)))
   return tuple(
     j for j in get_ref_joint_order(name) if j not in excluded and j in bounded
   )
