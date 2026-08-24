@@ -17,6 +17,7 @@ are *deciding* something, not when you are reading the line that implements it.
 
 | File | Covers |
 | --- | --- |
+| [improvement-roadmap.md](improvement-roadmap.md) | ordered critique remediation, acceptance gates, and experiment program |
 | [difficulty.md](difficulty.md) | `push_velocity`, `push_angular_velocity`, `warmup_s`, `episode_length_s` |
 | [reward-shaping.md](reward-shaping.md) | tracking weights and stds, the termination penalty, metrics, rejected ideas |
 | [residual-authority.md](residual-authority.md) | `residual_scale`, the per-joint partition, the torque budget |
