@@ -27,6 +27,7 @@ are *deciding* something, not when you are reading the line that implements it.
 | [../MC_MJLAB_TRAINING_CONFIG_PROPOSAL_V3.md](../MC_MJLAB_TRAINING_CONFIG_PROPOSAL_V3.md) | recovery-only objective screen and adoption gate |
 | [../MC_MJLAB_TRAINING_CONFIG_PROPOSAL_V4.md](../MC_MJLAB_TRAINING_CONFIG_PROPOSAL_V4.md) | recovery-kernel saturation screen and adoption gate |
 | [observations.md](observations.md) | noise levels, the actor/critic split, the `controller_planned_*` terms |
+| [external-controller-api.md](external-controller-api.md) | versioned deployment boundary for recovery state, residuals, and references |
 | [evaluation.md](evaluation.md) | how the measurement scripts avoid biasing a result |
 | [coupling.md](coupling.md) | action term, pool and host: interpolation, dispatch lag, reset ordering |
 | [robots.md](robots.md) | collision geoms, PD gains, extra sensors, refJointOrder, assets |

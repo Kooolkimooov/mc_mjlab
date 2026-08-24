@@ -278,3 +278,47 @@ drives every residual joint uniformly and offers no joint-subset pattern.
 
 The question arose because the reward proved blind to the policy — see
 `RECOVERY_TRACKING_WEIGHT` in [reward-shaping.md](reward-shaping.md).
+
+## AUTHORITY_SETS
+
+**Current:** position-control screens are registered for `ankle`, `sagittal`,
+`hardware`, and the unchanged `uniform` default. Ankle authority selects the
+last two joints of each leg. Sagittal authority selects hip pitch, knee pitch,
+and ankle pitch. Hardware and uniform retain all twelve leg joints. Selection is
+derived from each mc_rtc robot module rather than HRP5P names typed into the task.
+
+For every non-uniform position set, per-joint authority is
+`min(0.01 rad, 0.20 * effort_limit / kp)`. Torque uses
+`min(10 Nm, 0.20 * effort_limit)`. The configuration emits an exact scale and
+clip entry for every actuator so an unmatched non-residual actuator cannot fall
+back to mjlab's unit scale.
+
+**Re-measure if:** robot module joint groups, PD gains, effort limits, or control
+mode changes.
+
+**History:**
+- 2026-08-24 — HRP5P hardware-normalized position scales are `0.009293` rad
+  (hip yaw), `0.009318` (hip roll), `0.007527` (hip pitch), `0.007886` (knee
+  pitch), `0.007602` (ankle pitch), and `0.010000` (ankle roll), symmetrically
+  left/right.
+
+## probe_selective_authority
+
+**Current:** `scripts/probe_selective_authority.py` runs paired zero and pulse
+environments for individual joints and anatomy groups, measuring the two-second
+signed and absolute DCM response, centre-of-pressure shift, and peak effort
+change relative to the hardware limit. It disables disturbances and the recovery
+detector so the requested pulse is the only residual input.
+
+**Re-measure if:** controller, gait, pulse duration, residual scale, gains, or
+robot changes.
+
+**History:**
+- 2026-08-24 — full HRP5P position probe, 30 environments, 10 s settle plus 2 s
+  positive full-scale pulse. Individual absolute DCM changes ranged
+  `0.01352-0.02166 m`; CoP shifts `0.02615-0.04974 m`; effort changes
+  `0.074-0.179` of hardware limit. Group results were ankle
+  `0.01864/0.02689/0.052`, sagittal `0.01732/0.02640/0.060`, and all
+  `0.01756/0.04880/0.157` for absolute DCM change / CoP shift / effort change.
+  The groups therefore have measurable leverage, but only the fixed-budget
+  training and qualification screen may promote one.

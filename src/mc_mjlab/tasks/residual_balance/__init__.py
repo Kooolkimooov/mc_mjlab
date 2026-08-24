@@ -28,6 +28,53 @@ register_mjlab_task(
   runner_cls=ResidualBalanceOnPolicyRunner,
 )
 
+for authority_set in ("ankle", "sagittal", "hardware"):
+  task_id = get_task_name(TASK_DIR, f"position-{authority_set}")
+  register_mjlab_task(
+    task_id=task_id,
+    env_cfg=residual_balance_position_env_cfg(authority_set=authority_set),
+    play_env_cfg=residual_balance_position_env_cfg(
+      play=True, authority_set=authority_set
+    ),
+    rl_cfg=residual_balance_ppo_cfg(experiment_name=task_id),
+    runner_cls=ResidualBalanceOnPolicyRunner,
+  )
+
+for randomization_stage in (1, 2):
+  task_id = get_task_name(TASK_DIR, f"position-robust{randomization_stage}")
+  register_mjlab_task(
+    task_id=task_id,
+    env_cfg=residual_balance_position_env_cfg(randomization_stage=randomization_stage),
+    play_env_cfg=residual_balance_position_env_cfg(
+      play=True, randomization_stage=randomization_stage
+    ),
+    rl_cfg=residual_balance_ppo_cfg(experiment_name=task_id),
+    runner_cls=ResidualBalanceOnPolicyRunner,
+  )
+
+for controller_history in (10, 5):
+  task_id = get_task_name(TASK_DIR, f"position-history{controller_history}")
+  register_mjlab_task(
+    task_id=task_id,
+    env_cfg=residual_balance_position_env_cfg(controller_history=controller_history),
+    play_env_cfg=residual_balance_position_env_cfg(
+      play=True, controller_history=controller_history
+    ),
+    rl_cfg=residual_balance_ppo_cfg(experiment_name=task_id),
+    runner_cls=ResidualBalanceOnPolicyRunner,
+  )
+
+GRU_TASK_ID = get_task_name(TASK_DIR, "position-gru256")
+register_mjlab_task(
+  task_id=GRU_TASK_ID,
+  env_cfg=residual_balance_position_env_cfg(controller_history=1, proprio_history=1),
+  play_env_cfg=residual_balance_position_env_cfg(
+    play=True, controller_history=1, proprio_history=1
+  ),
+  rl_cfg=residual_balance_ppo_cfg(experiment_name=GRU_TASK_ID, recurrent=True),
+  runner_cls=ResidualBalanceOnPolicyRunner,
+)
+
 register_mjlab_task(
   task_id=TORQUE_TASK_ID,
   env_cfg=residual_balance_torque_env_cfg(),

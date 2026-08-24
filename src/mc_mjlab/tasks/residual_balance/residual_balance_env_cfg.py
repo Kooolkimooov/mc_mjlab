@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import replace
 from pathlib import Path
 from typing import Literal
@@ -45,6 +46,62 @@ TORQUE_MARGIN_WEIGHT = -0.05
 SOLE_VELOCIMETERS = ("left_foot_lin_vel", "right_foot_lin_vel")
 CONTROLLER_HISTORY = 20
 RECOVERY_DETECTOR_PATH = REPO_ROOT / "etc" / "recovery_detector.json"
+AUTHORITY_SETS = ("uniform", "ankle", "sagittal", "hardware")
+
+
+def _select_residual_joints(
+  robot_name: str, candidates: tuple[str, ...], authority_set: str
+) -> tuple[str, ...]:
+  """Select one anatomy-based authority screen in module joint order."""
+  if authority_set in ("uniform", "hardware"):
+    return candidates
+  selected: set[str] = set()
+  for side in ("left", "right"):
+    leg = [
+      joint for joint in mc_rtc.get_leg_joints(robot_name, side) if joint in candidates
+    ]
+    if authority_set == "ankle":
+      selected.update(leg[-2:])
+    elif authority_set == "sagittal":
+      selected.update(leg[2:-1])
+    else:
+      raise ValueError(f"unknown authority set {authority_set!r}")
+  return tuple(joint for joint in candidates if joint in selected)
+
+
+def _reference_stiffness(robot_name: str, path: Path) -> dict[str, float]:
+  """Read the position gains in ``refJointOrder`` order."""
+  rows = [line.split() for line in path.read_text().splitlines() if line.strip()]
+  return {
+    joint: float(row[0])
+    for joint, row in zip(mc_rtc.get_ref_joint_order(robot_name), rows, strict=True)
+  }
+
+
+def _hardware_residual_scales(
+  robot_name: str,
+  control: str,
+  residual_joints: tuple[str, ...],
+  pd_gains_path: Path,
+) -> dict[str, float]:
+  """Build exact per-actuator scales from effort limits and position gains."""
+  limits = mc_rtc.get_effort_limits(robot_name)
+  stiffness = _reference_stiffness(robot_name, pd_gains_path)
+  default = 0.01 if control == "position" else 10.0
+  authority: dict[str, float] = {}
+  for joint in residual_joints:
+    if joint not in limits:
+      raise KeyError(f"no effort limit for residual joint {joint}")
+    if control == "position":
+      if joint not in stiffness or stiffness[joint] <= 0.0:
+        raise KeyError(f"no positive PD stiffness for residual joint {joint}")
+      authority[joint] = min(default, 0.20 * limits[joint] / stiffness[joint])
+    else:
+      authority[joint] = min(default, 0.20 * limits[joint])
+  return {
+    re.escape(joint): authority.get(joint, default)
+    for joint in mc_rtc.get_actuated_joints(robot_name)
+  }
 
 
 def _make_env_cfg(
@@ -61,6 +118,11 @@ def _make_env_cfg(
   print_residual_every: int = 0,
   mc_rtc_yaml: Path = MC_RTC_YAML_PATH,
   recovery_detector_path: Path | None = RECOVERY_DETECTOR_PATH,
+  disturbance: Literal["finite", "velocity", "none"] = "finite",
+  authority_set: Literal["uniform", "ankle", "sagittal", "hardware"] = "uniform",
+  controller_history: Literal[1, 5, 10, 20] = CONTROLLER_HISTORY,
+  proprio_history: Literal[1, 5] = 5,
+  randomization_stage: Literal[0, 1, 2] = 0,
 ) -> ManagerBasedRlEnvCfg:
   """Build the residual balance env cfg for the config's ``MainRobot``."""
   robot_name, robot = get_main_robot_spec(mc_rtc_yaml)
@@ -68,14 +130,26 @@ def _make_env_cfg(
     robot.cfg_fn(), names_collision_geoms=robot.names_collision_geoms
   )
   nominal_height = mc_rtc.get_default_root_position(robot_name)[2]
+  if randomization_stage:
+    if robot_cfg.articulation is None:
+      raise ValueError("randomization requires an articulated robot")
+    for actuator in robot_cfg.articulation.actuators:
+      actuator.delay_max_lag = 2 * randomization_stage
 
   # Legs only; the task's opinion, not the robot's. docs/residual-authority.md
   upper_body = set(mc_rtc.get_upper_body_joints(robot_name))
-  residual_joints = tuple(j for j in robot.get_residual_joints() if j not in upper_body)
+  candidates = tuple(j for j in robot.get_residual_joints() if j not in upper_body)
+  residual_joints = _select_residual_joints(robot_name, candidates, authority_set)
 
   if residual_scale is None:
     # Measured reference; 0.03 and 0.20 were harmful. docs/residual-authority.md
-    residual_scale = 0.01 if control == "position" else 10.0
+    residual_scale = (
+      (0.01 if control == "position" else 10.0)
+      if authority_set == "uniform"
+      else _hardware_residual_scales(
+        robot_name, control, residual_joints, robot.pd_gains_path
+      )
+    )
 
   # Must partition *every* actuator: an unmatched joint silently gets scale 1.0
   # and no clip -- 100x the intended authority. docs/residual-authority.md#residual_scales
@@ -115,12 +189,12 @@ def _make_env_cfg(
     "base_lin_vel": ObservationTermCfg(
       func=envs_mdp.base_lin_vel,
       noise=Unoise(n_min=-0.02, n_max=0.02),
-      history_length=5,
+      history_length=proprio_history,
     ),
     "base_ang_vel": ObservationTermCfg(
       func=envs_mdp.base_ang_vel,
       noise=Unoise(n_min=-0.03, n_max=0.03),
-      history_length=5,
+      history_length=proprio_history,
     ),
     "projected_gravity": ObservationTermCfg(
       func=envs_mdp.projected_gravity, noise=Unoise(n_min=-0.05, n_max=0.05)
@@ -134,28 +208,29 @@ def _make_env_cfg(
     "joint_vel": ObservationTermCfg(
       func=envs_mdp.joint_vel_rel, noise=Unoise(n_min=-0.05, n_max=0.05)
     ),
-    "actions": ObservationTermCfg(func=mdp.executed_action, history_length=5),
+    "actions": ObservationTermCfg(
+      func=mdp.executed_action, history_length=proprio_history
+    ),
     "controller_ref_vel": ObservationTermCfg(
-      func=mdp.controller_reference_velocity, history_length=CONTROLLER_HISTORY
+      func=mdp.controller_reference_velocity, history_length=controller_history
     ),
     "controller_ref_pos": ObservationTermCfg(
-      func=mdp.controller_reference_position, history_length=CONTROLLER_HISTORY
+      func=mdp.controller_reference_position, history_length=controller_history
     ),
     "controller_pos_error": ObservationTermCfg(
       func=mdp.controller_position_error,
       noise=Unoise(n_min=-0.01, n_max=0.01),
-      history_length=CONTROLLER_HISTORY,
+      history_length=controller_history,
     ),
     "controller_planned_zmp": ObservationTermCfg(
-      func=mdp.controller_planned_zmp_offset, history_length=CONTROLLER_HISTORY
+      func=mdp.controller_planned_zmp_offset, history_length=controller_history
     ),
     "controller_planned_com_vel": ObservationTermCfg(
-      func=mdp.controller_planned_com_velocity, history_length=CONTROLLER_HISTORY
+      func=mdp.controller_planned_com_velocity, history_length=controller_history
     ),
-    # Gait phase, sim-side: mc_rtc's walking plan is unreachable through the
-    # bindings, so support state and sole motion stand in for it.
+    # mc_rtc's gait plan is unreachable, so deployable support state stands in.
     "foot_load_share": ObservationTermCfg(
-      func=mdp.foot_load_share, history_length=CONTROLLER_HISTORY
+      func=mdp.foot_load_share, history_length=controller_history
     ),
     "gait_phase": ObservationTermCfg(
       func=mdp.gait_phase,
@@ -165,13 +240,13 @@ def _make_env_cfg(
         # Measured |d_dot| rms over the baseline's load difference.
         "rate_ref": 7.1,
       },
-      history_length=CONTROLLER_HISTORY,
+      history_length=controller_history,
     ),
     **{
       name: ObservationTermCfg(
         func=envs_mdp.builtin_sensor,
         params={"sensor_name": f"robot/{name}"},
-        history_length=CONTROLLER_HISTORY,
+        history_length=controller_history,
       )
       for name in SOLE_VELOCIMETERS
     },
@@ -182,6 +257,11 @@ def _make_env_cfg(
   critic_terms = {
     name: replace(term, params=dict(term.params)) for name, term in actor_terms.items()
   }
+  for name in SOLE_VELOCIMETERS:
+    actor_terms.pop(name)
+  if randomization_stage:
+    for term in actor_terms.values():
+      term.delay_max_lag = randomization_stage
   critic_terms["joint_pos"] = replace(critic_terms["joint_pos"], params={})
   critic_terms["controller_pos_error"] = replace(
     critic_terms["controller_pos_error"], params={"biased": False}
@@ -286,7 +366,7 @@ def _make_env_cfg(
     ),
   }
 
-  events = {
+  events: dict[str, EventTermCfg] = {
     # Must come first and must not be dropped: declaring `events` at all replaces
     # mjlab's default, and this is the only term that resets *joints*. Without it
     # every episode starts from qpos0 and the FSM never reaches walking.
@@ -305,9 +385,57 @@ def _make_env_cfg(
         "velocity_range": {},
       },
     ),
-    "push_robot": EventTermCfg(
-      # Records *when* it fired; `recovery_tracking` gates on that, and
-      # `steps_since_push` raises if this is swapped for the plain term.
+    "encoder_bias": EventTermCfg(
+      func=dr.encoder_bias,
+      mode="startup",
+      params={"asset_cfg": SceneEntityCfg("robot"), "bias_range": (-0.01, 0.01)},
+    ),
+  }
+  if randomization_stage:
+    physics_scale = 0.05 * randomization_stage
+    com_shift = 0.005 * randomization_stage
+    friction_scale = 0.10 * randomization_stage
+    events |= {
+      "randomize_inertia": EventTermCfg(
+        func=dr.pseudo_inertia,
+        mode="startup",
+        params={
+          "alpha_range": (
+            0.5 * math.log(1.0 - physics_scale),
+            0.5 * math.log(1.0 + physics_scale),
+          ),
+          "t_range": (-com_shift, com_shift),
+          "asset_cfg": SceneEntityCfg("robot"),
+        },
+      ),
+      "randomize_friction": EventTermCfg(
+        func=dr.geom_friction,
+        mode="startup",
+        params={
+          "ranges": (1.0 - friction_scale, 1.0 + friction_scale),
+          "operation": "scale",
+          "asset_cfg": SceneEntityCfg("robot"),
+        },
+      ),
+      "randomize_pd_gains": EventTermCfg(
+        func=mdp.randomize_current_pd_gains,
+        mode="startup",
+        params={
+          "scale_range": (1.0 - physics_scale, 1.0 + physics_scale),
+          "asset_cfg": SceneEntityCfg("robot"),
+        },
+      ),
+      "randomize_strength": EventTermCfg(
+        func=dr.effort_limits,
+        mode="startup",
+        params={
+          "effort_limit_range": (1.0 - physics_scale, 1.0 + physics_scale),
+          "asset_cfg": SceneEntityCfg("robot"),
+        },
+      ),
+    }
+  if disturbance == "velocity":
+    events["push_robot"] = EventTermCfg(
       func=mdp.push_and_record,
       mode="interval",
       interval_range_s=(5.0, 7.0),
@@ -320,13 +448,25 @@ def _make_env_cfg(
         },
         "warmup_s": 10.0,
       },
-    ),
-    "encoder_bias": EventTermCfg(
-      func=dr.encoder_bias,
-      mode="startup",
-      params={"asset_cfg": SceneEntityCfg("robot"), "bias_range": (-0.01, 0.01)},
-    ),
-  }
+    )
+  else:
+    events["push_robot"] = EventTermCfg(
+      func=mdp.finite_impulse_curriculum,
+      mode="step",
+      params={
+        "enabled": disturbance == "finite",
+        "interval_range_s": (5.0, 7.0),
+        "warmup_s": 10.0,
+        "duration_range_s": (0.08, 0.20),
+        "height_range_m": (0.0, 0.25),
+        "stages": (
+          (0, (0.10, 0.25)),
+          (48_000, (0.10, 0.40)),
+          (96_000, (0.10, 0.50)),
+        ),
+        "asset_cfg": SceneEntityCfg("robot"),
+      },
+    )
 
   # Read tracking quality as `zmp_error / zmp_grounded`, never zmp_error alone.
   metric_params = {
@@ -442,24 +582,44 @@ PLAY_CONSOLE_OUTPUT = "single"
 PLAY_PRINT_RESIDUAL_EVERY = 10
 
 
-def residual_balance_position_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+def residual_balance_position_env_cfg(
+  play: bool = False,
+  authority_set: Literal["uniform", "ankle", "sagittal", "hardware"] = "uniform",
+  controller_history: Literal[1, 5, 10, 20] = CONTROLLER_HISTORY,
+  proprio_history: Literal[1, 5] = 5,
+  randomization_stage: Literal[0, 1, 2] = 0,
+) -> ManagerBasedRlEnvCfg:
   """Residual on the controller's joint *position* targets."""
   cfg = _make_env_cfg(
     control="position",
     console_output=PLAY_CONSOLE_OUTPUT if play else "none",
     print_residual_every=PLAY_PRINT_RESIDUAL_EVERY if play else 0,
+    authority_set=authority_set,
+    controller_history=controller_history,
+    proprio_history=proprio_history,
+    randomization_stage=randomization_stage,
   )
   if play:
     _apply_play_overrides(cfg)
   return cfg
 
 
-def residual_balance_torque_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+def residual_balance_torque_env_cfg(
+  play: bool = False,
+  authority_set: Literal["uniform", "ankle", "sagittal", "hardware"] = "uniform",
+  controller_history: Literal[1, 5, 10, 20] = CONTROLLER_HISTORY,
+  proprio_history: Literal[1, 5] = 5,
+  randomization_stage: Literal[0, 1, 2] = 0,
+) -> ManagerBasedRlEnvCfg:
   """Residual on the controller's joint *torques*."""
   cfg = _make_env_cfg(
     control="torque",
     console_output=PLAY_CONSOLE_OUTPUT if play else "none",
     print_residual_every=PLAY_PRINT_RESIDUAL_EVERY if play else 0,
+    authority_set=authority_set,
+    controller_history=controller_history,
+    proprio_history=proprio_history,
+    randomization_stage=randomization_stage,
   )
   if play:
     _apply_play_overrides(cfg)

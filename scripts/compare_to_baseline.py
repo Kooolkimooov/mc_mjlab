@@ -168,6 +168,7 @@ def _run_both(env, wrapped, policy, minutes: float, policy_ids) -> tuple[Arm, Ar
       # Masked, not sliced: the actor is batched, so wasted rows are cheaper.
       action[is_policy] = policy(wrapped.get_observations())[is_policy]
     _, _, terminated, time_outs, _ = env.step(action)
+    policy.reset(terminated | time_outs)
     base.steps += 1
     pol.steps += 1
     done = (terminated | time_outs).nonzero(as_tuple=False).flatten()
@@ -352,6 +353,15 @@ def main() -> None:
     choices=("position", "torque"),
     help="action space the checkpoint was trained on; a mismatch fails to load",
   )
+  p.add_argument(
+    "--authority-set",
+    choices=("uniform", "ankle", "sagittal", "hardware"),
+    default="uniform",
+    help="residual joint/scaling screen the checkpoint was trained with",
+  )
+  p.add_argument("--controller-history", type=int, choices=(1, 5, 10, 20), default=20)
+  p.add_argument("--proprio-history", type=int, choices=(1, 5), default=5)
+  p.add_argument("--recurrent", action="store_true")
   p.add_argument("--device", default="cuda:0", help="torch device for the simulation")
   p.add_argument(
     "--recovery-dcm-std",
@@ -396,6 +406,9 @@ def main() -> None:
     num_envs=args.num_envs,
     num_workers=args.num_workers,
     console_output="none",
+    authority_set=args.authority_set,
+    controller_history=args.controller_history,
+    proprio_history=args.proprio_history,
   )
   if args.recovery_dcm_std is not None:
     cfg.rewards["recovery_dcm"].params["std"] = args.recovery_dcm_std
@@ -422,7 +435,9 @@ def main() -> None:
   # tell a fall from a survival.
   wrapped = RslRlVecEnvWrapper(env)
   runner = MjlabOnPolicyRunner(
-    wrapped, asdict(residual_balance_ppo_cfg()), device=args.device
+    wrapped,
+    asdict(residual_balance_ppo_cfg(recurrent=args.recurrent)),
+    device=args.device,
   )
   runner.load(
     args.checkpoint, load_cfg={"actor": True}, strict=True, map_location=args.device

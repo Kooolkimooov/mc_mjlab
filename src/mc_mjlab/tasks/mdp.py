@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 from weakref import WeakKeyDictionary
 
@@ -9,7 +10,7 @@ import mujoco
 import torch
 from mjlab.envs.mdp import events, terminations
 from mjlab.managers.scene_entity_config import SceneEntityCfg
-from mjlab.utils.lab_api.math import quat_apply_inverse
+from mjlab.utils.lab_api.math import quat_apply, quat_apply_inverse
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
 from mc_mjlab.robots import mc_rtc_robot_configuration as mc_rtc
@@ -101,6 +102,41 @@ def requested_physical_action(
 ) -> torch.Tensor:
   """The physical residual requested before gating and feasibility projection."""
   return _residual_term(env, action_name).requested_physical_action
+
+
+def randomize_current_pd_gains(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None,
+  scale_range: tuple[float, float],
+  asset_cfg: SceneEntityCfg | None = None,
+  action_name: str = "mc_rtc_residual",
+) -> None:
+  """Scale the active reference PD gains independently per environment and joint."""
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, device=env.device)
+  else:
+    env_ids = env_ids.to(env.device)
+  term = _residual_term(env, action_name)
+  kp = getattr(term, "_kp", None)
+  kd = getattr(term, "_kd", None)
+  if kp is not None and kd is not None:
+    scale = torch.empty(len(env_ids), kp.shape[1], device=env.device).uniform_(
+      *scale_range
+    )
+    kp[env_ids] *= scale
+    kd[env_ids] *= scale
+    return
+  asset = env.scene[(asset_cfg or SceneEntityCfg("robot")).name]
+  for actuator in asset.actuators:
+    stiffness = getattr(actuator, "stiffness", None)
+    damping = getattr(actuator, "damping", None)
+    if stiffness is None or damping is None:
+      continue
+    scale = torch.empty(
+      len(env_ids), len(actuator.target_names), device=env.device
+    ).uniform_(*scale_range)
+    stiffness[env_ids] *= scale
+    damping[env_ids] *= scale
 
 
 def projection_fraction(
@@ -730,8 +766,8 @@ class max_effort_ratio:
     return (effort[:, self._cols].abs() / self._limits).amax(dim=1)
 
 
-class push_and_record:
-  """``push_by_setting_velocity``, plus a record of when it last fired."""
+class recorded_disturbance:
+  """Shared per-environment record for disturbance-aware terms."""
 
   #: Monotone counter, so this reads as "no push yet" for any run length.
   NEVER = -(1 << 30)
@@ -747,6 +783,10 @@ class push_and_record:
   def disable(self, env_ids: torch.Tensor) -> None:
     """Suppress scheduled pushes for selected calibration environments."""
     self.enabled[env_ids] = False
+
+
+class push_and_record(recorded_disturbance):
+  """``push_by_setting_velocity``, plus a record of when it last fired."""
 
   def __call__(
     self,
@@ -786,22 +826,142 @@ class push_and_record:
     self.last_push_step[ids] = env.common_step_counter
 
 
+class finite_impulse_curriculum(recorded_disturbance):
+  """Apply finite, mass-scaled torso impulses with a global-step curriculum."""
+
+  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+    super().__init__(cfg, env)
+    self._env = env
+    self.asset = env.scene[cfg.params.get("asset_cfg", SceneEntityCfg("robot")).name]
+    self.interval_range_s = cfg.params["interval_range_s"]
+    self.warmup_s = cfg.params["warmup_s"]
+    self.force = torch.zeros(env.num_envs, 1, 3, device=env.device)
+    self.torque = torch.zeros_like(self.force)
+    self.remaining = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+    self.next_push_step = torch.zeros_like(self.remaining)
+
+  def reset(self, env_ids: torch.Tensor | None = None) -> None:
+    """Clear active wrenches and schedule the first post-warmup impulse."""
+    env = self._env
+    ids = torch.arange(env.num_envs, device=env.device) if env_ids is None else env_ids
+    self._write_zeros(ids)
+    self.last_push_step[ids] = self.NEVER
+    self.last_push_vel[ids] = 0.0
+    warmup = round(self.warmup_s / env.step_dt)
+    span = max(
+      1, round((self.interval_range_s[1] - self.interval_range_s[0]) / env.step_dt)
+    )
+    self.next_push_step[ids] = warmup + torch.randint(
+      0, span + 1, (len(ids),), device=env.device
+    )
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor | None,
+    interval_range_s: tuple[float, float],
+    warmup_s: float,
+    duration_range_s: tuple[float, float],
+    height_range_m: tuple[float, float],
+    stages: tuple[tuple[int, tuple[float, float]], ...],
+    enabled: bool = True,
+    asset_cfg: SceneEntityCfg | None = None,
+  ) -> None:
+    """Expire the current wrench and trigger any due curriculum impulse."""
+    del env_ids, interval_range_s, warmup_s, asset_cfg
+    active = self.remaining > 0
+    self.remaining[active] -= 1
+    expired = active & (self.remaining == 0)
+    if bool(expired.any()):
+      self._write_zeros(expired.nonzero(as_tuple=False).flatten())
+    if not enabled:
+      return
+    due = self.enabled & (env.episode_length_buf >= self.next_push_step)
+    ids = due.nonzero(as_tuple=False).flatten()
+    if ids.numel() == 0:
+      return
+    self._trigger(env, ids, duration_range_s, height_range_m, stages)
+    low, high = self.interval_range_s
+    low_steps = round(low / env.step_dt)
+    high_steps = round(high / env.step_dt)
+    self.next_push_step[ids] = env.episode_length_buf[ids] + torch.randint(
+      low_steps, high_steps + 1, (len(ids),), device=env.device
+    )
+
+  def _trigger(
+    self,
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor,
+    duration_range_s: tuple[float, float],
+    height_range_m: tuple[float, float],
+    stages: tuple[tuple[int, tuple[float, float]], ...],
+  ) -> None:
+    """Sample and install one force-equivalent planar velocity change."""
+    velocity_range = stages[0][1]
+    for step, candidate in stages:
+      if env.common_step_counter >= step:
+        velocity_range = candidate
+    count = len(env_ids)
+    angle = 2.0 * torch.pi * torch.rand(count, device=env.device)
+    speed = velocity_range[0] + (velocity_range[1] - velocity_range[0]) * torch.rand(
+      count, device=env.device
+    )
+    delta_b = torch.zeros(count, 3, device=env.device)
+    delta_b[:, 0] = speed * torch.cos(angle)
+    delta_b[:, 1] = speed * torch.sin(angle)
+    quat = self.asset.data.root_link_quat_w[env_ids]
+    delta_w = quat_apply(quat, delta_b)
+    min_steps = math.ceil(duration_range_s[0] / env.step_dt)
+    max_steps = math.floor(duration_range_s[1] / env.step_dt)
+    duration_steps = torch.randint(
+      min_steps, max_steps + 1, (count,), device=env.device
+    )
+    duration = duration_steps * env.step_dt
+    body_ids = self.asset.indexing.body_ids
+    mass = env.sim.model.body_mass[env_ids][:, body_ids].sum(dim=1)
+    force = mass.unsqueeze(-1) * delta_w / duration.unsqueeze(-1)
+    height = height_range_m[0] + (height_range_m[1] - height_range_m[0]) * torch.rand(
+      count, device=env.device
+    )
+    offset_b = torch.zeros_like(force)
+    offset_b[:, 2] = height
+    torque = torch.cross(quat_apply(quat, offset_b), force, dim=1)
+    self.force[env_ids, 0] = force
+    self.torque[env_ids, 0] = torque
+    self.remaining[env_ids] = duration_steps
+    self.asset.write_external_wrench_to_sim(
+      self.force[env_ids], self.torque[env_ids], env_ids=env_ids, body_ids=[0]
+    )
+    self.last_push_vel[env_ids] = delta_b
+    self.last_push_step[env_ids] = env.common_step_counter
+
+  def _write_zeros(self, env_ids: torch.Tensor) -> None:
+    """Remove external wrenches for selected environments."""
+    if env_ids.numel() == 0:
+      return
+    zeros = torch.zeros(len(env_ids), 1, 3, device=env_ids.device)
+    self.asset.write_external_wrench_to_sim(zeros, zeros, env_ids=env_ids, body_ids=[0])
+    self.force[env_ids] = 0.0
+    self.torque[env_ids] = 0.0
+    self.remaining[env_ids] = 0
+
+
 #: Age reported for an env that has not been pushed inside its current episode.
 NEVER_AGE = 1 << 30
 
 
-def _push_term(env: ManagerBasedRlEnv, term_name: str) -> push_and_record:
-  """The ``push_and_record`` behind ``term_name``, or a ``TypeError``."""
+def _push_term(env: ManagerBasedRlEnv, term_name: str) -> recorded_disturbance:
+  """The recorded disturbance behind ``term_name``, or a ``TypeError``."""
   term = env.event_manager.get_term_cfg(term_name).func
-  if not isinstance(term, push_and_record):
+  if not isinstance(term, recorded_disturbance):
     raise TypeError(
-      f"event term {term_name!r} must be `mdp.push_and_record` for a "
+      f"event term {term_name!r} must record disturbances for a "
       f"disturbance-gated reward to know when it fired, got {type(term).__name__}"
     )
   return term
 
 
-def _age_since_push(env: ManagerBasedRlEnv, term: push_and_record) -> torch.Tensor:
+def _age_since_push(env: ManagerBasedRlEnv, term: recorded_disturbance) -> torch.Tensor:
   """See :func:`steps_since_push`; this is that, with the term already resolved."""
   # Python int on the left: `torch.as_tensor` here would be an H2D copy per step.
   age = env.common_step_counter - term.last_push_step

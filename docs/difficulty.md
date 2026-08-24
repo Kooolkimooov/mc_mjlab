@@ -7,6 +7,57 @@ task is actually calibrated against.
 
 Constants live in `src/mc_mjlab/tasks/residual_balance/residual_balance_env_cfg.py`.
 
+## finite_impulse_curriculum
+
+**Current:** training uses a finite external wrench at the root, not a velocity
+teleport. Each disturbance samples a uniform body-frame planar direction, an
+`0.08-0.20 s` duration, and a `0-0.25 m` vertical moment arm. Force is computed
+from the environment's randomized total robot mass so its time integral equals
+the requested equivalent delta velocity. The first event lands after a
+`10-12 s` warm-up, then repeats every `5-7 s`.
+
+The equivalent-delta-velocity curriculum is `[0.10, 0.25] m/s` initially,
+`[0.10, 0.40] m/s` after 48,000 environment steps, and `[0.10, 0.50] m/s` after
+96,000. `disturbance="velocity"` retains the old velocity kick only for detector
+calibration and compatibility evaluation.
+
+**Re-measure if:** mass, policy step time, force application semantics, root body,
+or controller gait changes.
+
+**History:**
+- 2026-08-24 — live verification over 16 environments x 1000 steps delivered
+  32 impulses. Equivalent-delta-velocity error was at most `7.5e-08 m/s`;
+  duration and `0.25 m` moment-arm assertions passed. The accepted detector
+  reached maximum authority `0.741`, mean duty `0.941%`, and exactly zero
+  inactive residual.
+
+## randomization_stage
+
+**Current:** stage zero is the standard task. The separately registered
+`Position-Robust1` task samples mass/inertia `+-5%`, centre of mass `+-5 mm`,
+friction `+-10%`, PD gains `+-5%`, and motor strength `+-5%`. Actor observations
+sample `0-1` policy-step delay, while actuator commands sample `0-1` mc_rtc
+controller-period delay (`0-2` physics substeps). `Position-Robust2` doubles
+every range and permits two delay steps. Randomization is static per environment
+construction; ordinary training does not enable it before the standard-task
+promotion gate is met.
+
+**Re-measure if:** mjlab's pseudo-inertia, observation delay, actuator delay, or
+effort-limit implementations change.
+
+**History:**
+- 2026-08-24 — added as explicit task variants so robustness is a gated stage,
+  not a silent change to the standard task.
+- 2026-08-24 — a live smoke test rejected interpreting controller delay as a
+  full 20 ms policy step: the cohort repeatedly reset before its first impulse.
+  Controller delay now uses the coupling's actual 2 ms period.
+- 2026-08-24 — mjlab's generic PD-gain randomizer was also rejected because it
+  scaled the armature-derived construction defaults, silently replacing the
+  reference `PDgains_sim.dat` values. Scaling the active gains instead passed a
+  stage-one live run over 4 environments x 1000 steps: 8 impulses, maximum
+  authority `0.516`, duty `0.722%`, exact inactive zeroing, and impulse error
+  `5.2e-08 m/s`.
+
 ## push_velocity
 
 **Current:** `0.4` — the task's difficulty dial. Both directions ruin training:

@@ -14,9 +14,6 @@ from pathlib import Path
 
 import torch
 from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
-from mjlab.envs.mdp import dr
-from mjlab.managers.event_manager import EventTermCfg
-from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.rl import RslRlVecEnvWrapper
 from mjlab.utils.lab_api.math import quat_apply
 
@@ -77,31 +74,16 @@ def scenario_cfg(name: str, seed: int, args) -> ManagerBasedRlEnvCfg:
     num_workers=args.num_workers,
     push_velocity=0.0,
     console_output="none",
+    disturbance="none",
+    authority_set=args.authority_set,
+    controller_history=args.controller_history,
+    proprio_history=args.proprio_history,
+    randomization_stage=1 if name == "robust" else 0,
   )
   cfg.seed = seed
   cfg.auto_reset = False
   cfg.episode_length_s = args.episode_length_s
-  cfg.events["push_robot"].interval_range_s = (1.0e9, 1.0e9)
   cfg.events["reset_base"].params["pose_range"] = {}
-  if name == "robust":
-    cfg.events["robust_inertia"] = EventTermCfg(
-      func=dr.pseudo_inertia,
-      mode="startup",
-      params={
-        "alpha_range": (0.5 * math.log(0.95), 0.5 * math.log(1.05)),
-        "t_range": (-0.005, 0.005),
-        "asset_cfg": SceneEntityCfg("robot"),
-      },
-    )
-    cfg.events["robust_friction"] = EventTermCfg(
-      func=dr.geom_friction,
-      mode="startup",
-      params={
-        "ranges": (0.9, 1.1),
-        "operation": "scale",
-        "asset_cfg": SceneEntityCfg("robot"),
-      },
-    )
   return cfg
 
 
@@ -243,7 +225,9 @@ def run_checkpoint(checkpoint: Path, scenario: str, seed: int, args) -> list[Epi
   env = ManagerBasedRlEnv(cfg, device=args.device)
   wrapped = RslRlVecEnvWrapper(env)
   runner = ResidualBalanceOnPolicyRunner(
-    wrapped, asdict(residual_balance_ppo_cfg()), device=args.device
+    wrapped,
+    asdict(residual_balance_ppo_cfg(recurrent=args.recurrent)),
+    device=args.device,
   )
   runner.load(
     str(checkpoint),
@@ -276,6 +260,7 @@ def run_checkpoint(checkpoint: Path, scenario: str, seed: int, args) -> list[Epi
         proposed = policy(wrapped.get_observations())
       action[current_policy & active] = proposed[current_policy & active]
     _, _, terminated, time_outs, _ = env.step(action)
+    policy.reset(terminated | time_outs)
     disturbances.after_step()
     done = (terminated | time_outs).nonzero(as_tuple=False).flatten()
     if done.numel() == 0:
@@ -564,6 +549,16 @@ def main() -> None:
   parser.add_argument("--episode-length-s", type=float, default=90.0)
   parser.add_argument("--seed", type=int, action="append")
   parser.add_argument("--control", choices=("position", "torque"), default="position")
+  parser.add_argument(
+    "--authority-set",
+    choices=("uniform", "ankle", "sagittal", "hardware"),
+    default="uniform",
+  )
+  parser.add_argument(
+    "--controller-history", type=int, choices=(1, 5, 10, 20), default=20
+  )
+  parser.add_argument("--proprio-history", type=int, choices=(1, 5), default=5)
+  parser.add_argument("--recurrent", action="store_true")
   parser.add_argument("--device", default="cuda:0")
   parser.add_argument("--out-dir", type=Path, default=Path("logs/qualification"))
   args = parser.parse_args()
@@ -603,6 +598,10 @@ def main() -> None:
       "episodes_per_env": args.episodes_per_env,
       "num_envs": args.num_envs,
       "episode_length_s": args.episode_length_s,
+      "authority_set": args.authority_set,
+      "controller_history": args.controller_history,
+      "proprio_history": args.proprio_history,
+      "recurrent": args.recurrent,
     },
     "checkpoints": summaries,
     "selected": selected,

@@ -61,11 +61,10 @@ untrained actor and require `mean_head_magnitude(...) < 1e-3`.
 
 **Current:** `2` with `num_mini_batches = 2`, against mjlab's 5 and 4.
 
-**Their product is the number of learning-rate adaptation events per iteration.**
-rsl_rl's adaptive schedule runs *inside* the minibatch loop (`ppo.py:234-249`,
-within the flat `mini_batch_generator`; `ppo.py:321` confirms
-`num_updates = num_learning_epochs * num_mini_batches`), not once per iteration.
-Each event can multiply the rate by 1.5 either way.
+The four gradient steps now share one fixed learning rate. The local
+`RolloutAdaptivePPO` measures post-update KL over the full rollout and makes one
+rate decision for the next rollout. The original rsl_rl behavior below is
+retained as the motivation and a selectable `schedule="adaptive"` screen arm.
 
 | epochs x minibatches | events | worst-case collapse in one iteration |
 | --- | --- | --- |
@@ -102,6 +101,28 @@ event count as a pure win.
 
 **Re-measure `desired_kl` only after this**, not alongside it — with the event
 count down, 0.02 may already be enough.
+
+## RolloutAdaptivePPO
+
+**Current:** the default algorithm holds learning rate constant through every
+epoch and minibatch, computes latent-distribution KL over all valid rollout
+samples after optimization, then applies rsl_rl's existing
+`2 * desired_kl` and `desired_kl / 2` thresholds once. The rate changes by `1.5`
+for the following rollout and retains the `[1e-5, 1e-2]` bounds. Recurrent
+padding is excluded from the schedule statistic.
+
+`Diagnostics/schedule_kl` is the value that drove the rate decision;
+`Diagnostics/approx_kl` is recomputed independently by the diagnostics pass.
+Fixed-rate screens use `1e-4`, `3e-4`, and `1e-3`. Both the legacy per-minibatch
+adaptive schedule and fixed schedule remain selectable without patching rsl_rl.
+
+**Re-measure if:** rsl_rl changes its storage generator, distribution parameter
+contract, adaptive thresholds, or optimizer ownership.
+
+**History:**
+- 2026-08-24 — implemented after every earlier run exposed only an
+  iteration-end diagnostic while the learning rate reacted four to twenty times
+  to different minibatch KL values.
 
 ## std_range
 
@@ -245,7 +266,7 @@ sample-count comparable.
 
 ## Training diagnostics
 
-**Current:** ten scalars under `Diagnostics/`, from
+**Current:** eleven scalars under `Diagnostics/`, from
 `residual_balance_diagnostics.ppo_diagnostics`. rsl_rl logs three losses and the
 learning rate and nothing else, and `learn()` exposes no hook, so the runner
 wraps the one `Logger.log` call each iteration makes and writes them there.
@@ -262,16 +283,16 @@ wraps the one `Logger.log` call each iteration makes and writes them there.
 | `exploration_rms` | RMS of sampled action minus policy mean |
 | `policy_mean_rate_rms` | policy-mean temporal-change RMS, excluding resets |
 | `sampled_action_rate_rms` | sampled-action temporal-change RMS, excluding resets |
+| `schedule_kl` | full-rollout KL used for the single next-rollout LR decision |
 
-All ten are read off the rollout *after* `PPO.update()` returns, which is safe
+All eleven are read off the rollout *after* `PPO.update()` returns, which is safe
 because `RolloutStorage.clear()` resets the write cursor and nothing else: the
 buffers stay intact until the next `act()` overwrites them.
 
-**`approx_kl` is not the KL the schedule reacts to.** The adaptive schedule
-compares a *per-minibatch* KL against `desired_kl` before each gradient step and
-can move the rate four times per iteration; this scalar is the end-of-iteration
-divergence over every sample. They answer different questions — "was the step
-size safe" against "how far did we go" — and the second was the one no run had.
+`schedule_kl` and `approx_kl` should agree for the feed-forward default, but are
+computed independently. The former is owned by the optimizer schedule and the
+latter by the diagnostics layer; logging both makes a future storage or model
+contract mismatch visible instead of silently steering the learning rate.
 
 **Why they were added:** the learning rate is the control that has decided every
 run here (see the note at the top of this file), and its input was never

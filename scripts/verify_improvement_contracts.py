@@ -14,8 +14,14 @@ from mc_mjlab.recovery_authority import (
   detector_target,
 )
 from mc_mjlab.residual_safety import project_residual
+from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import _make_env_cfg
+from mc_mjlab.tasks.rollout_adaptive_ppo import RolloutAdaptivePPO
 from mc_mjlab.tasks.squashed_gaussian import SquashedGaussianDistribution
-from mc_mjlab.tasks.zero_init_actor import ZeroInitMLPModel, mean_head_magnitude
+from mc_mjlab.tasks.zero_init_actor import (
+  ZeroInitMLPModel,
+  ZeroInitRNNModel,
+  mean_head_magnitude,
+)
 
 
 def verify_distribution() -> None:
@@ -62,6 +68,21 @@ def verify_zero_initialization() -> None:
     },
   )
   assert mean_head_magnitude(actor, observation) == 0.0
+  recurrent = ZeroInitRNNModel(
+    observation,
+    {"actor": ["actor"]},
+    "actor",
+    4,
+    hidden_dims=(16, 8),
+    rnn_type="gru",
+    rnn_hidden_dim=16,
+    distribution_cfg={
+      "class_name": ("mc_mjlab.tasks.squashed_gaussian:SquashedGaussianDistribution"),
+      "init_std": 0.1,
+      "std_range": (0.05, 0.30),
+    },
+  )
+  assert mean_head_magnitude(recurrent, observation) == 0.0
 
 
 def verify_projection() -> None:
@@ -112,12 +133,53 @@ def verify_recovery_detector() -> None:
   assert float(authority) == 0.0
 
 
+def verify_rollout_schedule() -> None:
+  """Check one-event rate decisions retain rsl_rl's thresholds and bounds."""
+  update = RolloutAdaptivePPO.next_learning_rate
+  assert update(1.0e-3, 0.05, 0.02) == 1.0e-3 / 1.5
+  assert update(1.0e-3, 0.005, 0.02) == 1.5e-3
+  assert update(1.0e-3, 0.02, 0.02) == 1.0e-3
+  assert update(1.0e-5, 0.05, 0.02) == 1.0e-5
+  assert update(1.0e-2, 0.005, 0.02) == 1.0e-2
+
+
+def verify_environment_variants() -> None:
+  """Check deployable observations and staged-randomization configuration."""
+  standard = _make_env_cfg("position", num_envs=1, disturbance="none")
+  actor = standard.observations["actor"].terms
+  critic = standard.observations["critic"].terms
+  for name in ("left_foot_lin_vel", "right_foot_lin_vel"):
+    assert name not in actor and name in critic
+  robust = _make_env_cfg(
+    "position", num_envs=1, disturbance="none", randomization_stage=1
+  )
+  assert {
+    "randomize_inertia",
+    "randomize_friction",
+    "randomize_pd_gains",
+    "randomize_strength",
+  } <= robust.events.keys()
+  assert all(
+    term.delay_max_lag == 1 for term in robust.observations["actor"].terms.values()
+  )
+  assert all(
+    term.delay_max_lag == 0 for term in robust.observations["critic"].terms.values()
+  )
+  assert robust.scene.entities["robot"].articulation is not None
+  assert all(
+    actuator.delay_max_lag == 2
+    for actuator in robust.scene.entities["robot"].articulation.actuators
+  )
+
+
 def main() -> None:
   """Run every local improvement-contract assertion."""
   verify_distribution()
   verify_zero_initialization()
   verify_projection()
   verify_recovery_detector()
+  verify_rollout_schedule()
+  verify_environment_variants()
   print("improvement contract assertions passed")
 
 

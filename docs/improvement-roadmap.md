@@ -107,6 +107,10 @@ passing set.
 **History:**
 - 2026-08-24 — chosen to remove joints whose authority adds exploration cost
   without measurable recovery leverage.
+- 2026-08-24 — implemented derived ankle/sagittal sets, hardware-normalized
+  scales, registered screen tasks, and a paired per-joint/group probe. All three
+  groups produced measurable two-second DCM and centre-of-pressure responses;
+  promotion remains gated on training and checkpoint qualification.
 
 ## FINITE_DISTURBANCE
 
@@ -130,6 +134,9 @@ hardware changes.
 **History:**
 - 2026-08-24 — finite impulses were selected to make disturbance energy and
   sim-to-real relevance explicit.
+- 2026-08-24 — made finite impulses the training default, verified their wrench
+  integral live, retained the velocity-kick compatibility path, and registered
+  both robustness stages without enabling them in the standard task.
 
 ## ACTOR_OBSERVATIONS
 
@@ -144,6 +151,9 @@ changes.
 **History:**
 - 2026-08-24 — actor inputs are restricted to quantities available at runtime
   without simulator-only velocimeters.
+- 2026-08-24 — removed both sole velocimeters from the actor, registered 10- and
+  5-frame feed-forward screens plus a one-frame GRU-256 screen, and preserved
+  the velocimeters for critic value estimation and slip measurement.
 
 ## PPO_KL_SCHEDULE
 
@@ -163,6 +173,8 @@ Screen adaptive scheduling against fixed learning rates `1e-4`, `3e-4`, and
 **History:**
 - 2026-08-24 — per-minibatch adaptive learning-rate changes confound a single
   update and make the recorded KL difficult to interpret.
+- 2026-08-24 — implemented a local full-rollout scheduler, retained selectable
+  legacy adaptive and fixed-rate arms, and logged its independent schedule KL.
 
 ## EXTERNAL_CONTROLLER_API
 
@@ -178,6 +190,8 @@ versioned residual interface.
 **History:**
 - 2026-08-24 — controller-library changes are intentionally outside this
   repository's authorization boundary.
+- 2026-08-24 — documented the versioned recovery, residual, reference, and
+  compatibility contracts, including fail-closed behavior and sequence pairing.
 
 ## EXPERIMENT_PROGRAM
 
@@ -205,6 +219,8 @@ profiles change.
 
 **History:**
 - 2026-08-24 — multi-seed promotion replaces the current single-seed evidence.
+- 2026-08-24 — added a resumable 12-arm short-screen runner with derived task
+  IDs, fixed budgets, local TensorBoard logging, and no pre-gate robust arm.
 
 ## VERIFICATION
 

@@ -28,6 +28,7 @@ def collect(args) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     num_workers=args.num_workers,
     push_velocity=args.push_velocity,
     recovery_detector_path=None,
+    disturbance="velocity",
   )
   cfg.seed = args.seed
   cfg.events["push_robot"].params["planar_speed"] = args.push_velocity

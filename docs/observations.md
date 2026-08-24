@@ -41,6 +41,11 @@ The encoder bias goes with the noise: a privileged critic should value states
 from the true joint angles, not from the miscalibrated reading the actor has to
 live with. mjlab's own tracking task splits the two groups the same way.
 
+The two simulator-only sole velocimeters are critic-only. The actor retains
+deployable base/IMU, encoder, controller-reference, planned-centroidal, and foot
+load channels. Foot load comes from the same force sensors mc_rtc already uses;
+no actor term depends on MuJoCo-only body velocity.
+
 **Until 2026-08-17 that was the critic's *only* advantage** — noise-free
 `joint_pos` and nothing else. It now also gets four terms the actor cannot have,
 which matters more at `gamma = 0.997` than it did at 0.99, because a longer
@@ -72,27 +77,31 @@ the robot-state channels are the ones a longer window helps least: base velocity
 and joint state are near-Markov, whereas the plan's recent history is what encodes
 where in the stride the robot is.
 
-Actor width goes 284 to 1219 (1179 before `gait_phase`), which grows the first
-layer from 145k to 624k parameters. Affordable because collection dominates
+Actor width is `1099` at 20 controller frames after removing the two sole
+velocimeters. The registered history screens are `649` dimensions at 10 frames
+and `424` at 5. The one-frame GRU input is `172` dimensions, with hidden size
+`256`; both its recurrent policy and the feed-forward policy zero-initialize the
+mean head. These remain affordable because collection dominates
 completely — 6.94 s against 0.014 s of learning per iteration at 2x2 epochs x
 minibatches, so a wider first layer costs no wall clock.
 
 ## Gait phase proxies
 
-**Current:** `foot_load_share`, the two sole velocimeters (`left_foot_lin_vel`,
-`right_foot_lin_vel`), and `gait_phase` below — all at `CONTROLLER_HISTORY`.
+**Current:** actor gait proxies are `foot_load_share` and `gait_phase`, both at
+`CONTROLLER_HISTORY`. The two sole velocimeters (`left_foot_lin_vel`,
+`right_foot_lin_vel`) remain available only to the critic and reward.
 
-These are **sim-side proxies, and deliberately so.** mc_rtc's walking plan — the
+The actor terms are deployable fallbacks. mc_rtc's walking plan — the
 FSM's phase, the next planned footstep, time to touchdown — lives in the
 datastore, which the Python bindings do not expose (see `CLAUDE.md`). It is out of
 reach without patching them.
 
-What is reachable: `foot_load_share` gives each foot's share of the vertical
+What is deployable: `foot_load_share` gives each foot's share of the vertical
 contact force, which is support state (double support, left single, right single)
 in two numbers, and it reuses `_ZmpSensors` so it costs no new plumbing. The
-velocimeters separate swing from stance and give swing speed. Both sensor sets
-were already being added to every robot MJCF by
-`robots/additional_sensors_configuration.py` and had never been read by anything.
+velocimeters still separate swing from stance for privileged value estimation
+and slip measurement, but their MuJoCo-only body velocity no longer reaches the
+policy.
 
 ## gait_phase
 

@@ -8,15 +8,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import torch
 import mujoco
+import torch
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
 
 FEATURE_NAMES = ("dcm_error", "base_ang_speed", "tilt", "load_deviation")
-mjtSensor = getattr(mujoco, "mjtSensor")
+mjtSensor = vars(mujoco)["mjtSensor"]
 
 
 def _wrench_sensor(mj_model, suffix: str, sensor_type: int) -> tuple[int, int]:

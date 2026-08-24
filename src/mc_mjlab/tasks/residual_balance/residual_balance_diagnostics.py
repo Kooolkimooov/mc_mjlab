@@ -20,15 +20,29 @@ def ppo_diagnostics(alg: Any, saturation_level: float = 0.99) -> dict[str, float
       storage.distribution_params[0]
     )
     rollout_actions = storage.actions
-    old_params = tuple(p.flatten(0, 1) for p in storage.distribution_params)
-    actions = rollout_actions.flatten(0, 1)
-    old_log_prob = storage.actions_log_prob.flatten(0, 1).reshape(-1)
+    hidden_state = actor.get_hidden_state()
+    if actor.is_recurrent:
+      batch = next(storage.recurrent_mini_batch_generator(1, 1))
+      actor(
+        batch.observations,
+        masks=batch.masks,
+        hidden_state=batch.hidden_states[0],
+        stochastic_output=True,
+      )
+      old_params = batch.old_distribution_params
+      actions = batch.actions
+      old_log_prob = batch.old_actions_log_prob.reshape(-1)
+    else:
+      old_params = tuple(p.flatten(0, 1) for p in storage.distribution_params)
+      actions = rollout_actions.flatten(0, 1)
+      old_log_prob = storage.actions_log_prob.flatten(0, 1).reshape(-1)
+      actor(storage.observations.flatten(0, 1), stochastic_output=True)
     values = storage.values.flatten(0, 1).reshape(-1)
     returns = storage.returns.flatten(0, 1).reshape(-1)
 
-    actor(storage.observations.flatten(0, 1), stochastic_output=True)
     kl = actor.get_kl_divergence(old_params, actor.output_distribution_params)
     ratio = torch.exp(actor.get_output_log_prob(actions).reshape(-1) - old_log_prob)
+    actor.reset(hidden_state=hidden_state)
 
     return {
       # End of the iteration, not the per-minibatch value the adaptive schedule
@@ -46,6 +60,7 @@ def ppo_diagnostics(alg: Any, saturation_level: float = 0.99) -> dict[str, float
       "exploration_rms": _rms(rollout_actions - policy_mean),
       "policy_mean_rate_rms": _temporal_rms(policy_mean, storage.dones),
       "sampled_action_rate_rms": _temporal_rms(rollout_actions, storage.dones),
+      "schedule_kl": float(getattr(alg, "last_schedule_kl", float("nan"))),
     }
 
 
