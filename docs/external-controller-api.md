@@ -59,6 +59,35 @@ changes.
 - 2026-08-24 — records the minimum actor inputs already consumed by this
   repository and the sequence relationship required for deployment parity.
 
+## controller_parameter_modulation
+
+**Current:** do not add a parameter action to this repository yet. The installed
+ismpc controller registers datastore callbacks for reference velocity, step and
+double-support timing, torso pitch, and CoM height, but the Python `MCController`
+wrapper exposes no datastore access. A live ablation therefore cannot reach the
+same controller instance that the worker steps.
+
+The first binding-backed screen should be a planar reference-velocity offset,
+because `ismpc_walking::get_ref_vel` and `ismpc_walking::set_ref_vel` provide a
+read/write pair. Its action contract is: tanh-bounded offset, recovery-authority
+gate, measured slew limit, exact restoration of the controller's nominal value
+at zero authority, and readback of the applied value. Bounds must come from a
+zero-residual sweep in which the base controller remains feasible. Step timing,
+CoM height, and torso pitch stay out until separate sweeps establish phase-safe
+bounds.
+
+The binding should expose narrow typed calls rather than arbitrary datastore
+execution, re-resolve them after every controller reset, and fail closed when a
+callback is missing or changes type.
+
+**Re-measure if:** mc_rtc exposes typed datastore callbacks in Python or the
+installed walking controller changes its registered callbacks.
+
+**History:**
+- 2026-08-25 — inspected the installed controller and bindings. The controller
+  has the required runtime callbacks, but type erasure at the Python boundary
+  blocks an in-repository prototype without an external binding change.
+
 ## compatibility
 
 **Current:** negotiate a semantic API version and robot-module digest before

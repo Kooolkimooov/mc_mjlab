@@ -48,6 +48,16 @@ No checkpoint is promoted and the 500-iteration confirmation does not run. The
 safety and measurement infrastructure remains, but this screen provides no
 evidence for changing the policy defaults.
 
+The robust scenario in that original qualification was invalid: baseline and
+policy episodes fell at about 6.0 s, before the first 10 s disturbance, because
+the inertial-field randomizer changed HRP5P dynamics even at zero perturbation.
+Its measurements are not evidence about recovery. This does not reverse the
+decision above: the finite-impulse recovery and nominal-gait gates independently
+reject all three checkpoints. After removing the incompatible inertial and COM
+fields, an 8-environment, one-pair, 20 s robust smoke test had zero pre-push
+hazard and no worker failures. Its post-push hazard was 0.875 for the baseline
+and 1.000 for standard checkpoint 180, so it still supplied no promotion signal.
+
 Quarantined workers died once in standard, once in fixed-1e-4, twice in
 fixed-1e-3, once in epochs-5x4, twice in unclipped PPO, and twice in GRU. The
 remaining seven arms had no worker death. Late-window

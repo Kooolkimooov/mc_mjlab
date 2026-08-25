@@ -188,6 +188,10 @@ bindings.
 versioned residual interface.
 
 **History:**
+- 2026-08-25 — binding inspection found usable ismpc callbacks for reference
+  velocity and gait parameters, but confirmed that Python exposes no datastore
+  access. The first future screen is specified as bounded, recovery-gated planar
+  reference-velocity modulation; implementation remains externally blocked.
 - 2026-08-24 — controller-library changes are intentionally outside this
   repository's authorization boundary.
 - 2026-08-24 — documented the versioned recovery, residual, reference, and

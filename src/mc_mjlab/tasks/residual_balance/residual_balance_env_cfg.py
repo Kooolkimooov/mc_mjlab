@@ -393,21 +393,8 @@ def _make_env_cfg(
   }
   if randomization_stage:
     physics_scale = 0.05 * randomization_stage
-    com_shift = 0.005 * randomization_stage
     friction_scale = 0.10 * randomization_stage
     events |= {
-      "randomize_inertia": EventTermCfg(
-        func=dr.pseudo_inertia,
-        mode="startup",
-        params={
-          "alpha_range": (
-            0.5 * math.log(1.0 - physics_scale),
-            0.5 * math.log(1.0 + physics_scale),
-          ),
-          "t_range": (-com_shift, com_shift),
-          "asset_cfg": SceneEntityCfg("robot"),
-        },
-      ),
       "randomize_friction": EventTermCfg(
         func=dr.geom_friction,
         mode="startup",

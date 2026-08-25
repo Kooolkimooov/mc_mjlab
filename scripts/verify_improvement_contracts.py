@@ -154,7 +154,6 @@ def verify_environment_variants() -> None:
     "position", num_envs=1, disturbance="none", randomization_stage=1
   )
   assert {
-    "randomize_inertia",
     "randomize_friction",
     "randomize_pd_gains",
     "randomize_strength",

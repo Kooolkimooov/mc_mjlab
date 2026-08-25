@@ -161,8 +161,21 @@ uv run python scripts/qualify_checkpoints.py logs/.../run_dir \
 
 The default scenarios are nominal walking, the historical velocity kick, a
 force-based finite impulse, and a held-out robust impulse with stage-one
-inertia/CoM/friction/gain/strength and delay perturbations. Episode counts are
-fixed per env and arm; wall time never decides which episodes enter the result.
+friction/gain/strength and delay perturbations. Episode counts are fixed per env
+and arm; wall time never decides which episodes enter the result. The robust
+scenario is invalid for promotion if more than 5% of its baseline episodes fail
+before the first disturbance.
+
+Use the zero-residual component gate before adding or widening a robustness
+term:
+
+```sh
+uv run python scripts/calibrate_robustness_profile.py
+```
+
+It runs each component and their combination through the 12-second gait
+transition, reports survival and worker failures, and exits nonzero below 95%
+survival.
 
 Each env runs a crossover: baseline and policy alternate, with starting arm
 balanced across env ids. Disturbance timing, planar direction, equivalent delta

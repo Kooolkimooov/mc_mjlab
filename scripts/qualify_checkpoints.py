@@ -28,6 +28,8 @@ from mc_mjlab.tasks.residual_balance.residual_balance_runner import (
 )
 
 SCENARIOS = ("nominal", "current_kick", "finite_impulse", "robust")
+DISTURBANCE_WARMUP_S = 10.0
+POLICY_STEP_S = 0.02
 
 
 @dataclass
@@ -320,6 +322,13 @@ def _episode_value(episode: Episode, name: str) -> float:
         for term in ("fell_over", "collapsed", "controller_failed")
       )
     )
+  if name == "pre_disturbance_hazard":
+    first_disturbance_step = round(DISTURBANCE_WARMUP_S / POLICY_STEP_S)
+    return float(
+      episode.scenario != "nominal"
+      and episode.length <= first_disturbance_step
+      and _episode_value(episode, "hazard")
+    )
   if name == "worker_failure":
     return float(episode.terminations.get("controller_worker_failed", 0))
   if name == "recovery_dcm_error":
@@ -358,6 +367,7 @@ def summarize(episodes: list[Episode]) -> dict:
   """Compute paired, environment-clustered scenario summaries."""
   names = (
     "hazard",
+    "pre_disturbance_hazard",
     "worker_failure",
     "dcm_error",
     "recovery_dcm_error",
@@ -479,6 +489,9 @@ def promotion(checkpoint_summaries: dict[str, dict]) -> dict:
     paired = recovery["recovery_dcm_error"]["paired"]
     if base and (-paired["mean"] / base < 0.05 or paired["ci_high"] >= 0.0):
       reasons.append("finite impulse: recovery DCM improvement gate failed")
+  robust = checkpoint_summaries.get("robust")
+  if robust is not None and robust["pre_disturbance_hazard"]["baseline"] > 0.05:
+    reasons.append("robust: baseline pre-disturbance hazard exceeds 5%")
   hazards = [summary["hazard"] for summary in checkpoint_summaries.values()]
   total_base = sum(item["baseline"] for item in hazards)
   total_policy = sum(item["policy"] for item in hazards)

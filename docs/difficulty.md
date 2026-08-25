@@ -34,18 +34,28 @@ or controller gait changes.
 ## randomization_stage
 
 **Current:** stage zero is the standard task. The separately registered
-`Position-Robust1` task samples mass/inertia `+-5%`, centre of mass `+-5 mm`,
-friction `+-10%`, PD gains `+-5%`, and motor strength `+-5%`. Actor observations
-sample `0-1` policy-step delay, while actuator commands sample `0-1` mc_rtc
-controller-period delay (`0-2` physics substeps). `Position-Robust2` doubles
-every range and permits two delay steps. Randomization is static per environment
-construction; ordinary training does not enable it before the standard-task
-promotion gate is met.
+`Position-Robust1` samples friction `+-10%`, active PD gains `+-5%`, and motor
+strength `+-5%`. Actor observations sample `0-1` policy-step delay, while
+actuator commands sample `0-1` mc_rtc controller-period delay (`0-2` physics
+substeps). `Position-Robust2` doubles every range and permits two delay steps.
+Randomization is static per environment construction; ordinary training does
+not enable it before the standard-task promotion gate is met.
 
-**Re-measure if:** mjlab's pseudo-inertia, observation delay, actuator delay, or
-effort-limit implementations change.
+Mass/inertia and COM are intentionally excluded. Expanding either family for
+per-world randomization and recomputing MuJoCo constants changed HRP5P's walking
+dynamics even when every requested perturbation was exactly zero.
+
+**Re-measure if:** mjlab's per-world inertial-field expansion, observation delay,
+actuator delay, or effort-limit implementations change.
 
 **History:**
+- 2026-08-25 — excluded mass/inertia and COM after component ablation isolated a
+  pre-push failure. Nominal and every other component survived 8/8 for 12 s;
+  pseudo-inertia, direct mass/inertia scaling, and COM offset each survived only
+  1/8. The latter two still failed with their perturbations set exactly to zero,
+  locating the incompatibility in field expansion/recomputation rather than the
+  requested ranges. After removing those fields, the combined stage-one profile
+  and its nominal control each survived 16/16 for 12 s with no worker failure.
 - 2026-08-24 — added as explicit task variants so robustness is a gated stage,
   not a silent change to the standard task.
 - 2026-08-24 — a live smoke test rejected interpreting controller delay as a
