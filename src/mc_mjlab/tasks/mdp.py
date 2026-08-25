@@ -90,6 +90,30 @@ def executed_action(
   return _residual_term(env, action_name).executed_physical_action
 
 
+def walking_reference_velocity(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """Executed walking-reference delta in normalized action coordinates."""
+  return _residual_term(env, action_name).walking_reference_normalized
+
+
+def walking_reference_l2(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """Squared normalized walking-reference delta delivered this step."""
+  action = _residual_term(env, action_name).walking_reference_normalized
+  return torch.sum(torch.square(action), dim=1)
+
+
+def walking_reference_rate_l2(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """Squared policy-step change in the normalized walking-reference delta."""
+  term = _residual_term(env, action_name)
+  delta = term.walking_reference_normalized - term.previous_walking_reference_normalized
+  return torch.sum(torch.square(delta), dim=1)
+
+
 def requested_normalized_action(
   env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
 ) -> torch.Tensor:
@@ -170,6 +194,13 @@ def detector_score(
   return _residual_term(env, action_name).detector_score
 
 
+def recovery_dcm_error_vector(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """Signed deployable DCM error used by the recovery detector."""
+  return _residual_term(env, action_name).recovery_dcm_error_vector
+
+
 def inactive_residual_violation(
   env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
 ) -> torch.Tensor:
@@ -221,6 +252,13 @@ def controller_planned_com_velocity(
 ) -> torch.Tensor:
   """The CoM velocity the controller's plan calls for."""
   return _residual_term(env, action_name).controller_vector("control_com_vel")
+
+
+def controller_walking_reference_velocity(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """Current ``(vx, vy, yaw_rate)`` command reported by the walking controller."""
+  return _residual_term(env, action_name).controller_vector("walking_ref_vel")
 
 
 def base_progress_tanh(

@@ -58,8 +58,8 @@ class RecoveryFeatureExtractor:
     self.site_ids = torch.tensor(site_ids, device=env.device, dtype=torch.long)
     self.root_body_id = self.asset.indexing.root_body_id
 
-  def __call__(self) -> torch.Tensor:
-    """Return the four nonnegative detector features in ``FEATURE_NAMES`` order."""
+  def measure(self) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return detector features and the signed horizontal DCM error."""
     data = self.env.sim.data
     count = len(self.site_ids)
     rotation = data.site_xmat[:, self.site_ids].reshape(-1, count, 3, 3)
@@ -84,16 +84,20 @@ class RecoveryFeatureExtractor:
       dim=-1,
     )
     omega = torch.sqrt(9.81 / com[:, 2].clamp(min=0.1)).unsqueeze(-1)
-    dcm = torch.linalg.vector_norm(
-      (com_vel[:, :2] - commanded[:, :2]) / omega - measured, dim=1
-    )
+    dcm_error = (com_vel[:, :2] - commanded[:, :2]) / omega - measured
+    dcm = torch.linalg.vector_norm(dcm_error, dim=1)
     angular_speed = torch.linalg.vector_norm(self.asset.data.root_link_ang_vel_b, dim=1)
     gravity = self.asset.data.projected_gravity_b
     tilt = torch.acos((-gravity[:, 2]).clamp(-1.0, 1.0))
     body_ids = self.asset.indexing.body_ids
     mass = self.env.sim.model.body_mass[:, body_ids].sum(dim=1)
     load_deviation = (total_force[:, 2] / (mass * 9.81) - 1.0).abs()
-    return torch.stack((dcm, angular_speed, tilt, load_deviation), dim=1)
+    features = torch.stack((dcm, angular_speed, tilt, load_deviation), dim=1)
+    return features, dcm_error
+
+  def __call__(self) -> torch.Tensor:
+    """Return the four nonnegative detector features in ``FEATURE_NAMES`` order."""
+    return self.measure()[0]
 
 
 @dataclass(frozen=True)
@@ -237,6 +241,7 @@ class RecoveryAuthority:
     self.filter = RecoveryFilter(env.num_envs, env.device, self.calibration)
     self.onset_index = FEATURE_NAMES.index(self.calibration.onset_feature)
     self.score = torch.zeros(env.num_envs, device=env.device)
+    self.dcm_error = torch.zeros(env.num_envs, 2, device=env.device)
 
   @property
   def authority(self) -> torch.Tensor:
@@ -245,7 +250,7 @@ class RecoveryAuthority:
 
   def update(self) -> torch.Tensor:
     """Measure the current state and advance the temporal authority filter."""
-    features = self.extractor()
+    features, self.dcm_error = self.extractor.measure()
     self.score, target = detector_target(features, self.calibration)
     return self.filter.update(
       self.score, features[:, self.onset_index], target, self.dt
@@ -256,3 +261,4 @@ class RecoveryAuthority:
     ids = slice(None) if env_ids is None else env_ids
     self.filter.reset(ids)
     self.score[ids] = 0.0
+    self.dcm_error[ids] = 0.0

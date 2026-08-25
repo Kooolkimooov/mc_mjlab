@@ -122,12 +122,13 @@ STATUS_WORKER_FAILED = 2.0
 
 # Per-env 3-vectors, read off the *control* robot -- not the canonical one
 # every other read here uses. docs/coupling.md#vector_outputs
-VECTOR_OUTPUTS: dict[str, Callable[[Any], Any]] = {
-  "planned_zmp": _planned_zmp,
+VECTOR_OUTPUTS: dict[str, Callable[[Any, Any], Any]] = {
+  "planned_zmp": lambda _, robot: _planned_zmp(robot),
   # Subtracted from both sides to cancel observer drift.
-  "control_com": lambda robot: robot.com,
+  "control_com": lambda _, robot: robot.com,
   # Differential, so it needs no drift correction.
-  "control_com_vel": lambda robot: robot.comVelocity,
+  "control_com_vel": lambda _, robot: robot.comVelocity,
+  "walking_ref_vel": lambda ctl, _: ctl.datastore().call("ismpc_walking::get_ref_vel"),
 }
 
 
@@ -258,6 +259,8 @@ class IoLayout:
   # of VECTOR_OUTPUTS; unlike the channels above these are not per-joint and
   # are not interpolated across substeps.
   output_vectors: tuple[str, ...] = ()
+  # (getter, setter) datastore callbacks for gated Vector3 delta commands.
+  datastore_vector_commands: tuple[tuple[str, str], ...] = ()
 
   @property
   def root_off(self) -> int:
@@ -273,6 +276,10 @@ class IoLayout:
 
   @property
   def in_width(self) -> int:
+    return self.command_off + 4 * len(self.datastore_vector_commands)
+
+  @property
+  def command_off(self) -> int:
     return self.wrench_off + 6 * len(self.wrenches)
 
   @property
@@ -421,6 +428,7 @@ class ControllerHost:
     )
     self._layout: IoLayout | None = None
     self._zero_base = np.zeros(len(self._ref_joint_order), dtype=np.float64)
+    self._command_baselines: list[list[Any | None]] = [[] for _ in self._controllers]
 
   def metadata(self) -> HostMetadata:
     return self._metadata
@@ -444,6 +452,27 @@ class ControllerHost:
     self._vector_readers = [VECTOR_OUTPUTS[v] for v in layout.output_vectors]
     self._imu_keys = [name.encode() for name, _, _ in layout.imu]
     self._wrench_keys = [name.encode() for name in layout.wrenches]
+    self._command_baselines = [
+      [None] * len(layout.datastore_vector_commands) for _ in self._controllers
+    ]
+    if layout.datastore_vector_commands:
+      datastore = self._controllers[0].controller().datastore()
+      if not hasattr(datastore, "call"):
+        raise RuntimeError(
+          "the mc_rtc Python binding lacks DataStore.call(); rebuild the local "
+          "binding with generic datastore accessor support"
+        )
+      missing = [
+        key
+        for pair in layout.datastore_vector_commands
+        for key in pair
+        if not datastore.has(key)
+      ]
+      if missing:
+        raise ValueError(f"controller datastore is missing callbacks {missing}")
+      for getter, setter in layout.datastore_vector_commands:
+        current = datastore.call(getter)
+        datastore.call(setter, current)
 
   def _output_guard(
     self, env_id: int, hot: bool = False
@@ -514,6 +543,34 @@ class ControllerHost:
         controller.running = True
         # Whatever made the QP give up is gone with the new state.
         self._failed[local] = False
+        self._command_baselines[local] = [None] * len(layout.datastore_vector_commands)
+
+  def _apply_datastore_commands(self, controller, local: int, row: np.ndarray) -> None:
+    """Apply active Vector3 deltas and restore each captured baseline exactly."""
+    layout = self._layout
+    assert layout is not None
+    if not layout.datastore_vector_commands:
+      return
+    datastore = controller.controller().datastore()
+    for index, (getter, setter) in enumerate(layout.datastore_vector_commands):
+      off = layout.command_off + 4 * index
+      active = row[off] > 0.0
+      baseline = self._command_baselines[local][index]
+      if active:
+        if baseline is None:
+          baseline = datastore.call(getter)
+          self._command_baselines[local][index] = baseline
+        datastore.call(
+          setter,
+          type(baseline)(
+            baseline.x() + float(row[off + 1]),
+            baseline.y() + float(row[off + 2]),
+            baseline.z() + float(row[off + 3]),
+          ),
+        )
+      elif baseline is not None:
+        datastore.call(setter, baseline)
+        self._command_baselines[local][index] = None
 
   def step_env(self, env_id: int, in_arr: np.ndarray, out_arr: np.ndarray) -> None:
     """Feed one env's input row to its controller, run it, write q/alpha out."""
@@ -621,6 +678,7 @@ class ControllerHost:
       controller.setWrenches(wrenches)
 
     controller.setJointTorques(self._expand(row[2 * T : 3 * T], self._zero_base))
+    self._apply_datastore_commands(controller, local, row)
 
     # A failed QP is the normal end of a fall: latch it and cost one episode,
     # not the run. mc_mujoco stops the whole sim instead.
@@ -641,10 +699,11 @@ class ControllerHost:
     if self._vector_readers:
       # Re-resolved every step, never cached: a reset rebuilds the controller and
       # a stale handle segfaults a reset later. docs/coupling.md#vector_outputs
-      control_robot = controller.controller().robot()
+      control = controller.controller()
+      control_robot = control.robot()
       base = layout.vector_off
       for reader in self._vector_readers:
-        v = reader(control_robot)
+        v = reader(control, control_robot)
         out_row[base] = v.x()
         out_row[base + 1] = v.y()
         out_row[base + 2] = v.z()

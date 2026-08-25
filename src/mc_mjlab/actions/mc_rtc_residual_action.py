@@ -26,6 +26,12 @@ if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
 
+WALKING_REFERENCE_CALLBACKS = (
+  "ismpc_walking::get_ref_vel",
+  "ismpc_walking::set_ref_vel",
+)
+
+
 @dataclass(kw_only=True)
 class McRtcResidualActionCfg(BaseActionCfg):
   """Shared configuration for mc_rtc residual action terms."""
@@ -91,6 +97,17 @@ class McRtcResidualActionCfg(BaseActionCfg):
   """Calibration JSON for recovery-conditioned authority; ``None`` gives full
   authority for compatibility and detector calibration runs."""
 
+  walking_reference_velocity_scale: tuple[float, float, float] | None = None
+  """Maximum recovery-gated ``(vx, vy, yaw_rate)`` delta sent through the
+  walking controller's datastore; ``None`` preserves the existing action space."""
+
+  walking_reference_velocity_slew_rate: tuple[float, float, float] = (
+    2.0,
+    1.5,
+    3.0,
+  )
+  """Maximum physical command change per second while authority is nonzero."""
+
 
 class McRtcResidualActionBase(BaseAction):
   """mc_rtc residual action base: steps controllers via a pool, adds RL residual."""
@@ -112,6 +129,7 @@ class McRtcResidualActionBase(BaseAction):
     self._num_targets = len(self._target_names)
 
     self._setup_residual(cfg)
+    self._setup_walking_reference(cfg)
     self._setup_residual_printing(cfg)
 
     self._steps_since_run = torch.zeros(
@@ -142,6 +160,7 @@ class McRtcResidualActionBase(BaseAction):
       cfg.use_controller_reset,
       self.output_channels,
       cfg.controller_vectors,
+      self._datastore_vector_commands,
     )
     # refJointOrder is only known now, so the gain override is applied here.
     if cfg.pd_gains_path is not None:
@@ -230,6 +249,51 @@ class McRtcResidualActionBase(BaseAction):
     self._previous_executed_physical = torch.zeros_like(self._raw_actions)
     self._projection_mask = torch.zeros_like(self._raw_actions, dtype=torch.bool)
     self._setup_hardware_bounds()
+
+  def _setup_walking_reference(self, cfg: McRtcResidualActionCfg) -> None:
+    """Append an optional normalized Vector3 walking-reference action."""
+    self._residual_action_dim = self._action_dim
+    self._residual_raw_actions = self._raw_actions
+    self._datastore_vector_commands: tuple[tuple[str, str], ...] = ()
+    self._walking_reference_scale = torch.empty(0, device=self.device)
+    self._walking_reference_requested = torch.empty(
+      self.num_envs, 0, device=self.device
+    )
+    self._walking_reference_executed = torch.empty_like(
+      self._walking_reference_requested
+    )
+    self._previous_walking_reference_executed = torch.empty_like(
+      self._walking_reference_requested
+    )
+    self._walking_reference_active = torch.zeros(
+      self.num_envs, dtype=torch.bool, device=self.device
+    )
+    scale = cfg.walking_reference_velocity_scale
+    if scale is None:
+      return
+    if len(scale) != 3 or any(value <= 0.0 for value in scale):
+      raise ValueError(
+        "walking reference velocity scales must be three positive values"
+      )
+    slew = cfg.walking_reference_velocity_slew_rate
+    if len(slew) != 3 or any(value <= 0.0 for value in slew):
+      raise ValueError("walking reference slew rates must be three positive values")
+    self._datastore_vector_commands = (WALKING_REFERENCE_CALLBACKS,)
+    self._walking_reference_scale = torch.tensor(scale, device=self.device).unsqueeze(0)
+    self._walking_reference_slew = (
+      torch.tensor(slew, device=self.device).unsqueeze(0) * self._env.step_dt
+    )
+    self._walking_reference_requested = torch.zeros(
+      self.num_envs, 3, device=self.device
+    )
+    self._walking_reference_executed = torch.zeros_like(
+      self._walking_reference_requested
+    )
+    self._previous_walking_reference_executed = torch.zeros_like(
+      self._walking_reference_requested
+    )
+    self._action_dim += 3
+    self._raw_actions = torch.zeros(self.num_envs, self._action_dim, device=self.device)
 
   def _setup_hardware_bounds(self) -> None:
     """Resolve RobotModule position, velocity, and effort bounds to target order."""
@@ -406,7 +470,7 @@ class McRtcResidualActionBase(BaseAction):
   @property
   def requested_normalized_action(self) -> torch.Tensor:
     """Policy request in normalized action coordinates."""
-    return self._raw_actions
+    return self._residual_raw_actions
 
   @property
   def requested_physical_action(self) -> torch.Tensor:
@@ -429,6 +493,25 @@ class McRtcResidualActionBase(BaseAction):
     return self._previous_executed_physical / self._physical_scale
 
   @property
+  def walking_reference_velocity(self) -> torch.Tensor:
+    """Executed ``(vx, vy, yaw_rate)`` delta in physical units."""
+    return self._walking_reference_executed
+
+  @property
+  def walking_reference_normalized(self) -> torch.Tensor:
+    """Executed walking-reference delta in normalized action coordinates."""
+    if self._walking_reference_scale.numel() == 0:
+      return self._walking_reference_executed
+    return self._walking_reference_executed / self._walking_reference_scale
+
+  @property
+  def previous_walking_reference_normalized(self) -> torch.Tensor:
+    """Previous executed walking-reference delta in normalized coordinates."""
+    if self._walking_reference_scale.numel() == 0:
+      return self._previous_walking_reference_executed
+    return self._previous_walking_reference_executed / self._walking_reference_scale
+
+  @property
   def projection_mask(self) -> torch.Tensor:
     """Per-residual-joint mask where feasibility changed the gated request."""
     return self._projection_mask
@@ -444,6 +527,13 @@ class McRtcResidualActionBase(BaseAction):
     if self._recovery_authority is None:
       return torch.zeros_like(self._last_gate)
     return self._recovery_authority.score
+
+  @property
+  def recovery_dcm_error_vector(self) -> torch.Tensor:
+    """Latest deployable signed horizontal DCM error, in metres."""
+    if self._recovery_authority is None:
+      return torch.zeros(self.num_envs, 2, device=self.device)
+    return self._recovery_authority.dcm_error
 
   @property
   def residual_ids(self) -> torch.Tensor | None:
@@ -468,9 +558,35 @@ class McRtcResidualActionBase(BaseAction):
 
   def process_actions(self, actions: torch.Tensor) -> None:
     self._previous_executed_physical.copy_(self._executed_physical)
-    super().process_actions(actions)
+    self._previous_walking_reference_executed.copy_(self._walking_reference_executed)
+    self._raw_actions.copy_(actions)
+    residual = actions[:, : self._residual_action_dim]
+    self._residual_raw_actions.copy_(residual)
+    self._processed_actions.copy_(residual * self._scale + self._offset)
+    if self.cfg.clip is not None:
+      self._processed_actions.copy_(
+        torch.clamp(
+          self._processed_actions,
+          min=self._clip[:, :, 0],
+          max=self._clip[:, :, 1],
+        )
+      )
     if self._recovery_authority is not None:
       self._last_gate.copy_(self._recovery_authority.update())
+    if self._walking_reference_scale.numel():
+      normalized = actions[:, self._residual_action_dim :].clamp(-1.0, 1.0)
+      self._walking_reference_requested.copy_(
+        normalized * self._walking_reference_scale
+      )
+      target = self._walking_reference_requested * self._last_gate.unsqueeze(-1)
+      delta = (target - self._walking_reference_executed).clamp(
+        -self._walking_reference_slew, self._walking_reference_slew
+      )
+      self._walking_reference_executed.add_(delta)
+      self._walking_reference_executed[self._last_gate == 0.0] = 0.0
+      self._walking_reference_active.copy_(
+        self._walking_reference_executed.abs().amax(dim=1) > 1.0e-6
+      )
     if self._print_every:
       self._print_pending = True
 
@@ -490,6 +606,11 @@ class McRtcResidualActionBase(BaseAction):
     self._last_gate[env_ids] = 0.0 if self._recovery_authority is not None else 1.0
     self._executed_physical[env_ids] = 0.0
     self._previous_executed_physical[env_ids] = 0.0
+    self._residual_raw_actions[env_ids] = 0.0
+    self._walking_reference_requested[env_ids] = 0.0
+    self._walking_reference_executed[env_ids] = 0.0
+    self._previous_walking_reference_executed[env_ids] = 0.0
+    self._walking_reference_active[env_ids] = False
     self._projection_mask[env_ids] = False
     if self._recovery_authority is not None:
       self._recovery_authority.reset(env_ids)
@@ -548,6 +669,11 @@ class McRtcResidualActionBase(BaseAction):
       # Sample the current state and dispatch this period's solve without
       # blocking; it overlaps the next `frameskip` substeps of sim.
       self._io.fill_controller_input(self._in_np)
+      self._io.write_datastore_vector_commands(
+        self._in_np,
+        self._walking_reference_active,
+        self._walking_reference_executed,
+      )
       self._pool.dispatch_controller_step(run_indices)
 
     # coef=1 on the last substep gives the full new target, matching mc_mujoco.

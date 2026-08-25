@@ -151,6 +151,7 @@ and those correlate with episode length at r = +0.98.
 uv run python scripts/compare_to_baseline.py --checkpoint <path/to/model_*.pt>
 # Can a constant residual move the centre of pressure at all?
 uv run python scripts/probe_residual_authority.py --level 1.0
+uv run python scripts/probe_walking_reference.py
 # Does the DCM objective still prefer standing to walking? (no checkpoint needed)
 uv run python scripts/validate_dcm_objective.py
 ```

@@ -178,16 +178,26 @@ Screen adaptive scheduling against fixed learning rates `1e-4`, `3e-4`, and
 
 ## EXTERNAL_CONTROLLER_API
 
-**Current:** Document, but do not implement here, the controller-side parameter
-API needed for deployment. The boundary includes recovery state, authority,
-per-joint residual requests, projected residuals, and relevant controller
-references. Repository work remains compatible with the current mc_rtc Python
-bindings.
+**Current:** the local mc_rtc binding provides generic datastore accessor calls,
+and this repository implements a recovery-gated walking-reference velocity
+screen. The new task adds three bounded, slew-limited actions, exact restoration
+of the live nominal value, actual-command readback, and the signed deployable DCM
+error needed to learn the useful direction. Existing task IDs and checkpoint
+dimensions are unchanged.
 
 **Re-measure if:** the external controller exposes datastore bindings or a
 versioned residual interface.
 
 **History:**
+- 2026-08-25 — after explicit slew limiting, a fixed 0.35 m/s-equivalent
+  sagittal impulse gave two envs per gain: DCM error `0.049570 m` at zero,
+  `0.050517 m` at `-2 s^-1`, and `0.063163/0.077178 m` at `+2/+4 s^-1`.
+  A narrow rerun found `0.048402 m` at `-0.5 s^-1` against `0.049334 m` zero
+  (`-1.9%`). All 16 worlds survived without worker failure. The channel has
+  signed authority, but the fixed law does not clear the 5% promotion gate.
+- 2026-08-25 — committed generic datastore accessor calls in external mc_rtc at
+  `aadbd7cebd`, then registered the `Position-Velocity` task and deterministic
+  gain probe.
 - 2026-08-25 — binding inspection found usable ismpc callbacks for reference
   velocity and gait parameters, but confirmed that Python exposes no datastore
   access. The first future screen is specified as bounded, recovery-gated planar
@@ -222,6 +232,9 @@ claim that training defaults improved.
 profiles change.
 
 **History:**
+- 2026-08-25 — the next short screen is the `Position-Velocity` task at the
+  existing 48,128-step seed-42 budget. It advances only if paired qualification
+  improves recovery without nominal gait or hazard regression.
 - 2026-08-25 — paired qualification rejected all three shortlisted checkpoints;
   per the pre-registered gate, no 500-iteration or robust-stage run starts.
 - 2026-08-25 — all 12 short-screen arms completed; `standard/model_180`,

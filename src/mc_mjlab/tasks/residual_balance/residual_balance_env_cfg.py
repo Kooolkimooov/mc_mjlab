@@ -47,6 +47,7 @@ SOLE_VELOCIMETERS = ("left_foot_lin_vel", "right_foot_lin_vel")
 CONTROLLER_HISTORY = 20
 RECOVERY_DETECTOR_PATH = REPO_ROOT / "etc" / "recovery_detector.json"
 AUTHORITY_SETS = ("uniform", "ankle", "sagittal", "hardware")
+WALKING_REFERENCE_SCALE = (0.20, 0.15, 0.30)
 
 
 def _select_residual_joints(
@@ -123,6 +124,7 @@ def _make_env_cfg(
   controller_history: Literal[1, 5, 10, 20] = CONTROLLER_HISTORY,
   proprio_history: Literal[1, 5] = 5,
   randomization_stage: Literal[0, 1, 2] = 0,
+  walking_reference_velocity_scale: tuple[float, float, float] | None = None,
 ) -> ManagerBasedRlEnvCfg:
   """Build the residual balance env cfg for the config's ``MainRobot``."""
   robot_name, robot = get_main_robot_spec(mc_rtc_yaml)
@@ -172,7 +174,12 @@ def _make_env_cfg(
       mc_rtc_robot_name=robot_name,
       frameskip=2,
       num_workers=num_workers,
-      controller_vectors=("planned_zmp", "control_com", "control_com_vel"),
+      controller_vectors=(
+        "planned_zmp",
+        "control_com",
+        "control_com_vel",
+        *(("walking_ref_vel",) if walking_reference_velocity_scale else ()),
+      ),
       pd_gains_path=str(robot.pd_gains_path),
       scale=residual_scales,
       clip=residual_clip,
@@ -181,6 +188,7 @@ def _make_env_cfg(
       ),
       console_output=console_output,
       print_residual_every=print_residual_every,
+      walking_reference_velocity_scale=walking_reference_velocity_scale,
     )
   }
 
@@ -251,6 +259,19 @@ def _make_env_cfg(
       for name in SOLE_VELOCIMETERS
     },
   }
+  if walking_reference_velocity_scale is not None:
+    actor_terms |= {
+      "walking_reference_delta": ObservationTermCfg(
+        func=mdp.walking_reference_velocity, history_length=proprio_history
+      ),
+      "controller_walking_reference": ObservationTermCfg(
+        func=mdp.controller_walking_reference_velocity,
+        history_length=controller_history,
+      ),
+      "recovery_dcm_error_vector": ObservationTermCfg(
+        func=mdp.recovery_dcm_error_vector, history_length=proprio_history
+      ),
+    }
 
   # Copy the terms rather than rebuilding them from `func`/`params`: a rebuild
   # silently drops every other field, which is how the critic lost its history.
@@ -341,6 +362,19 @@ def _make_env_cfg(
       params={"action_name": "mc_rtc_residual"},
     ),
   }
+  if walking_reference_velocity_scale is not None:
+    rewards |= {
+      "walking_reference_magnitude": RewardTermCfg(
+        func=mdp.walking_reference_l2,
+        weight=-0.05,
+        params={"action_name": "mc_rtc_residual"},
+      ),
+      "walking_reference_rate": RewardTermCfg(
+        func=mdp.walking_reference_rate_l2,
+        weight=-0.05,
+        params={"action_name": "mc_rtc_residual"},
+      ),
+    }
 
   terminations = {
     "time_out": TerminationTermCfg(func=envs_mdp.time_out, time_out=True),
@@ -520,6 +554,11 @@ def _make_env_cfg(
       },
     ),
   }
+  if walking_reference_velocity_scale is not None:
+    metrics |= {
+      "walking_reference_l2": MetricsTermCfg(func=mdp.walking_reference_l2),
+      "walking_reference_rate_l2": MetricsTermCfg(func=mdp.walking_reference_rate_l2),
+    }
 
   # Solver settings follow mc_mujoco's HRP5Pmain.xml, as in the demo.
   return ManagerBasedRlEnvCfg(
@@ -607,6 +646,23 @@ def residual_balance_torque_env_cfg(
     controller_history=controller_history,
     proprio_history=proprio_history,
     randomization_stage=randomization_stage,
+  )
+  if play:
+    _apply_play_overrides(cfg)
+  return cfg
+
+
+def residual_balance_position_velocity_env_cfg(
+  play: bool = False,
+  randomization_stage: Literal[0, 1, 2] = 0,
+) -> ManagerBasedRlEnvCfg:
+  """Residual position control plus gated walking-reference velocity deltas."""
+  cfg = _make_env_cfg(
+    control="position",
+    console_output=PLAY_CONSOLE_OUTPUT if play else "none",
+    print_residual_every=PLAY_PRINT_RESIDUAL_EVERY if play else 0,
+    randomization_stage=randomization_stage,
+    walking_reference_velocity_scale=WALKING_REFERENCE_SCALE,
   )
   if play:
     _apply_play_overrides(cfg)

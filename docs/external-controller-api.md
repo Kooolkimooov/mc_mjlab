@@ -61,29 +61,31 @@ changes.
 
 ## controller_parameter_modulation
 
-**Current:** do not add a parameter action to this repository yet. The installed
-ismpc controller registers datastore callbacks for reference velocity, step and
-double-support timing, torso pitch, and CoM height, but the Python `MCController`
-wrapper exposes no datastore access. A live ablation therefore cannot reach the
-same controller instance that the worker steps.
+**Current:** the local mc_rtc binding exposes `MCController.datastore()` plus a
+generic `DataStore.call()` over zero-argument getters and one-argument setters
+whose values are already supported by the Python binding. Unsupported callback
+signatures fail with their C++ type instead of being invoked speculatively. The
+external source commit is `aadbd7cebd`.
 
-The first binding-backed screen should be a planar reference-velocity offset,
-because `ismpc_walking::get_ref_vel` and `ismpc_walking::set_ref_vel` provide a
-read/write pair. Its action contract is: tanh-bounded offset, recovery-authority
-gate, measured slew limit, exact restoration of the controller's nominal value
-at zero authority, and readback of the applied value. Bounds must come from a
-zero-residual sweep in which the base controller remains feasible. Step timing,
-CoM height, and torso pitch stay out until separate sweeps establish phase-safe
-bounds.
+The `Position-Velocity` task appends a recovery-gated `(vx, vy, yaw_rate)`
+offset to the position-residual action. It uses
+`ismpc_walking::get_ref_vel`/`set_ref_vel`, captures the live nominal command at
+activation, slew-limits changes, restores that exact value at zero authority,
+and reads the applied value back through the output block. The host resolves the
+controller and datastore every step because reset rebuilds both. Missing
+callbacks fail during host configuration.
 
-The binding should expose narrow typed calls rather than arbitrary datastore
-execution, re-resolve them after every controller reset, and fail closed when a
-callback is missing or changes type.
+The provisional limits are `(0.20, 0.15, 0.30)` in m/s, m/s, and rad/s. Step
+timing, CoM height, and torso pitch remain excluded until separate phase-safe
+sweeps justify bounds.
 
-**Re-measure if:** mc_rtc exposes typed datastore callbacks in Python or the
-installed walking controller changes its registered callbacks.
+**Re-measure if:** the installed walking controller changes its callbacks,
+nominal velocity, recovery detector, or control period.
 
 **History:**
+- 2026-08-25 — implemented and live-tested generic getter/setter invocation,
+  gated shared-memory command transport, exact nominal restoration, applied
+  readback, and the registered `Position-Velocity` task.
 - 2026-08-25 — inspected the installed controller and bindings. The controller
   has the required runtime callbacks, but type erasure at the Python boundary
   blocks an in-repository prototype without an external binding change.

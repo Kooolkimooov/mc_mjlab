@@ -174,11 +174,10 @@ motion implies.
 This is the plan as the QP hands it down, not the walking MPC's raw `zmpTarget`.
 The two differ by ismpc's ZMP-delay compensation (it builds the stabilizer's
 CoM-acceleration target from `admittanceTarget`,
-`Walking_controller.cpp:765-793`) and by whatever the QP traded away. `zmpTarget`
-itself is reachable only through the controller's datastore, which the mc_rtc
-Python bindings do not expose; this one needs nothing beyond stock
-`mc_rbdyn.Robot`, and it is arguably the more apt thing to reward — it is what
-the controller is asking of the world *now*.
+`Walking_controller.cpp:765-793`) and by whatever the QP traded away. The local
+binding now reaches `zmpTarget` through `DataStore.call()`, but this quantity is
+kept for checkpoint compatibility and because it is arguably the more apt thing
+to reward — it is what the controller is asking of the world *now*.
 
 `control_com` must be subtracted from both sides before comparing with the sim's
 ZMP: the controller places its plan against the *estimated* state, which drifts

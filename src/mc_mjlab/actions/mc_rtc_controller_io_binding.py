@@ -104,6 +104,7 @@ class ControllerIoBinding:
     use_controller_reset: bool,
     output_channels: Sequence[str],
     output_vectors: Sequence[str] = (),
+    datastore_vector_commands: Sequence[tuple[str, str]] = (),
   ):
     self._env = env
     self._entity = entity
@@ -112,6 +113,7 @@ class ControllerIoBinding:
     self._device = target_ids.device
     self._output_channels = tuple(output_channels)
     self._output_vectors = tuple(output_vectors)
+    self._datastore_vector_commands = tuple(datastore_vector_commands)
     self._num_targets = len(self._target_names)
 
     mj_model = env.sim.mj_model
@@ -207,6 +209,7 @@ class ControllerIoBinding:
       wrenches=tuple(n for n, _, _ in wrench_sensors),
       output_channels=self._output_channels,
       output_vectors=self._output_vectors,
+      datastore_vector_commands=self._datastore_vector_commands,
     )
 
     # Gather columns for a single fancy-indexed sensordata copy per step;
@@ -261,6 +264,23 @@ class ControllerIoBinding:
     self._fill_joint_columns(in_np)
     self._fill_root_and_sensor_columns(in_np)
 
+  def write_datastore_vector_commands(
+    self, in_np: np.ndarray, active: torch.Tensor, values: torch.Tensor
+  ) -> None:
+    """Write active flags and Vector3 deltas into the controller input block."""
+    count = len(self.layout.datastore_vector_commands)
+    if count == 0:
+      return
+    expected = (self._env.num_envs, 3 * count)
+    if tuple(values.shape) != expected:
+      raise ValueError(
+        f"datastore command values have shape {tuple(values.shape)}, expected {expected}"
+      )
+    rows = in_np[:, self.layout.command_off : self.layout.in_width]
+    rows[:, 0::4] = active.detach().cpu().numpy().reshape(-1, 1)
+    shaped = values.detach().cpu().numpy().reshape(self._env.num_envs, count, 3)
+    rows.reshape(self._env.num_envs, count, 4)[:, :, 1:] = shaped
+
   def reset_controller_input(self, in_np: np.ndarray) -> None:
     """Write the encoder and root columns the hosts read on reset/init."""
     T = self.layout.num_targets
@@ -275,6 +295,8 @@ class ControllerIoBinding:
       in_np[:, ro : ro + 3] = self._entity.data.root_link_pos_w.cpu().numpy()
       in_np[:, ro + 3 : ro + 7] = self._entity.data.root_link_quat_w.cpu().numpy()
     in_np[:, ro : ro + 3] -= self._env_origins_np
+    if self.layout.datastore_vector_commands:
+      in_np[:, self.layout.command_off : self.layout.in_width] = 0.0
 
   def read_controller_output(
     self, out_np: np.ndarray, env_indices: list[int]

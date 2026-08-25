@@ -280,13 +280,14 @@ Cross-cutting invariants:
   reset, so never cache the `MCController` from `controller()` (or a `Robot`
   from it) across steps — the worker segfaults one reset later, far from the
   cache. Re-resolve every step; it costs a wrapper allocation.
-- mc_rtc bindings expose no datastore access, so a controller's own planned
-  quantities (ismpc's `zmpTarget` under `ismpc_walking::zmp_target`) are out of
-  reach without patching them. `mdp.zmp_tracking` therefore derives the plan
-  from the control robot's centroid instead — `rbd::computeCentroidalZMP` on
-  `com`/`comAcceleration`, i.e. the ZMP the QP's commanded motion implies. It
-  differs from `zmpTarget` by ismpc's ZMP-delay compensation (the stabilizer's
-  CoM-acceleration target comes from `admittanceTarget`, not `zmpTarget`).
+- The locally patched bindings expose `MCController.datastore()` and generic
+  `DataStore.call()` for zero-argument getters and one-argument setters over
+  the binding's supported scalar/vector/spatial types. Callback lookup is
+  runtime-checked and must be re-resolved after reset like every controller
+  handle. `mdp.zmp_tracking` deliberately keeps the control-centroid plan for
+  checkpoint compatibility: it is the QP-commanded ZMP, while ismpc's reachable
+  `zmp_target` differs by delay compensation before the stabilizer builds its
+  CoM-acceleration target.
 - mc_rtc's terminal logging is hardwired C++ spdlog; silencing requires
   fd-level redirection (`suppress_mc_rtc_output`), not `sys.stdout` swaps.
   The cfg's `console_output` picks "none" (silence all, the default),
