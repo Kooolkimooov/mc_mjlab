@@ -218,6 +218,8 @@ claim that training defaults improved.
 profiles change.
 
 **History:**
+- 2026-08-25 — paired qualification rejected all three shortlisted checkpoints;
+  per the pre-registered gate, no 500-iteration or robust-stage run starts.
 - 2026-08-25 — all 12 short-screen arms completed; `standard/model_180`,
   `authority-ankle/model_140`, and the latter's `model_187` second read advance
   to paired qualification. See `docs/improvement-screens.md`.

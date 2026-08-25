@@ -33,6 +33,21 @@ and recovery DCM values with one-third of the standard residual. Qualify
 and `standard/model_180` as the full-authority control. Do not start the
 500-iteration confirmation until paired qualification shows an advantage.
 
+Paired deterministic qualification completed with `16` environments, two
+episodes per arm per environment, seed `42`, and all four scenarios. Negative
+recovery delta is better. The interval is the environment-clustered 95% interval
+on the absolute recovery DCM difference in metres.
+
+| checkpoint | finite-impulse recovery | 95% interval | hazard ratio | max effort | projection / near-bound | verdict |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| standard 180 | -7.70% | [-0.02140, +0.00119] | 1.000 | 0.572 | 0 / 0 | fail: recovery confidence, nominal foot-slip CI, hazard |
+| ankle 140 | -4.79% | [-0.02030, +0.00752] | 1.011 | 0.580 | 0 / 0 | fail: recovery magnitude/confidence and hazard |
+| ankle 187 | -5.08% | [-0.01731, +0.00380] | 1.011 | 0.554 | 0 / 0 | fail: recovery confidence and hazard |
+
+No checkpoint is promoted and the 500-iteration confirmation does not run. The
+safety and measurement infrastructure remains, but this screen provides no
+evidence for changing the policy defaults.
+
 Quarantined workers died once in standard, once in fixed-1e-4, twice in
 fixed-1e-3, once in epochs-5x4, twice in unclipped PPO, and twice in GRU. The
 remaining seven arms had no worker death. Late-window
@@ -43,5 +58,7 @@ the paired qualifier remains stricter and invalidates any affected run.
 scales, observation contract, or training budget changes.
 
 **History:**
+- 2026-08-25 — paired qualification selected no checkpoint, ending the
+  experiment before the long-run stage.
 - 2026-08-25 — selected the standard and ankle checkpoints for deterministic
   paired qualification; no policy is promoted from training curves.
