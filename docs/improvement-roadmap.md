@@ -218,6 +218,9 @@ claim that training defaults improved.
 profiles change.
 
 **History:**
+- 2026-08-25 — all 12 short-screen arms completed; `standard/model_180`,
+  `authority-ankle/model_140`, and the latter's `model_187` second read advance
+  to paired qualification. See `docs/improvement-screens.md`.
 - 2026-08-24 — multi-seed promotion replaces the current single-seed evidence.
 - 2026-08-24 — added a resumable 12-arm short-screen runner with derived task
   IDs, fixed budgets, local TensorBoard logging, and no pre-gate robust arm.
