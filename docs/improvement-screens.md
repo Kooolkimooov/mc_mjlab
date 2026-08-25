@@ -2,7 +2,7 @@
 
 ## CRITIQUE_SCREEN_2026_08_25
 
-**Current:** The fixed-budget matrix completed all 12 arms at seed `42`, `128`
+**Current:** The fixed-budget matrix completed all 13 arms at seed `42`, `128`
 environments, `30` workers, and `188` PPO iterations. Every arm reached
 `model_187.pt` with exit code zero and no traceback. Values below are
 60-iteration moving-average minima and late-window values from TensorBoard;
@@ -22,6 +22,7 @@ environments, `30` workers, and `188` PPO iterations. Every arm reached
 | PPO fixed 1e-3 | 0.035666 (153) | 0.035793 | 0.013171 (183) | 0.013219 | 0.000374 |
 | PPO epochs 5x4 | 0.035735 (87) | 0.035813 | 0.013199 (89) | 0.013276 | 0.000970 |
 | PPO unclipped | 0.035697 (154) | 0.035791 | 0.013169 (159) | 0.013264 | 0.003230 |
+| position-velocity | 0.035733 (174) | 0.035815 | 0.013187 (178) | 0.013226 | 0.000654 |
 
 These are stochastic training diagnostics, not policy-versus-controller
 evidence. They only shortlist paired deterministic evaluation. The PPO,
@@ -48,6 +49,14 @@ No checkpoint is promoted and the 500-iteration confirmation does not run. The
 safety and measurement infrastructure remains, but this screen provides no
 evidence for changing the policy defaults.
 
+The later `position-velocity` arm also fails promotion. Its best saved
+checkpoint, `model_140`, matched baseline survival at 91.7% and changed recovery
+and total reward per step by only +0.2% (p=0.887 and p=0.915). Its required late
+read, `model_187`, reduced survival from 79.2% to 54.2% and total reward per step
+by 5.2% (p=0.437). One policy-side worker failure affected that late read, but
+the best read already establishes only parity. Exact results and the fixed-law
+precursor are in `walking-reference.md`.
+
 The robust scenario in that original qualification was invalid: baseline and
 policy episodes fell at about 6.0 s, before the first 10 s disturbance, because
 the inertial-field randomizer changed HRP5P dynamics even at zero perturbation.
@@ -60,7 +69,8 @@ and 1.000 for standard checkpoint 180, so it still supplied no promotion signal.
 
 Quarantined workers died once in standard, once in fixed-1e-4, twice in
 fixed-1e-3, once in epochs-5x4, twice in unclipped PPO, and twice in GRU. The
-remaining seven arms had no worker death. Late-window
+position-velocity arm also lost one worker; the remaining six arms had no worker
+death. Late-window
 `controller_worker_failed` was zero in every arm, so no screen was discarded;
 the paired qualifier remains stricter and invalidates any affected run.
 
@@ -68,6 +78,8 @@ the paired qualifier remains stricter and invalidates any affected run.
 scales, observation contract, or training budget changes.
 
 **History:**
+- 2026-08-25 — the position-velocity extension produced parity at its best
+  checkpoint and degradation at its late read, so it did not advance.
 - 2026-08-25 — paired qualification selected no checkpoint, ending the
   experiment before the long-run stage.
 - 2026-08-25 — selected the standard and ankle checkpoints for deterministic

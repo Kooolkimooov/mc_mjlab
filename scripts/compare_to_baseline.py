@@ -16,7 +16,10 @@ import torch
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 
-from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import _make_env_cfg
+from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
+  WALKING_REFERENCE_SCALE,
+  _make_env_cfg,
+)
 from mc_mjlab.tasks.residual_balance.residual_balance_ppo_cfg import (
   residual_balance_ppo_cfg,
 )
@@ -354,6 +357,11 @@ def main() -> None:
     help="action space the checkpoint was trained on; a mismatch fails to load",
   )
   p.add_argument(
+    "--walking-reference",
+    action="store_true",
+    help="reconstruct the position-velocity task's three walking-reference actions",
+  )
+  p.add_argument(
     "--authority-set",
     choices=("uniform", "ankle", "sagittal", "hardware"),
     default="uniform",
@@ -409,6 +417,9 @@ def main() -> None:
     authority_set=args.authority_set,
     controller_history=args.controller_history,
     proprio_history=args.proprio_history,
+    walking_reference_velocity_scale=(
+      WALKING_REFERENCE_SCALE if args.walking_reference else None
+    ),
   )
   if args.recovery_dcm_std is not None:
     cfg.rewards["recovery_dcm"].params["std"] = args.recovery_dcm_std

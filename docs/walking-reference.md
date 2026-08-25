@@ -8,10 +8,32 @@ by the calibrated recovery authority, and becomes exactly zero when authority
 does. The live nominal reference is restored rather than assuming the installed
 controller still commands `(0.1, 0, 0)`.
 
+The first learned screen does not clear promotion. At seed 42, 128 environments,
+30 workers, and 188 PPO iterations, the 60-iteration means bottomed at
+`0.035733 m` ZMP error (window ending at iteration 174) and `0.013187 m`
+recovery DCM error (ending at 178). The final-20-iteration means were
+`0.000654` executed joint residual L2 and `0.000152` walking-reference L2.
+
+Paired deterministic reads used 16 environments for eight minutes and kept the
+first three episodes per environment and arm:
+
+| checkpoint | baseline / policy survival | recovery reward per-step delta | total reward per-step delta | worker failures |
+| --- | ---: | ---: | ---: | ---: |
+| `model_140` | 91.7% / 91.7% | +0.2%, p=0.887 | +0.2%, p=0.915 | 0 / 0 |
+| `model_187` | 79.2% / 54.2% | -2.2%, p=0.596 | -5.2%, p=0.437 | 0 / 1 |
+
+`model_140` is the saved checkpoint nearest both smoothed minima; `model_187`
+is the required later read. The best checkpoint is parity and the later one is
+worse, so neither advances to qualification or longer training. One worker death
+in the later policy arm does not explain its five additional physical falls.
+
 **Re-measure if:** controller gait speed, control period, detector attack, robot,
 or disturbance profile changes.
 
 **History:**
+- 2026-08-25 — the first learned screen found parity at its best checkpoint and
+  degradation at its final checkpoint; no walking-reference policy was
+  promoted.
 - 2026-08-25 — chosen as a deliberately broad first screen. The deterministic
   probe exercised mean planar deltas up to `0.092209 m/s` without a worker or
   controller failure; these are exploration bounds, not promoted hardware

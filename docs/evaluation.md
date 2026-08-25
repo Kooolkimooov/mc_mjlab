@@ -22,6 +22,14 @@ the dither.
 uv run python scripts/compare_to_baseline.py --checkpoint logs/.../model_499.pt
 ```
 
+Checkpoints from the `Position-Velocity` task need its additional action and
+observation layout reconstructed explicitly:
+
+```sh
+uv run python scripts/compare_to_baseline.py \
+  --checkpoint logs/.../model_187.pt --walking-reference
+```
+
 Reward-shape screens must be scored with their own width. Pass
 `--recovery-dcm-std` when it differs from the repository default; this changes
 only the reported recovery term, not the policy or simulated behavior.
