@@ -263,18 +263,19 @@ class ControllerPool:
       )
       return self._host.metadata()
     metadata: HostMetadata | None = None
-    # Construction is ~570 ms per controller and serial within a worker, so it
-    # needs a far larger budget than a step; scale it with the biggest share.
     biggest_share = max(len(ids) for ids in self._worker_env_ids)
     build_timeout = max(300.0, 30.0 * biggest_share)
-    for w in range(len(self._conns)):
-      tag, payload = self._recv(w, timeout=build_timeout)
-      if tag == "error":
-        self.close()
-        if "ImportError" in payload:
-          raise ImportError(f"mc_rtc worker failed to start:\n{payload}")
-        raise RuntimeError(f"mc_rtc worker failed to start:\n{payload}")
-      metadata = payload
+    try:
+      for w in range(len(self._conns)):
+        tag, payload = self._recv(w, timeout=build_timeout)
+        if tag == "error":
+          if "ImportError" in payload:
+            raise ImportError(f"mc_rtc worker failed to start:\n{payload}")
+          raise RuntimeError(f"mc_rtc worker failed to start:\n{payload}")
+        metadata = payload
+    except BaseException:
+      self.close()
+      raise
     assert metadata is not None
     print(f"[mc_rtc] controllers ready in {time.perf_counter() - self._t0:.1f}s")
     return metadata
@@ -397,8 +398,15 @@ class ControllerPool:
 
   def close(self) -> None:
     """Stop the workers and release the shared blocks."""
+    if self._thread_pool is not None:
+      self._thread_pool.shutdown(wait=True, cancel_futures=True)
+      self._thread_pool = None
     _shutdown_workers(self._procs, self._conns, self._shms)
-    self._procs, self._conns, self._shms = [], [], []
+    self._procs.clear()
+    self._conns.clear()
+    self._shms.clear()
+    if hasattr(self, "_finalizer") and self._finalizer.alive:
+      self._finalizer.detach()
 
   # ---- Pipe helpers. ----
 

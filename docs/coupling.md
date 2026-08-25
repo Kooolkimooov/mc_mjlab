@@ -218,6 +218,21 @@ Cleanup is registered early so it runs even if the owner's construction raises;
 the lists are captured by reference, covering the shm blocks and any respawned
 workers, since revival mutates the list slots in place.
 
+`ManagerBasedRlEnv.close()` closes only its renderer and recorder in the current
+mjlab release; it does not close action terms. A process that constructs several
+envs in sequence must therefore call `McRtcResidualActionBase.close()` before
+`env.close()`. `ControllerPool.close()` is idempotent, drains its workers and
+shared memory, and detaches the fallback finalizer. `await_ready()` also closes
+the pool on any startup exception.
+
+Measured on 2026-08-25: the first multi-scenario qualifier omitted that explicit
+action close, retaining six generations of 12 workers. Active anonymous memory
+reached 51.5 GB on a 59 GB machine, all but 220 KB of 8 GB swap was consumed,
+and the kernel invoked the OOM killer at 10:58 and 11:32. The terminal error was
+a later 300 s worker-startup timeout caused by the memory pressure, not the root
+failure. A two-checkpoint same-process live check after the fix left no
+qualification or forkserver worker process behind.
+
 ### Controller failure is one episode, not the run
 
 mc_mujoco stops the whole sim when `run()` reports failure. A trainer cannot: the

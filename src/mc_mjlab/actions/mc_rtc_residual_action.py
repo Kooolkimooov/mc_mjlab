@@ -191,6 +191,10 @@ class McRtcResidualActionBase(BaseAction):
         flush=True,
       )
 
+  def close(self) -> None:
+    """Stop controller workers and release their shared memory."""
+    self._pool.close()
+
   def _setup_residual(self, cfg: McRtcResidualActionCfg) -> None:
     """Slice scale/offset/clip down to the residual actuator subset."""
     self._residual_ids: torch.Tensor | None = None

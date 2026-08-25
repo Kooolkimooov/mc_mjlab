@@ -17,6 +17,7 @@ from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 from mjlab.rl import RslRlVecEnvWrapper
 from mjlab.utils.lab_api.math import quat_apply
 
+from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
 from mc_mjlab.tasks import mdp
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import _make_env_cfg
 from mc_mjlab.tasks.residual_balance.residual_balance_ppo_cfg import (
@@ -302,6 +303,10 @@ def run_checkpoint(checkpoint: Path, scenario: str, seed: int, args) -> list[Epi
         pairs[env_id] = counts[env_id][int(current_policy[env_id])]
     disturbances.clear(done)
     _reset_done(env, done)
+  action = env.action_manager.get_term("mc_rtc_residual")
+  if not isinstance(action, McRtcResidualActionBase):
+    raise TypeError(f"unexpected residual action type: {type(action).__name__}")
+  action.close()
   env.close()
   return episodes
 
