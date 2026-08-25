@@ -68,6 +68,39 @@ actuator delay, or effort-limit implementations change.
   authority `0.516`, duty `0.722%`, exact inactive zeroing, and impulse error
   `5.2e-08 m/s`.
 
+## map_com_stability
+
+**Current:** `scripts/map_com_stability.py` changes the compiled simulator model
+while leaving mc_rtc's robot model nominal. It moves the root torso's inertial
+position enough to produce the requested initial whole-robot COM offset, then
+runs zero-residual, push-free walking. This bypasses the invalid per-world
+inertial-field expansion path.
+
+A seed-42 screen used 4 environments per point and a 12 s horizon. Every point
+had zero worker failures. The transition intervals are:
+
+| initial COM offset | last 4/4 survival | partial survival | first 0/4 survival |
+| --- | ---: | ---: | ---: |
+| backward x | -55 mm | none sampled | -60 mm |
+| forward x | +80 mm | +85 mm: 2/4; +90 mm: 1/4 | +95 mm |
+| negative y | -45 mm | -50 mm: 3/4; -55 mm: 1/4 | -60 mm |
+| positive y | +50 mm | none sampled | +55 mm |
+| vertical z | -100 to +100 mm | none | not reached |
+
+The intended `+-5 mm` COM range is therefore well inside this short-horizon
+envelope. These are aggregate initial offsets produced through the torso, not
+independent per-link errors, and the extreme torso shifts are diagnostic rather
+than plausible morphology. Run with a longer horizon and more seeds before
+treating a boundary as a controller guarantee.
+
+**Re-measure if:** the robot model, walking controller, installed gait, encoder
+bias, horizon, or method used to distribute COM error changes.
+
+**History:**
+- 2026-08-25 — added the compiled-model sweep after runtime COM randomization
+  falsely made 7/8 nominal-value environments fall. Genuine compiled COM error
+  remained stable across at least `+-40 mm` on every axis.
+
 ## push_velocity
 
 **Current:** `0.4` — the task's difficulty dial. Both directions ruin training:
