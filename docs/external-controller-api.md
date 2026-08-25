@@ -75,14 +75,19 @@ and reads the applied value back through the output block. The host resolves the
 controller and datastore every step because reset rebuilds both. Missing
 callbacks fail during host configuration.
 
-The provisional limits are `(0.20, 0.15, 0.30)` in m/s, m/s, and rad/s. Step
-timing, CoM height, and torso pitch remain excluded until separate phase-safe
-sweeps justify bounds.
+The scalar transport also carries paired `double` callbacks with applied-value
+and activation-baseline readback. Step duration was safe to manipulate and
+restore but failed its causal promotion gate, so it is available only to the
+probe. CoM height and torso pitch remain excluded because neither has a getter
+that can restore the live controller state exactly.
 
 **Re-measure if:** the installed walking controller changes its callbacks,
 nominal velocity, recovery detector, or control period.
 
 **History:**
+- 2026-08-25 — an eight-world-per-arm confirmation improved two-second recovery
+  DCM error only 2.247% at `+0.10 s` and 1.519% at `+0.20 s`; both were below
+  the 5% gate, so the provisional timing task was removed.
 - 2026-08-25 — implemented and live-tested generic getter/setter invocation,
   gated shared-memory command transport, exact nominal restoration, applied
   readback, and the registered `Position-Velocity` task.

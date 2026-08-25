@@ -108,6 +108,9 @@ class McRtcResidualActionCfg(BaseActionCfg):
   )
   """Maximum physical command change per second while authority is nonzero."""
 
+  datastore_scalar_commands: tuple[tuple[str, str], ...] = ()
+  """Probe-only paired scalar getter/setters; values are baseline-relative."""
+
 
 class McRtcResidualActionBase(BaseAction):
   """mc_rtc residual action base: steps controllers via a pool, adds RL residual."""
@@ -130,6 +133,7 @@ class McRtcResidualActionBase(BaseAction):
 
     self._setup_residual(cfg)
     self._setup_walking_reference(cfg)
+    self._setup_datastore_scalar_commands(cfg)
     self._setup_residual_printing(cfg)
 
     self._steps_since_run = torch.zeros(
@@ -161,6 +165,7 @@ class McRtcResidualActionBase(BaseAction):
       self.output_channels,
       cfg.controller_vectors,
       self._datastore_vector_commands,
+      self._datastore_scalar_commands,
     )
     # refJointOrder is only known now, so the gain override is applied here.
     if cfg.pd_gains_path is not None:
@@ -295,6 +300,15 @@ class McRtcResidualActionBase(BaseAction):
     self._action_dim += 3
     self._raw_actions = torch.zeros(self.num_envs, self._action_dim, device=self.device)
 
+  def _setup_datastore_scalar_commands(self, cfg: McRtcResidualActionCfg) -> None:
+    """Allocate probe-controlled scalar datastore deltas without policy actions."""
+    self._datastore_scalar_commands = tuple(cfg.datastore_scalar_commands)
+    count = len(self._datastore_scalar_commands)
+    self._datastore_scalar_active = torch.zeros(
+      self.num_envs, count, dtype=torch.bool, device=self.device
+    )
+    self._datastore_scalar_delta = torch.zeros(self.num_envs, count, device=self.device)
+
   def _setup_hardware_bounds(self) -> None:
     """Resolve RobotModule position, velocity, and effort bounds to target order."""
     position = mc_rtc.get_position_bounds(self._mc_rtc_robot_name)
@@ -406,6 +420,14 @@ class McRtcResidualActionBase(BaseAction):
       v: torch.zeros(self.num_envs, 3, device=self.device)
       for v in self.cfg.controller_vectors
     }
+    self._controller_scalars = {
+      getter: torch.zeros(self.num_envs, device=self.device)
+      for getter, _ in self._datastore_scalar_commands
+    }
+    self._controller_scalar_baselines = {
+      getter: torch.zeros(self.num_envs, device=self.device)
+      for getter, _ in self._datastore_scalar_commands
+    }
     # Latched per env until reset; read by the `controller_failed` termination
     # term so a QP giving up ends that episode instead of the whole run.
     self.controller_failed = torch.zeros(
@@ -432,6 +454,15 @@ class McRtcResidualActionBase(BaseAction):
       new_vectors = self._io.read_controller_vectors(self._out_np, env_indices)
       for v, values in new_vectors.items():
         self._controller_vectors[v][env_indices_t] = values
+    if self._controller_scalars:
+      new_scalars = self._io.read_datastore_scalar_commands(self._out_np, env_indices)
+      for name, values in new_scalars.items():
+        self._controller_scalars[name][env_indices_t] = values
+      new_baselines = self._io.read_datastore_scalar_baselines(
+        self._out_np, env_indices
+      )
+      for name, values in new_baselines.items():
+        self._controller_scalar_baselines[name][env_indices_t] = values
     # Latch (not assign): the flags must survive until this env is reset, even
     # though the substeps in between keep collecting.
     qp_failed, worker_failed = self._io.read_controller_failed(
@@ -455,6 +486,46 @@ class McRtcResidualActionBase(BaseAction):
         f"controller vector {name!r} is not collected; add it to the action "
         f"term's `controller_vectors` (have: {sorted(self._controller_vectors)})"
       ) from None
+
+  def controller_scalar(self, getter: str) -> torch.Tensor:
+    """Latest scalar datastore getter value collected from each controller."""
+    try:
+      return self._controller_scalars[getter]
+    except KeyError:
+      raise KeyError(
+        f"controller scalar {getter!r} is not configured; have: "
+        f"{sorted(self._controller_scalars)}"
+      ) from None
+
+  def controller_scalar_baseline(self, getter: str) -> torch.Tensor:
+    """Baseline captured when a scalar datastore command became active."""
+    try:
+      return self._controller_scalar_baselines[getter]
+    except KeyError:
+      raise KeyError(
+        f"controller scalar {getter!r} is not configured; have: "
+        f"{sorted(self._controller_scalar_baselines)}"
+      ) from None
+
+  def set_datastore_scalar_delta(
+    self, getter: str, active: torch.Tensor, delta: torch.Tensor
+  ) -> None:
+    """Set one probe-only scalar command as a delta from its live baseline."""
+    getters = [pair[0] for pair in self._datastore_scalar_commands]
+    try:
+      index = getters.index(getter)
+    except ValueError:
+      raise KeyError(
+        f"scalar datastore getter {getter!r} is not configured; have: {getters}"
+      ) from None
+    expected = (self.num_envs,)
+    if tuple(active.shape) != expected or tuple(delta.shape) != expected:
+      raise ValueError(
+        f"scalar command shapes {tuple(active.shape)} and {tuple(delta.shape)}, "
+        f"expected {expected}"
+      )
+    self._datastore_scalar_active[:, index].copy_(active)
+    self._datastore_scalar_delta[:, index].copy_(delta)
 
   def consume_torque_peak(self) -> torch.Tensor:
     """Peak |joint torque| since the last call, over the target joints; resets it."""
@@ -611,6 +682,8 @@ class McRtcResidualActionBase(BaseAction):
     self._walking_reference_executed[env_ids] = 0.0
     self._previous_walking_reference_executed[env_ids] = 0.0
     self._walking_reference_active[env_ids] = False
+    self._datastore_scalar_active[env_ids] = False
+    self._datastore_scalar_delta[env_ids] = 0.0
     self._projection_mask[env_ids] = False
     if self._recovery_authority is not None:
       self._recovery_authority.reset(env_ids)
@@ -630,6 +703,10 @@ class McRtcResidualActionBase(BaseAction):
     self._seed_interpolation(env_indices_t)
     self._has_staged_control[env_indices_t] = False
     for values in self._controller_vectors.values():
+      values[env_indices_t] = 0.0
+    for values in self._controller_scalars.values():
+      values[env_indices_t] = 0.0
+    for values in self._controller_scalar_baselines.values():
       values[env_indices_t] = 0.0
     # The pool has re-initialized these controllers, so clear the latches too.
     self.controller_failed[env_indices_t] = False
@@ -673,6 +750,11 @@ class McRtcResidualActionBase(BaseAction):
         self._in_np,
         self._walking_reference_active,
         self._walking_reference_executed,
+      )
+      self._io.write_datastore_scalar_commands(
+        self._in_np,
+        self._datastore_scalar_active,
+        self._datastore_scalar_delta,
       )
       self._pool.dispatch_controller_step(run_indices)
 

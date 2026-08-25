@@ -30,6 +30,7 @@ are *deciding* something, not when you are reading the line that implements it.
 | [observations.md](observations.md) | noise levels, the actor/critic split, the `controller_planned_*` terms |
 | [external-controller-api.md](external-controller-api.md) | versioned deployment boundary for recovery state, residuals, and references |
 | [walking-reference.md](walking-reference.md) | datastore velocity action, bounds, and deterministic gain screen |
+| [controller-timing.md](controller-timing.md) | datastore inventory, generic scalar transport, and step-duration screen |
 | [evaluation.md](evaluation.md) | how the measurement scripts avoid biasing a result |
 | [coupling.md](coupling.md) | action term, pool and host: interpolation, dispatch lag, reset ordering |
 | [robots.md](robots.md) | collision geoms, PD gains, extra sensors, refJointOrder, assets |

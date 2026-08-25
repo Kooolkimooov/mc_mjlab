@@ -91,10 +91,10 @@ minibatches, so a wider first layer costs no wall clock.
 `CONTROLLER_HISTORY`. The two sole velocimeters (`left_foot_lin_vel`,
 `right_foot_lin_vel`) remain available only to the critic and reward.
 
-The actor terms are deployable fallbacks. mc_rtc's walking plan — the
-FSM's phase, the next planned footstep, time to touchdown — lives in the
-datastore, which the Python bindings do not expose (see `CLAUDE.md`). It is out of
-reach without patching them.
+The actor terms remain the deployment-compatible fallback. The locally patched
+bindings can now read the walking datastore, including timing, support-foot,
+DCM, and ZMP callbacks. None is added to the policy observation yet: doing so
+changes checkpoint dimensions and needs a separate causal observation screen.
 
 What is deployable: `foot_load_share` gives each foot's share of the vertical
 contact force, which is support state (double support, left single, right single)

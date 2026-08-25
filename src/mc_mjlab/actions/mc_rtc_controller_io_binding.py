@@ -105,6 +105,7 @@ class ControllerIoBinding:
     output_channels: Sequence[str],
     output_vectors: Sequence[str] = (),
     datastore_vector_commands: Sequence[tuple[str, str]] = (),
+    datastore_scalar_commands: Sequence[tuple[str, str]] = (),
   ):
     self._env = env
     self._entity = entity
@@ -114,6 +115,7 @@ class ControllerIoBinding:
     self._output_channels = tuple(output_channels)
     self._output_vectors = tuple(output_vectors)
     self._datastore_vector_commands = tuple(datastore_vector_commands)
+    self._datastore_scalar_commands = tuple(datastore_scalar_commands)
     self._num_targets = len(self._target_names)
 
     mj_model = env.sim.mj_model
@@ -210,6 +212,7 @@ class ControllerIoBinding:
       output_channels=self._output_channels,
       output_vectors=self._output_vectors,
       datastore_vector_commands=self._datastore_vector_commands,
+      datastore_scalar_commands=self._datastore_scalar_commands,
     )
 
     # Gather columns for a single fancy-indexed sensordata copy per step;
@@ -276,10 +279,28 @@ class ControllerIoBinding:
       raise ValueError(
         f"datastore command values have shape {tuple(values.shape)}, expected {expected}"
       )
-    rows = in_np[:, self.layout.command_off : self.layout.in_width]
+    rows = in_np[:, self.layout.command_off : self.layout.scalar_command_off]
     rows[:, 0::4] = active.detach().cpu().numpy().reshape(-1, 1)
     shaped = values.detach().cpu().numpy().reshape(self._env.num_envs, count, 3)
     rows.reshape(self._env.num_envs, count, 4)[:, :, 1:] = shaped
+
+  def write_datastore_scalar_commands(
+    self, in_np: np.ndarray, active: torch.Tensor, values: torch.Tensor
+  ) -> None:
+    """Write active flags and scalar deltas into the controller input block."""
+    count = len(self.layout.datastore_scalar_commands)
+    if count == 0:
+      return
+    expected = (self._env.num_envs, count)
+    if tuple(active.shape) != expected or tuple(values.shape) != expected:
+      raise ValueError(
+        f"scalar datastore commands have shapes {tuple(active.shape)} and "
+        f"{tuple(values.shape)}, expected {expected}"
+      )
+    rows = in_np[:, self.layout.scalar_command_off : self.layout.in_width]
+    shaped = rows.reshape(self._env.num_envs, count, 2)
+    shaped[:, :, 0] = active.detach().cpu().numpy()
+    shaped[:, :, 1] = values.detach().cpu().numpy()
 
   def reset_controller_input(self, in_np: np.ndarray) -> None:
     """Write the encoder and root columns the hosts read on reset/init."""
@@ -295,7 +316,7 @@ class ControllerIoBinding:
       in_np[:, ro : ro + 3] = self._entity.data.root_link_pos_w.cpu().numpy()
       in_np[:, ro + 3 : ro + 7] = self._entity.data.root_link_quat_w.cpu().numpy()
     in_np[:, ro : ro + 3] -= self._env_origins_np
-    if self.layout.datastore_vector_commands:
+    if self.layout.datastore_vector_commands or self.layout.datastore_scalar_commands:
       in_np[:, self.layout.command_off : self.layout.in_width] = 0.0
 
   def read_controller_output(
@@ -322,6 +343,30 @@ class ControllerIoBinding:
         rows[:, off + 3 * i : off + 3 * i + 3], dtype=dtype, device=self._device
       )
       for i, name in enumerate(self._output_vectors)
+    }
+
+  def read_datastore_scalar_commands(
+    self, out_np: np.ndarray, env_indices: list[int]
+  ) -> dict[str, torch.Tensor]:
+    """Unpack scalar command getter values for ``env_indices``."""
+    off = self.layout.scalar_command_output_off
+    rows = out_np[env_indices]
+    dtype = torch.get_default_dtype()
+    return {
+      getter: torch.tensor(rows[:, off + 2 * i], dtype=dtype, device=self._device)
+      for i, (getter, _) in enumerate(self._datastore_scalar_commands)
+    }
+
+  def read_datastore_scalar_baselines(
+    self, out_np: np.ndarray, env_indices: list[int]
+  ) -> dict[str, torch.Tensor]:
+    """Unpack captured scalar command baselines for ``env_indices``."""
+    off = self.layout.scalar_command_output_off
+    rows = out_np[env_indices]
+    dtype = torch.get_default_dtype()
+    return {
+      getter: torch.tensor(rows[:, off + 2 * i + 1], dtype=dtype, device=self._device)
+      for i, (getter, _) in enumerate(self._datastore_scalar_commands)
     }
 
   def read_controller_failed(

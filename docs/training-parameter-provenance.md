@@ -190,7 +190,7 @@ mjlab's asymmetric actor/critic pattern.
 | `CONTROLLER_HISTORY` | `20` frames | Local-measured/design | Increased controller/gait channels from 5 to 20 to cover 0.4 s of a roughly 1 s gait cycle. |
 | controller ref position/velocity/error | 20 frames | Coupling-derived | Added because residual control requires the base controller's plan and tracking error. |
 | planned ZMP and CoM velocity | 20 frames | Local failure analysis | Added after rewards scored plan quantities the actor could not see. |
-| foot load share / sole velocities | 20 frames | Local proxy design | Sim-side proxies because mc_rtc datastore gait phase is unavailable. |
+| foot load share / sole velocities | 20 frames | Local proxy design | Deployable support-state proxies retained for checkpoint compatibility; datastore timing callbacks are currently probe-only. |
 | inferred gait phase | 20 frames | External-form / local-measured | Sin/cos representation follows `leo_mjlab`'s phase convention; the load-difference phase-plane estimator is local. `PHASE_RATE_REF=7.1` is measured RMS `|d_dot|`. |
 | minimum normal force | `20` N | Unresolved local constant | Shared hidden default for load share, ZMP/DCM, slip, and gait phase. Git records no calibration for the exact threshold. |
 | critic push recency | `tau=2.0` s | Local-design | Bounded privileged input; shares the two-second recovery timescale but has no recorded external numeric root. |

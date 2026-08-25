@@ -183,7 +183,9 @@ From mjlab down to mc_rtc:
   per-joint `output_channels` it can publish whole-controller 3-vectors
   (`VECTOR_OUTPUTS` → the action cfg's `controller_vectors`, read back with
   `controller_vector(name)`), which is how `mdp.zmp_tracking` gets the
-  controller's planned ZMP; those are not interpolated across substeps.
+  controller's planned ZMP; those are not interpolated across substeps. Paired
+  scalar datastore probes capture a live baseline inside each worker, publish
+  applied and baseline values, and restore it exactly when inactive.
 - `tasks/` — follows mjlab's own task layout, which is why this repo ships no
   train/play scripts: mjlab's console scripts drive it and tyro generates the
   `--env.*` / `--agent.*` overrides from the cfg dataclasses. `tasks/__init__.py`

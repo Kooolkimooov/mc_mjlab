@@ -261,6 +261,8 @@ class IoLayout:
   output_vectors: tuple[str, ...] = ()
   # (getter, setter) datastore callbacks for gated Vector3 delta commands.
   datastore_vector_commands: tuple[tuple[str, str], ...] = ()
+  # (getter, setter) datastore callbacks for gated scalar delta commands.
+  datastore_scalar_commands: tuple[tuple[str, str], ...] = ()
 
   @property
   def root_off(self) -> int:
@@ -276,11 +278,15 @@ class IoLayout:
 
   @property
   def in_width(self) -> int:
-    return self.command_off + 4 * len(self.datastore_vector_commands)
+    return self.scalar_command_off + 2 * len(self.datastore_scalar_commands)
 
   @property
   def command_off(self) -> int:
     return self.wrench_off + 6 * len(self.wrenches)
+
+  @property
+  def scalar_command_off(self) -> int:
+    return self.command_off + 4 * len(self.datastore_vector_commands)
 
   @property
   def status_off(self) -> int:
@@ -292,6 +298,10 @@ class IoLayout:
 
   @property
   def out_width(self) -> int:
+    return self.scalar_command_output_off + 2 * len(self.datastore_scalar_commands)
+
+  @property
+  def scalar_command_output_off(self) -> int:
     return self.vector_off + 3 * len(self.output_vectors)
 
 
@@ -429,6 +439,12 @@ class ControllerHost:
     self._layout: IoLayout | None = None
     self._zero_base = np.zeros(len(self._ref_joint_order), dtype=np.float64)
     self._command_baselines: list[list[Any | None]] = [[] for _ in self._controllers]
+    self._scalar_command_baselines: list[list[float | None]] = [
+      [] for _ in self._controllers
+    ]
+    self._scalar_command_last_baselines: list[list[float | None]] = [
+      [] for _ in self._controllers
+    ]
 
   def metadata(self) -> HostMetadata:
     return self._metadata
@@ -455,7 +471,14 @@ class ControllerHost:
     self._command_baselines = [
       [None] * len(layout.datastore_vector_commands) for _ in self._controllers
     ]
-    if layout.datastore_vector_commands:
+    self._scalar_command_baselines = [
+      [None] * len(layout.datastore_scalar_commands) for _ in self._controllers
+    ]
+    self._scalar_command_last_baselines = [
+      [None] * len(layout.datastore_scalar_commands) for _ in self._controllers
+    ]
+    command_pairs = layout.datastore_vector_commands + layout.datastore_scalar_commands
+    if command_pairs:
       datastore = self._controllers[0].controller().datastore()
       if not hasattr(datastore, "call"):
         raise RuntimeError(
@@ -463,16 +486,25 @@ class ControllerHost:
           "binding with generic datastore accessor support"
         )
       missing = [
-        key
-        for pair in layout.datastore_vector_commands
-        for key in pair
-        if not datastore.has(key)
+        key for pair in command_pairs for key in pair if not datastore.has(key)
       ]
       if missing:
         raise ValueError(f"controller datastore is missing callbacks {missing}")
       for getter, setter in layout.datastore_vector_commands:
         current = datastore.call(getter)
         datastore.call(setter, current)
+      for getter, setter in layout.datastore_scalar_commands:
+        current = datastore.call(getter)
+        if isinstance(current, bool):
+          raise TypeError(f"datastore getter {getter!r} returned bool, expected scalar")
+        value = float(current)
+        if not math.isfinite(value):
+          raise ValueError(f"datastore getter {getter!r} returned {value}")
+        setter_type = datastore.type(setter)
+        if not setter_type.startswith("std::function<void (double"):
+          raise TypeError(
+            f"datastore setter {setter!r} has type {setter_type}, expected double"
+          )
 
   def _output_guard(
     self, env_id: int, hot: bool = False
@@ -544,12 +576,18 @@ class ControllerHost:
         # Whatever made the QP give up is gone with the new state.
         self._failed[local] = False
         self._command_baselines[local] = [None] * len(layout.datastore_vector_commands)
+        self._scalar_command_baselines[local] = [None] * len(
+          layout.datastore_scalar_commands
+        )
+        self._scalar_command_last_baselines[local] = [None] * len(
+          layout.datastore_scalar_commands
+        )
 
   def _apply_datastore_commands(self, controller, local: int, row: np.ndarray) -> None:
-    """Apply active Vector3 deltas and restore each captured baseline exactly."""
+    """Apply active datastore deltas and restore captured baselines exactly."""
     layout = self._layout
     assert layout is not None
-    if not layout.datastore_vector_commands:
+    if not (layout.datastore_vector_commands or layout.datastore_scalar_commands):
       return
     datastore = controller.controller().datastore()
     for index, (getter, setter) in enumerate(layout.datastore_vector_commands):
@@ -571,6 +609,19 @@ class ControllerHost:
       elif baseline is not None:
         datastore.call(setter, baseline)
         self._command_baselines[local][index] = None
+    for index, (getter, setter) in enumerate(layout.datastore_scalar_commands):
+      off = layout.scalar_command_off + 2 * index
+      active = row[off] > 0.0
+      baseline = self._scalar_command_baselines[local][index]
+      if active:
+        if baseline is None:
+          baseline = float(datastore.call(getter))
+          self._scalar_command_baselines[local][index] = baseline
+          self._scalar_command_last_baselines[local][index] = baseline
+        datastore.call(setter, baseline + float(row[off + 1]))
+      elif baseline is not None:
+        datastore.call(setter, baseline)
+        self._scalar_command_baselines[local][index] = None
 
   def step_env(self, env_id: int, in_arr: np.ndarray, out_arr: np.ndarray) -> None:
     """Feed one env's input row to its controller, run it, write q/alpha out."""
@@ -696,7 +747,7 @@ class ControllerHost:
         # unset) reads 0.0; consumers treat that as "no command".
         out_row[base + k] = values[j][0] if j != -1 and len(values[j]) > 0 else 0.0
 
-    if self._vector_readers:
+    if self._vector_readers or layout.datastore_scalar_commands:
       # Re-resolved every step, never cached: a reset rebuilds the controller and
       # a stale handle segfaults a reset later. docs/coupling.md#vector_outputs
       control = controller.controller()
@@ -708,6 +759,14 @@ class ControllerHost:
         out_row[base + 1] = v.y()
         out_row[base + 2] = v.z()
         base += 3
+      base = layout.scalar_command_output_off
+      datastore = control.datastore()
+      for index, (getter, _) in enumerate(layout.datastore_scalar_commands):
+        value = float(datastore.call(getter))
+        baseline = self._scalar_command_last_baselines[local][index]
+        out_row[base] = value
+        out_row[base + 1] = value if baseline is None else baseline
+        base += 2
 
   def step_envs(
     self, env_ids: Sequence[int], in_arr: np.ndarray, out_arr: np.ndarray

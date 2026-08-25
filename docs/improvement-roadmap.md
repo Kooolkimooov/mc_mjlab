@@ -178,17 +178,19 @@ Screen adaptive scheduling against fixed learning rates `1e-4`, `3e-4`, and
 
 ## EXTERNAL_CONTROLLER_API
 
-**Current:** the local mc_rtc binding provides generic datastore accessor calls,
-and this repository implements a recovery-gated walking-reference velocity
-screen. The new task adds three bounded, slew-limited actions, exact restoration
-of the live nominal value, actual-command readback, and the signed deployable DCM
-error needed to learn the useful direction. Existing task IDs and checkpoint
-dimensions are unchanged.
+**Current:** the local mc_rtc binding provides generic datastore accessor calls.
+This repository implements recovery-gated walking-reference velocity plus
+generic paired scalar probes with live-baseline restoration and applied-command
+readback. Existing task IDs and checkpoint dimensions are unchanged.
 
 **Re-measure if:** the external controller exposes datastore bindings or a
 versioned residual interface.
 
 **History:**
+- 2026-08-25 — enumerated the live datastore without invoking callbacks. Step
+  duration was the only new paired, restorable scalar balance input, but its
+  eight-world confirmation improved DCM error at most 2.247%; no timing task
+  advanced to training.
 - 2026-08-25 — after explicit slew limiting, a fixed 0.35 m/s-equivalent
   sagittal impulse gave two envs per gain: DCM error `0.049570 m` at zero,
   `0.050517 m` at `-2 s^-1`, and `0.063163/0.077178 m` at `+2/+4 s^-1`.

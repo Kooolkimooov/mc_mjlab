@@ -236,7 +236,7 @@ def _make_env_cfg(
     "controller_planned_com_vel": ObservationTermCfg(
       func=mdp.controller_planned_com_velocity, history_length=controller_history
     ),
-    # mc_rtc's gait plan is unreachable, so deployable support state stands in.
+    # Deployment-compatible support state; datastore timing stays probe-only.
     "foot_load_share": ObservationTermCfg(
       func=mdp.foot_load_share, history_length=controller_history
     ),
