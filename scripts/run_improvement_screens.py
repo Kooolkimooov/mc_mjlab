@@ -8,7 +8,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from mc_mjlab.tasks.residual_balance import POSITION_TASK_ID
+from mc_mjlab.tasks.residual_balance import POSITION_TASK_ID, POSITION_VELOCITY_TASK_ID
 from mc_mjlab.utils.task_naming import get_task_name
 
 TASK_DIR = "residual_balance"
@@ -30,6 +30,7 @@ def task_id(suffix: str) -> str:
 
 SCREENS = (
   Screen("standard", POSITION_TASK_ID),
+  Screen("position-velocity", POSITION_VELOCITY_TASK_ID),
   Screen("authority-ankle", task_id("ankle")),
   Screen("authority-sagittal", task_id("sagittal")),
   Screen("authority-hardware", task_id("hardware")),
