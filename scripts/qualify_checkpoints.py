@@ -19,6 +19,10 @@ from mjlab.utils.lab_api.math import quat_apply
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
 from mc_mjlab.tasks import mdp
+from mc_mjlab.tasks.residual_balance.qualification_strata import (
+  StratifiedDiagnostics,
+  StratumRecord,
+)
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import _make_env_cfg
 from mc_mjlab.tasks.residual_balance.residual_balance_ppo_cfg import (
   residual_balance_ppo_cfg,
@@ -221,7 +225,9 @@ def _reset_done(env, env_ids: torch.Tensor) -> None:
   env.sim.forward()
 
 
-def run_checkpoint(checkpoint: Path, scenario: str, seed: int, args) -> list[Episode]:
+def run_checkpoint(
+  checkpoint: Path, scenario: str, seed: int, args
+) -> tuple[list[Episode], list[StratumRecord]]:
   """Run one checkpoint and scenario to a fixed paired episode count."""
   torch.manual_seed(seed)
   cfg = scenario_cfg(scenario, seed, args)
@@ -239,6 +245,13 @@ def run_checkpoint(checkpoint: Path, scenario: str, seed: int, args) -> list[Epi
     map_location=args.device,
   )
   policy = runner.get_inference_policy(device=args.device)
+  residual_term = env.action_manager.get_term("mc_rtc_residual")
+  if not isinstance(residual_term, McRtcResidualActionBase):
+    raise TypeError(f"unexpected residual action type: {type(residual_term).__name__}")
+  recovery_s = float(env.reward_manager.get_term_cfg("recovery_dcm").params["window_s"])
+  stratified = StratifiedDiagnostics(
+    env, residual_term, DISTURBANCE_WARMUP_S, recovery_s
+  )
   disturbances = PairedDisturbances(env, scenario, seed)
   counts = [[0, 0] for _ in range(env.num_envs)]
   current_policy = torch.tensor(
@@ -252,6 +265,7 @@ def run_checkpoint(checkpoint: Path, scenario: str, seed: int, args) -> list[Epi
     env.num_envs, env.action_manager.total_action_dim, device=env.device
   )
   episodes: list[Episode] = []
+  strata: list[StratumRecord] = []
   term_names = env.termination_manager.active_terms
   reward_names = env.reward_manager.active_terms
   env.reset()
@@ -265,6 +279,7 @@ def run_checkpoint(checkpoint: Path, scenario: str, seed: int, args) -> list[Epi
     _, _, terminated, time_outs, _ = env.step(action)
     policy.reset(terminated | time_outs)
     disturbances.after_step()
+    stratified.capture(active)
     done = (terminated | time_outs).nonzero(as_tuple=False).flatten()
     if done.numel() == 0:
       continue
@@ -273,10 +288,24 @@ def run_checkpoint(checkpoint: Path, scenario: str, seed: int, args) -> list[Epi
       name: env.reward_manager._episode_sums[name][done].tolist()
       for name in reward_names
     }
+    termination_terms = {
+      name: env.termination_manager.get_term(name) for name in term_names
+    }
     termination_values = {
-      name: env.termination_manager.get_term(name)[done].tolist() for name in term_names
+      name: values[done].tolist() for name, values in termination_terms.items()
     }
     lengths = env.episode_length_buf[done].tolist()
+    strata.extend(
+      stratified.finish(
+        str(checkpoint),
+        scenario,
+        seed,
+        done,
+        pairs,
+        current_policy,
+        termination_terms,
+      )
+    )
     for row, env_id in enumerate(done.tolist()):
       if not bool(active[env_id]):
         continue
@@ -305,12 +334,9 @@ def run_checkpoint(checkpoint: Path, scenario: str, seed: int, args) -> list[Epi
         pairs[env_id] = counts[env_id][int(current_policy[env_id])]
     disturbances.clear(done)
     _reset_done(env, done)
-  action = env.action_manager.get_term("mc_rtc_residual")
-  if not isinstance(action, McRtcResidualActionBase):
-    raise TypeError(f"unexpected residual action type: {type(action).__name__}")
-  action.close()
+  residual_term.close()
   env.close()
-  return episodes
+  return episodes, strata
 
 
 def _episode_value(episode: Episode, name: str) -> float:
@@ -437,6 +463,115 @@ def summarize(episodes: list[Episode]) -> dict:
   return summary
 
 
+def _paired_stratum_value(
+  records: list[StratumRecord], value
+) -> dict[str, float | int | str | dict]:
+  """Summarize one stratum value with environment- or seed-clustered pairing."""
+  grouped = {
+    (record.seed, record.env_id, record.pair, record.arm): record for record in records
+  }
+  arm_values: dict[str, list[float]] = {"baseline": [], "policy": []}
+  env_differences: dict[tuple[int, int], list[float]] = {}
+  for seed, env_id, pair, arm in grouped:
+    if arm != "baseline":
+      continue
+    baseline = grouped[(seed, env_id, pair, "baseline")]
+    policy = grouped.get((seed, env_id, pair, "policy"))
+    if policy is None:
+      continue
+    base_value = float(value(baseline))
+    policy_value = float(value(policy))
+    if not math.isfinite(base_value) or not math.isfinite(policy_value):
+      continue
+    arm_values["baseline"].append(base_value)
+    arm_values["policy"].append(policy_value)
+    env_differences.setdefault((seed, env_id), []).append(policy_value - base_value)
+  env_clusters = {
+    key: sum(values) / len(values) for key, values in env_differences.items()
+  }
+  seed_clusters: dict[int, list[float]] = {}
+  for (seed, _), difference in env_clusters.items():
+    seed_clusters.setdefault(seed, []).append(difference)
+  if len(seed_clusters) > 1:
+    clusters = [sum(values) / len(values) for values in seed_clusters.values()]
+    cluster_level = "seed"
+  else:
+    clusters = list(env_clusters.values())
+    cluster_level = "environment"
+  paired = _normal_stats(clusters)
+  baseline = (
+    sum(arm_values["baseline"]) / len(arm_values["baseline"])
+    if arm_values["baseline"]
+    else float("nan")
+  )
+  policy = (
+    sum(arm_values["policy"]) / len(arm_values["policy"])
+    if arm_values["policy"]
+    else float("nan")
+  )
+  return {
+    "baseline": baseline,
+    "policy": policy,
+    "paired": paired,
+    "relative": paired["mean"] / baseline if baseline else float("nan"),
+    "clusters": len(clusters),
+    "cluster_level": cluster_level,
+  }
+
+
+def summarize_strata(records: list[StratumRecord]) -> dict[str, dict]:
+  """Compute paired scalar, termination, and per-joint summaries by stratum."""
+  grouped: dict[tuple[str, str, str], list[StratumRecord]] = {}
+  for record in records:
+    grouped.setdefault((record.regime, record.axis, record.direction), []).append(
+      record
+    )
+  output = {}
+  for (regime, axis, direction), group in grouped.items():
+    metrics = {
+      "duration_s": _paired_stratum_value(group, lambda record: record.duration_s),
+      **{
+        name: _paired_stratum_value(
+          group, lambda record, metric=name: record.metrics[metric]
+        )
+        for name in sorted({name for record in group for name in record.metrics})
+      },
+    }
+    terminations = {
+      name: _paired_stratum_value(
+        group, lambda record, term=name: record.terminations.get(term, 0)
+      )
+      for name in sorted({name for record in group for name in record.terminations})
+    }
+    _holm_adjust(metrics)
+    _holm_adjust(terminations)
+    joints = {}
+    joint_names = sorted({name for record in group for name in record.joints})
+    for joint_name in joint_names:
+      fields = sorted(
+        {name for record in group for name in record.joints.get(joint_name, {})}
+      )
+      joint = {
+        name: _paired_stratum_value(
+          group,
+          lambda record, field=name, joint=joint_name: record.joints[joint][field],
+        )
+        for name in fields
+      }
+      _holm_adjust(joint)
+      joints[joint_name] = joint
+    output[f"{regime}/{direction}"] = {
+      "regime": regime,
+      "axis": axis,
+      "direction": direction,
+      "episodes": len({(r.seed, r.env_id, r.pair, r.arm) for r in group}),
+      "metrics": metrics,
+      "terminations": terminations,
+      "joints": joints,
+    }
+  return output
+
+
 def _holm_adjust(summary: dict[str, dict]) -> None:
   """Attach Holm-adjusted p-values across the scenario's reported comparisons."""
   finite = sorted(
@@ -520,7 +655,12 @@ def promotion(checkpoint_summaries: dict[str, dict]) -> dict:
   }
 
 
-def write_outputs(episodes: list[Episode], report: dict, out_dir: Path) -> None:
+def write_outputs(
+  episodes: list[Episode],
+  strata: list[StratumRecord],
+  report: dict,
+  out_dir: Path,
+) -> None:
   """Write raw paired episodes to CSV and complete summaries to JSON."""
   out_dir.mkdir(parents=True, exist_ok=True)
   term_names = sorted({name for episode in episodes for name in episode.terminations})
@@ -549,6 +689,74 @@ def write_outputs(episodes: list[Episode], report: dict, out_dir: Path) -> None:
         + [episode.rewards.get(name, float("nan")) for name in reward_names]
         + [episode.metrics.get(name, float("nan")) for name in metric_names]
       )
+  stratum_term_names = sorted(
+    {name for record in strata for name in record.terminations}
+  )
+  stratum_metric_names = sorted({name for record in strata for name in record.metrics})
+  identity = [
+    "checkpoint",
+    "scenario",
+    "seed",
+    "env",
+    "pair",
+    "arm",
+    "regime",
+    "axis",
+    "direction",
+    "steps",
+    "duration_s",
+  ]
+  with (out_dir / "qualification_strata.csv").open("w", newline="") as stream:
+    writer = csv.writer(stream)
+    writer.writerow(
+      identity
+      + [f"termination/{name}" for name in stratum_term_names]
+      + [f"metric/{name}" for name in stratum_metric_names]
+    )
+    for record in strata:
+      writer.writerow(
+        [
+          record.checkpoint,
+          record.scenario,
+          record.seed,
+          record.env_id,
+          record.pair,
+          record.arm,
+          record.regime,
+          record.axis,
+          record.direction,
+          record.steps,
+          record.duration_s,
+        ]
+        + [record.terminations.get(name, 0) for name in stratum_term_names]
+        + [record.metrics.get(name, float("nan")) for name in stratum_metric_names]
+      )
+  joint_fields = sorted(
+    {name for record in strata for joint in record.joints.values() for name in joint}
+  )
+  with (out_dir / "qualification_joints.csv").open("w", newline="") as stream:
+    writer = csv.writer(stream)
+    writer.writerow(identity + ["joint"] + joint_fields)
+    for record in strata:
+      prefix = [
+        record.checkpoint,
+        record.scenario,
+        record.seed,
+        record.env_id,
+        record.pair,
+        record.arm,
+        record.regime,
+        record.axis,
+        record.direction,
+        record.steps,
+        record.duration_s,
+      ]
+      for joint_name, values in record.joints.items():
+        writer.writerow(
+          prefix
+          + [joint_name]
+          + [values.get(name, float("nan")) for name in joint_fields]
+        )
   (out_dir / "qualification.json").write_text(
     json.dumps(report, indent=2, allow_nan=True) + "\n"
   )
@@ -584,20 +792,31 @@ def main() -> None:
   scenarios = args.scenario or list(SCENARIOS)
   seeds = args.seed or [42]
   episodes: list[Episode] = []
+  strata: list[StratumRecord] = []
   summaries: dict[str, dict] = {}
   for checkpoint in checkpoints:
     print(f"[qualify] {checkpoint}", flush=True)
     by_scenario: dict[str, dict] = {}
+    by_stratum: dict[str, dict] = {}
     for scenario in scenarios:
       print(f"[qualify]   {scenario}", flush=True)
-      result = []
+      result: list[Episode] = []
+      scenario_strata: list[StratumRecord] = []
       for seed in seeds:
         print(f"[qualify]     seed {seed}", flush=True)
-        result.extend(run_checkpoint(checkpoint, scenario, seed, args))
+        seed_episodes, seed_strata = run_checkpoint(checkpoint, scenario, seed, args)
+        result.extend(seed_episodes)
+        scenario_strata.extend(seed_strata)
       episodes.extend(result)
+      strata.extend(scenario_strata)
       by_scenario[scenario] = summarize(result)
+      by_stratum[scenario] = summarize_strata(scenario_strata)
     gate = promotion(by_scenario)
-    summaries[str(checkpoint)] = {"scenarios": by_scenario, "promotion": gate}
+    summaries[str(checkpoint)] = {
+      "scenarios": by_scenario,
+      "stratified": by_stratum,
+      "promotion": gate,
+    }
     print(
       f"[qualify]   {'PASS' if gate['eligible'] else 'FAIL'}: "
       + ("all gates" if gate["eligible"] else "; ".join(gate["reasons"])),
@@ -620,15 +839,22 @@ def main() -> None:
       "controller_history": args.controller_history,
       "proprio_history": args.proprio_history,
       "recurrent": args.recurrent,
+      "strata": {
+        "startup": f"episode age <= {DISTURBANCE_WARMUP_S:g} s",
+        "recovery": "reward-configured post-disturbance window",
+        "sustained": "all remaining exposure",
+        "direction_frame": "controller base frame",
+      },
     },
     "checkpoints": summaries,
     "selected": selected,
     "selection_rule": "safety and nominal gates, then recovery/hazard/residual",
   }
-  write_outputs(episodes, report, args.out_dir)
+  write_outputs(episodes, strata, report, args.out_dir)
   print(f"[qualify] selected: {selected or 'none'}")
   print(
-    f"[qualify] outputs: {args.out_dir / 'qualification.csv'} and qualification.json"
+    f"[qualify] outputs: {args.out_dir / 'qualification.csv'}, "
+    "qualification_strata.csv, qualification_joints.csv, and qualification.json"
   )
 
 

@@ -611,6 +611,28 @@ class McRtcResidualActionBase(BaseAction):
     """Columns of the target arrays carrying the residual; ``None`` = all."""
     return self._residual_ids
 
+  @property
+  def residual_names(self) -> tuple[str, ...]:
+    """Actuator names in residual action-column order."""
+    if self._residual_ids is None:
+      return tuple(self._target_names)
+    return tuple(self._target_names[index] for index in self._residual_ids.tolist())
+
+  @property
+  def residual_scale(self) -> torch.Tensor:
+    """Absolute physical authority per normalized residual action column."""
+    return self._physical_scale
+
+  @property
+  def residual_effort_ratio(self) -> torch.Tensor:
+    """Current actuator effort divided by the RobotModule limit per residual joint."""
+    effort = self._entity.data.qfrc_actuator[:, self._target_ids].abs()
+    limit = torch.maximum(self._effort_lower.abs(), self._effort_upper.abs())
+    if self._residual_ids is not None:
+      effort = effort[:, self._residual_ids]
+      limit = limit[:, self._residual_ids]
+    return effort / limit.clamp_min(torch.finfo(effort.dtype).eps)
+
   # ---- Subclass hooks. ----
 
   @abc.abstractmethod

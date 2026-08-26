@@ -16,6 +16,9 @@ using manager-based rewards and curricula.
 - 2026-08-26 — completed the second tranche with a live reward-call recorder,
   policy-zero/checkpoint audit, shape and finite-value contracts, conditional
   denominators, and effective curriculum-weight histories.
+- 2026-08-26 — implemented the third tranche as additive qualifier outputs:
+  startup/recovery/sustained windows, body-frame push directions, attributed
+  terminations, grounded tracking, and per-joint authority/effort diagnostics.
 
 ## Scope and reading rule
 
@@ -39,15 +42,15 @@ adds a larger curriculum.
 | --- | --- | --- |
 | 1 (done) | Effective configuration and resume integrity | every new checkpoint contains a canonical audit record, a semantic resume contract, a policy-interface contract, and the active curriculum is reapplied after restoring the global counter |
 | 2 (done) | Reward audit and shape contracts | policy-zero and trained rollouts expose raw value, effective weight, weighted rate, active fraction, quantiles, and tensor shape for every reward |
-| 3 | Stratified qualification metrics | reports separate startup/sustained behavior, nominal/disturbed regimes, direction/axis, termination cause, per-joint authority, grounded masks, and recovery windows |
+| 3 (done) | Stratified qualification metrics | reports separate startup/sustained behavior, nominal/disturbed regimes, direction/axis, termination cause, per-joint authority, grounded masks, and recovery windows |
 | 4 | Unattended-run watchdog | a run can warn, preserve a checkpoint, or stop on sustained degradation without killing the inherited checkpoint or mistaking a stopped trainer for watchdog failure |
 | 5 | Achievement-gated curriculum | difficulty advances only after repeated held-out qualification, retains rehearsal of earlier stages, and rolls back on regression |
 | 6 | Objective changes | one isolated hypothesis at a time, calibrated against raw magnitudes and accepted only by the baseline-relative qualifier |
 
 Tranches 1 and 2 are implemented because later measurements are not trustworthy
 if a run can silently use different defaults, resume at the wrong curriculum
-stage, or optimize an inert or incorrectly shaped reward. Tranche 3 is the next
-recommended code change.
+stage, or optimize an inert or incorrectly shaped reward. Tranche 3 passed its
+live output contract. Tranche 4 is the next recommended code change.
 
 ## Adopt now: experiment identity and resume integrity
 
@@ -164,18 +167,15 @@ stable promotion metrics and tranche 4 provides rollback automation.
 
 ## Concrete backlog after tranche 1
 
-1. Extend `compare_to_baseline.py` output with startup/recovery/sustained windows,
-   disturbance axis/direction, failure cause, per-joint residual clipping, and
-   controller-command tracking.
-2. Add `scripts/diff_effective_manifest.py` so rejected resume contracts and
+1. Add `scripts/diff_effective_manifest.py` so rejected resume contracts and
    intentional evaluator differences are easy to inspect without loading a
    controller.
-3. Add a structured watchdog that monitors the qualifier metrics, GPU memory,
+2. Add a structured watchdog that monitors the qualifier metrics, GPU memory,
    controller-worker restarts, trainer liveness, and checkpoint age.
-4. Define curriculum promotion/rollback thresholds only after two independent
+3. Define curriculum promotion/rollback thresholds only after two independent
    seeds establish baseline variance for the new stratified metrics.
-5. Implement stage state in checkpoints, sample easier stages after promotion,
+4. Implement stage state in checkpoints, sample easier stages after promotion,
    and validate uninterrupted-versus-resumed stage traces.
-6. Run objective ablations only after these gates pass; begin with the failure
+5. Run objective ablations only after these gates pass; begin with the failure
    variable identified by the baseline-deviation map, not with a borrowed gait
    reward.

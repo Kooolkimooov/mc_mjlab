@@ -195,6 +195,47 @@ and arm; wall time never decides which episodes enter the result. The robust
 scenario is invalid for promotion if more than 5% of its baseline episodes fail
 before the first disturbance.
 
+### qualification_strata.csv
+
+The qualifier also writes `qualification_strata.csv` and
+`qualification_joints.csv`. They are additional diagnostics; the established
+promotion gates still read the original episode aggregates.
+
+Every episode step belongs to exactly one stratum:
+
+- `startup/none` covers episode age through 10 s before a disturbance.
+- `recovery/{forward,backward,left,right}` covers the live `recovery_dcm`
+  window after a recorded push. Recovery takes precedence on the first pushed
+  step, so that step cannot leak into startup or sustained exposure.
+- `sustained/none` is every remaining step, including nominal walking after the
+  startup transient and the intervals between recovery windows.
+
+Directions use the push velocity in the controller base frame. The largest
+absolute horizontal component selects sagittal versus lateral; its sign selects
+forward/backward or left/right. The raw rows remain one episode, environment,
+pair, arm, and stratum each. JSON differences are paired on those episode keys
+and then clustered by environment, or by seed when multiple seeds are present.
+Timesteps are never treated as independent samples.
+
+The stratum CSV reports grounded fraction, grounded-conditional DCM and ZMP
+errors, controller-command CoM-velocity error, foot slip, recovery gate duty,
+detector score, and actuator-demand ratio. A stratum that contains the final
+step also carries its exact termination cause; the other strata in that episode
+carry zero, which attributes rather than duplicates failures.
+
+The joint CSV reports each residual joint's physical authority scale, requested
+and executed normalized RMS, executed physical RMS, active fraction,
+near-policy-bound fraction, feasibility-projection fraction, and actuator effort
+ratio. Physical RMS and authority are radians in position mode and newton-metres
+in torque mode. Per-joint effort is sampled at policy-step endpoints; the scalar
+`max_effort_ratio` has substep coverage and remains the hard safety gate.
+
+Read a zero `active_fraction` together with gate duty: it means the joint
+delivered no residual, while a nonzero request with a zero gate means the actor
+asked but recovery authority correctly withheld it. `com_velocity_error` is the
+controller-command tracking diagnostic: lower means realized CoM motion stayed
+closer to what mc_rtc commanded in that regime.
+
 Use the zero-residual component gate before adding or widening a robustness
 term:
 

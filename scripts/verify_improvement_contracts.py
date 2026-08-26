@@ -25,6 +25,7 @@ from mc_mjlab.tasks.residual_balance.effective_training_manifest import (
   synchronize_resumed_curriculum,
   validate_effective_training_manifest,
 )
+from mc_mjlab.tasks.residual_balance.qualification_strata import classify_strata
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   _make_env_cfg,
   residual_balance_position_curriculum_env_cfg,
@@ -436,6 +437,24 @@ def verify_reward_audit() -> None:
     raise AssertionError("reward audit accepted a broadcastable (num_envs, 1) term")
 
 
+def verify_qualification_strata() -> None:
+  """Check startup, sustained, and body-frame recovery direction classification."""
+  episode_steps = torch.tensor([500, 600, 501, 600, 600, 600])
+  push_age = torch.tensor([1 << 30, 1 << 30, 1, 50, 100, 100])
+  push_velocity = torch.tensor(
+    [
+      [0.0, 0.0, 0.0],
+      [0.0, 0.0, 0.0],
+      [0.4, 0.1, 0.0],
+      [-0.4, 0.1, 0.0],
+      [0.1, 0.4, 0.0],
+      [0.1, -0.4, 0.0],
+    ]
+  )
+  strata = classify_strata(episode_steps, push_age, push_velocity, 500, 100)
+  assert strata.tolist() == [0, 1, 2, 3, 4, 5]
+
+
 def verify_resume_curriculum_synchronization() -> None:
   """Check restored counters immediately select the matching curriculum stage."""
   env = _ManifestEnv()
@@ -465,6 +484,7 @@ def main() -> None:
   verify_environment_variants()
   verify_effective_training_manifest()
   verify_reward_audit()
+  verify_qualification_strata()
   verify_resume_curriculum_synchronization()
   print("improvement contract assertions passed")
 
