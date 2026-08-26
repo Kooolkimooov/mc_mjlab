@@ -135,6 +135,23 @@ uv run play  Mc-Mjlab-Residual-Balance-Posture-Jvrc1-Position \
   --checkpoint-file <path/to/model_*.pt>
 ```
 
+Every residual-balance training run publishes a PID-bound heartbeat under
+`<run>/watchdog/`. For an unattended run, attach the cooperative monitor from a
+second tmux window:
+
+```sh
+run_dir=/absolute/path/to/the/run
+trainer_pid=$(jq -r .pid "$run_dir/watchdog/runtime.json")
+uv run python scripts/watch_training.py \
+  --pid "$trainer_pid" --run-dir "$run_dir" --max-level stop
+```
+
+It warns on stale progress, low GPU memory, controller-worker failures, and
+optional qualification regressions. A stop is honored only at an iteration
+boundary and only after a recoverable checkpoint has been acknowledged. See
+[docs/training-watchdog.md](docs/training-watchdog.md) for thresholds and
+artifacts.
+
 > [!TIP] 
 > To add a task, drop a package under `src/mc_mjlab/tasks/` whose
 > `__init__.py` calls `register_mjlab_task`; the walk picks it up with no

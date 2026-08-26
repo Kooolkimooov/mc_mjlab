@@ -21,6 +21,10 @@ from mc_mjlab.tasks.residual_balance.residual_balance_diagnostics import (
   ppo_diagnostics,
   training_budget,
 )
+from mc_mjlab.tasks.residual_balance.training_watchdog import (
+  RunnerWatchdogBridge,
+  WatchdogStop,
+)
 from mc_mjlab.utils.mc_rtc_config import get_controller_name
 
 
@@ -101,12 +105,14 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
   BUDGET_KEY = "training_budget"
   MANIFEST_KEY = "effective_training_manifest"
   CURRICULUM_KEY = "curriculum_runtime"
+  WATCHDOG_KEY = "training_watchdog"
 
   def __init__(self, env, train_cfg: dict, log_dir=None, device: str = "cpu") -> None:
     super().__init__(env, train_cfg, log_dir, device)
     self._controller_provenance = collect_controller_provenance(env)
     self._training_budget = training_budget(env.num_envs, train_cfg)
     self._effective_manifest = build_effective_training_manifest(env, train_cfg)
+    self._watchdog = RunnerWatchdogBridge(self, log_dir)
     # rsl_rl's `learn()` offers no per-iteration hook, so the one logging call it
     # makes is where the diagnostics attach. docs/ppo.md#training-diagnostics
     self.logger.log = self._log_with_diagnostics(self.logger.log)
@@ -123,12 +129,38 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
     def logging_call(*args, **kwargs):
       writer = self.logger.writer
       iteration = kwargs.get("it", args[0] if args else None)
+      diagnostics = ppo_diagnostics(self.alg)
       if writer is not None and iteration is not None:
-        for name, value in ppo_diagnostics(self.alg).items():
+        for name, value in diagnostics.items():
           writer.add_scalar(f"Diagnostics/{name}", value, iteration)
-      return log(*args, **kwargs)
+      episode_extras = list(self.logger.ep_extras)
+      result = log(*args, **kwargs)
+      if iteration is not None:
+        self._watchdog.iteration(
+          iteration,
+          diagnostics,
+          episode_extras,
+          kwargs.get("collect_time", 0.0),
+          kwargs.get("learn_time", 0.0),
+        )
+      return result
 
     return logging_call
+
+  def learn(
+    self, num_learning_iterations: int, init_at_random_ep_len: bool = False
+  ) -> None:
+    """Run training while publishing an unambiguous terminal lifecycle state."""
+    try:
+      super().learn(num_learning_iterations, init_at_random_ep_len)
+    except WatchdogStop as error:
+      print(f"[mc_mjlab] {error}")
+      self.logger.stop_logging_writer()
+    except BaseException as error:
+      self._watchdog.failed(error)
+      raise
+    else:
+      self._watchdog.completed()
 
   def save(self, path: str, infos=None) -> None:
     """Embed controller inputs in every checkpoint as well as the run directory."""
@@ -138,8 +170,10 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
       self.BUDGET_KEY: self._training_budget,
       self.MANIFEST_KEY: self._effective_manifest,
       self.CURRICULUM_KEY: curriculum_runtime_snapshot(self.env),
+      self.WATCHDOG_KEY: self._watchdog.as_config(),
     }
     super().save(path, infos)
+    self._watchdog.checkpoint_saved(path)
 
   def load(
     self,

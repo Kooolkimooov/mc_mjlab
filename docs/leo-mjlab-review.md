@@ -19,6 +19,9 @@ using manager-based rewards and curricula.
 - 2026-08-26 — implemented the third tranche as additive qualifier outputs:
   startup/recovery/sustained windows, body-frame push directions, attributed
   terminations, grounded tracking, and per-joint authority/effort diagnostics.
+- 2026-08-26 — completed the fourth tranche with PID-bound heartbeats,
+  preserve-before-stop requests, GPU/checkpoint/worker/qualification guards,
+  and distinct completion, failure, unexpected-exit, and watchdog-stop verdicts.
 
 ## Scope and reading rule
 
@@ -43,14 +46,15 @@ adds a larger curriculum.
 | 1 (done) | Effective configuration and resume integrity | every new checkpoint contains a canonical audit record, a semantic resume contract, a policy-interface contract, and the active curriculum is reapplied after restoring the global counter |
 | 2 (done) | Reward audit and shape contracts | policy-zero and trained rollouts expose raw value, effective weight, weighted rate, active fraction, quantiles, and tensor shape for every reward |
 | 3 (done) | Stratified qualification metrics | reports separate startup/sustained behavior, nominal/disturbed regimes, direction/axis, termination cause, per-joint authority, grounded masks, and recovery windows |
-| 4 | Unattended-run watchdog | a run can warn, preserve a checkpoint, or stop on sustained degradation without killing the inherited checkpoint or mistaking a stopped trainer for watchdog failure |
+| 4 (done) | Unattended-run watchdog | a run can warn, preserve a checkpoint, or stop on sustained degradation without killing the inherited checkpoint or mistaking a stopped trainer for watchdog failure |
 | 5 | Achievement-gated curriculum | difficulty advances only after repeated held-out qualification, retains rehearsal of earlier stages, and rolls back on regression |
 | 6 | Objective changes | one isolated hypothesis at a time, calibrated against raw magnitudes and accepted only by the baseline-relative qualifier |
 
 Tranches 1 and 2 are implemented because later measurements are not trustworthy
 if a run can silently use different defaults, resume at the wrong curriculum
-stage, or optimize an inert or incorrectly shaped reward. Tranche 3 passed its
-live output contract. Tranche 4 is the next recommended code change.
+stage, or optimize an inert or incorrectly shaped reward. Tranches 3 and 4
+passed their live output contracts. Tranche 5 is the next recommended code
+change.
 
 ## Adopt now: experiment identity and resume integrity
 
@@ -132,20 +136,21 @@ that a term's name often did not match the physical event it measured.
 | Change deployment scale separately | a cap that is safe during training may be too permissive at deployment; record both | later, after authority qualification |
 
 The local task already has frozen and gradual diagnostic schedules. Those remain
-diagnostics. They should not become the main curriculum until tranche 3 provides
-stable promotion metrics and tranche 4 provides rollback automation.
+diagnostics. Tranches 3 and 4 now provide their measurement and rollback gates;
+tranche 5 must still define achievement and rehearsal before either schedule can
+become the main curriculum.
 
-## Adopt later: unattended experiment operations
+## Unattended experiment operations
 
 | Idea from the range | Local interpretation | Decision |
 | --- | --- | --- |
-| Attach a watchdog to an existing trainer | accept an explicit PID/run directory and verify both before monitoring | adopt |
-| Use warn/preserve/stop levels | distinguish a noisy sample from sustained degradation | adopt |
-| Guard degradation, not inherited state | establish a post-resume baseline window before applying stop rules | adopt |
-| A stopped trainer is not watchdog failure | report clean completion separately from crash/OOM/watchdog termination | adopt |
-| Checkpoint before intervention | request or copy a recoverable checkpoint before stopping a deteriorating run | adopt where runner hooks permit |
+| Attach a watchdog to an existing trainer | accept an explicit PID/run directory and verify both before monitoring | implemented |
+| Use warn/preserve/stop levels | distinguish a noisy sample from sustained degradation | implemented |
+| Guard degradation, not inherited state | establish a post-resume baseline window before applying stop rules | implemented for workers and qualification |
+| A stopped trainer is not watchdog failure | report clean completion separately from crash/OOM/watchdog termination | implemented |
+| Checkpoint before intervention | request or copy a recoverable checkpoint before stopping a deteriorating run | implemented at the iteration boundary |
 | Queue runs behind GPU availability | preserve the exact resolved command/config and launch in tmux | adopt in Python tooling |
-| Emit a machine-readable verdict | every rung records pass/fail/ambiguous, metrics, checkpoint, and next action | adopt |
+| Emit a machine-readable verdict | every rung records pass/fail/ambiguous, metrics, checkpoint, and next action | implemented for watchdog decisions |
 | Isolate ablations | change one semantic unit at a time; cumulative ladders confound interactions | adopt |
 | Allow paired or weighted variants | if a weight is the question, run identical state samples before multiple trainings | adopt |
 | Preflight environment viability | policy zero and controller-only rollouts must pass before PPO starts | adopt |
@@ -170,12 +175,10 @@ stable promotion metrics and tranche 4 provides rollback automation.
 1. Add `scripts/diff_effective_manifest.py` so rejected resume contracts and
    intentional evaluator differences are easy to inspect without loading a
    controller.
-2. Add a structured watchdog that monitors the qualifier metrics, GPU memory,
-   controller-worker restarts, trainer liveness, and checkpoint age.
-3. Define curriculum promotion/rollback thresholds only after two independent
+2. Define curriculum promotion/rollback thresholds only after two independent
    seeds establish baseline variance for the new stratified metrics.
-4. Implement stage state in checkpoints, sample easier stages after promotion,
+3. Implement stage state in checkpoints, sample easier stages after promotion,
    and validate uninterrupted-versus-resumed stage traces.
-5. Run objective ablations only after these gates pass; begin with the failure
+4. Run objective ablations only after these gates pass; begin with the failure
    variable identified by the baseline-deviation map, not with a borrowed gait
    reward.
