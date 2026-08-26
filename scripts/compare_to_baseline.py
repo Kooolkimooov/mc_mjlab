@@ -14,7 +14,7 @@ from pathlib import Path
 
 import torch
 from mjlab.envs import ManagerBasedRlEnv
-from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
+from mjlab.rl import RslRlVecEnvWrapper
 
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   WALKING_REFERENCE_SCALE,
@@ -22,6 +22,9 @@ from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
 )
 from mc_mjlab.tasks.residual_balance.residual_balance_ppo_cfg import (
   residual_balance_ppo_cfg,
+)
+from mc_mjlab.tasks.residual_balance.residual_balance_runner import (
+  ResidualBalanceOnPolicyRunner,
 )
 
 #: Where every comparison's CSV and printed report land, beside the training logs
@@ -445,7 +448,7 @@ def main() -> None:
   # `terminated` and `time_outs` into one `dones` and this needs them apart to
   # tell a fall from a survival.
   wrapped = RslRlVecEnvWrapper(env)
-  runner = MjlabOnPolicyRunner(
+  runner = ResidualBalanceOnPolicyRunner(
     wrapped,
     asdict(residual_balance_ppo_cfg(recurrent=args.recurrent)),
     device=args.device,

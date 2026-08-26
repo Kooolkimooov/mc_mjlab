@@ -10,6 +10,13 @@ from pathlib import Path
 
 from mjlab.rl import MjlabOnPolicyRunner
 
+from mc_mjlab.tasks.residual_balance.effective_training_manifest import (
+  build_effective_training_manifest,
+  curriculum_runtime_snapshot,
+  materialize_effective_training_manifest,
+  synchronize_resumed_curriculum,
+  validate_effective_training_manifest,
+)
 from mc_mjlab.tasks.residual_balance.residual_balance_diagnostics import (
   ppo_diagnostics,
   training_budget,
@@ -92,16 +99,20 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
 
   PROVENANCE_KEY = "base_controller_provenance"
   BUDGET_KEY = "training_budget"
+  MANIFEST_KEY = "effective_training_manifest"
+  CURRICULUM_KEY = "curriculum_runtime"
 
   def __init__(self, env, train_cfg: dict, log_dir=None, device: str = "cpu") -> None:
     super().__init__(env, train_cfg, log_dir, device)
     self._controller_provenance = collect_controller_provenance(env)
     self._training_budget = training_budget(env.num_envs, train_cfg)
+    self._effective_manifest = build_effective_training_manifest(env, train_cfg)
     # rsl_rl's `learn()` offers no per-iteration hook, so the one logging call it
     # makes is where the diagnostics attach. docs/ppo.md#training-diagnostics
     self.logger.log = self._log_with_diagnostics(self.logger.log)
     if log_dir is not None and int(os.environ.get("RANK", "0")) == 0:
       _materialize_provenance(self._controller_provenance, Path(log_dir))
+      materialize_effective_training_manifest(self._effective_manifest, Path(log_dir))
       (Path(log_dir) / "training_budget.json").write_text(
         json.dumps(self._training_budget, indent=2) + "\n"
       )
@@ -125,6 +136,8 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
       **(infos or {}),
       self.PROVENANCE_KEY: self._controller_provenance,
       self.BUDGET_KEY: self._training_budget,
+      self.MANIFEST_KEY: self._effective_manifest,
+      self.CURRICULUM_KEY: curriculum_runtime_snapshot(self.env),
     }
     super().save(path, infos)
 
@@ -137,11 +150,11 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
   ) -> dict:
     """Reject a checkpoint when its recorded base controller is different."""
     infos = super().load(path, load_cfg, strict, map_location)
-    saved = (infos or {}).get(self.PROVENANCE_KEY)
-    if saved is None:
+    checkpoint_infos = infos or {}
+    saved_provenance = checkpoint_infos.get(self.PROVENANCE_KEY)
+    if saved_provenance is None:
       print(f"[mc_mjlab] checkpoint {path} predates base-controller provenance")
-      return infos
-    if _provenance_signature(saved) != _provenance_signature(
+    elif _provenance_signature(saved_provenance) != _provenance_signature(
       self._controller_provenance
     ):
       raise RuntimeError(
@@ -149,4 +162,21 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
         "configuration. Restore the YAML/PD files embedded under infos/"
         f"{self.PROVENANCE_KEY} before loading {path}."
       )
+    saved_manifest = checkpoint_infos.get(self.MANIFEST_KEY)
+    if saved_manifest is None:
+      print(f"[mc_mjlab] checkpoint {path} predates effective-config manifests")
+    else:
+      validate_effective_training_manifest(
+        saved_manifest,
+        self._effective_manifest,
+        full_resume=load_cfg is None,
+      )
+    if load_cfg is None:
+      synchronized = synchronize_resumed_curriculum(self.env, checkpoint_infos)
+      saved_curriculum = checkpoint_infos.get(self.CURRICULUM_KEY)
+      if saved_curriculum is not None and saved_curriculum != synchronized:
+        print(
+          "[mc_mjlab] curriculum targets were realigned to the restored "
+          "common_step_counter"
+        )
     return infos

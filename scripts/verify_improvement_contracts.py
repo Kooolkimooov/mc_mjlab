@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import torch
 from tensordict import TensorDict
@@ -18,6 +20,11 @@ from mc_mjlab.tasks.mdp import (
   gradual_finite_impulse_curriculum,
   interpolated_impulse_range,
 )
+from mc_mjlab.tasks.residual_balance.effective_training_manifest import (
+  build_effective_training_manifest,
+  synchronize_resumed_curriculum,
+  validate_effective_training_manifest,
+)
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   _make_env_cfg,
   residual_balance_position_curriculum_env_cfg,
@@ -29,6 +36,115 @@ from mc_mjlab.tasks.zero_init_actor import (
   ZeroInitRNNModel,
   mean_head_magnitude,
 )
+
+
+def _manifest_probe(_env, gain: float = 2.0):
+  """Provide a callable default for effective-manifest assertions."""
+  return gain
+
+
+@dataclass
+class _TermCfg:
+  """Provide the manager-term fields used by manifest assertions."""
+
+  func: Any
+  params: dict[str, Any] = field(default_factory=dict)
+  weight: float = 1.0
+
+
+@dataclass
+class _ObservationGroupCfg:
+  """Provide observation-group fields used by manifest assertions."""
+
+  terms: dict[str, _TermCfg]
+  concatenate_terms: bool = True
+  enable_corruption: bool = True
+
+
+@dataclass
+class _ActionCfg:
+  """Provide action fields used by manifest assertions."""
+
+  entity_name: str = "robot"
+  scale: float = 0.1
+  num_workers: int = 2
+
+
+class _TermManager:
+  """Expose the ordinary manager contract to manifest assertions."""
+
+  def __init__(self, terms: dict[str, _TermCfg] | None = None) -> None:
+    self.cfg = terms or {}
+    self.active_terms = list(self.cfg)
+
+  def get_term_cfg(self, name: str) -> _TermCfg:
+    """Return one configured fake term."""
+    return self.cfg[name]
+
+
+class _CurriculumManager(_TermManager):
+  """Apply a deterministic fake stage from the restored global counter."""
+
+  def __init__(self, env) -> None:
+    super().__init__()
+    self.env = env
+    self._curriculum_state = {"torque_margin": 0}
+    self.compute_calls = 0
+
+  def compute(self) -> None:
+    """Apply the fake late stage at 48,000 steps."""
+    self.compute_calls += 1
+    stage = int(self.env.common_step_counter >= 48_000)
+    self.env.reward_manager.cfg["probe"].weight = -0.5 if stage else -0.05
+    self._curriculum_state["torque_margin"] = stage
+
+
+class _ObservationManager:
+  """Expose actor observation ordering and dimensions to the manifest."""
+
+  def __init__(self) -> None:
+    term = _TermCfg(func=_manifest_probe)
+    self.cfg = {"actor": _ObservationGroupCfg(terms={"probe": term})}
+    self.active_terms = {"actor": ["probe"]}
+    self.group_obs_dim = {"actor": (1,)}
+    self.group_obs_term_dim = {"actor": [(1,)]}
+
+  def get_term_cfg(self, group: str, name: str) -> _TermCfg:
+    """Return one configured fake observation term."""
+    return self.cfg[group].terms[name]
+
+
+class _ActionManager:
+  """Expose action ordering and dimensions to the manifest."""
+
+  def __init__(self) -> None:
+    self.cfg = {"residual": _ActionCfg()}
+    self.active_terms = ["residual"]
+    self.action_term_dim = [1]
+    self.total_action_dim = 1
+
+  def get_term(self, _name: str):
+    """Return a fake built action term."""
+    return self
+
+
+class _ManifestEnv:
+  """Provide a lightweight manager-based environment contract."""
+
+  def __init__(self) -> None:
+    self.unwrapped = self
+    self.cfg = {"scene": {"num_envs": 8}, "viewer": {"width": 640}}
+    self.common_step_counter = 48_000
+    self.action_manager = _ActionManager()
+    self.observation_manager = _ObservationManager()
+    self.reward_manager = _TermManager(
+      {"probe": _TermCfg(func=_manifest_probe, weight=-0.05)}
+    )
+    self.termination_manager = _TermManager()
+    self.command_manager = _TermManager()
+    self.event_manager = _TermManager()
+    self.metrics_manager = _TermManager()
+    self.curriculum_manager = _CurriculumManager(self)
 
 
 def verify_distribution() -> None:
@@ -196,6 +312,50 @@ def verify_environment_variants() -> None:
   )
 
 
+def verify_effective_training_manifest() -> None:
+  """Check default capture, deterministic hashes, and evaluation compatibility."""
+  env = _ManifestEnv()
+  train_cfg = {
+    "actor": {"hidden_dims": [8, 4]},
+    "obs_groups": {"actor": ("actor",)},
+    "resume": False,
+  }
+  manifest = build_effective_training_manifest(env, train_cfg)
+  repeated = build_effective_training_manifest(env, train_cfg)
+  assert manifest == repeated
+  probe = manifest["record"]["managers"]["observations"]["groups"]["actor"]
+  effective_gain = probe["terms"]["probe"]["effective_parameters"]["gain"]
+  assert effective_gain == {"source": "default", "value": 2.0}
+
+  evaluation = dict(manifest)
+  evaluation["training_sha256"] = "different-training-runtime"
+  validate_effective_training_manifest(manifest, evaluation, full_resume=False)
+  try:
+    validate_effective_training_manifest(manifest, evaluation, full_resume=True)
+  except RuntimeError:
+    pass
+  else:
+    raise AssertionError("full resume accepted a changed training contract")
+
+
+def verify_resume_curriculum_synchronization() -> None:
+  """Check restored counters immediately select the matching curriculum stage."""
+  env = _ManifestEnv()
+  snapshot = synchronize_resumed_curriculum(
+    env, {"env_state": {"common_step_counter": 48_000}}
+  )
+  assert env.curriculum_manager.compute_calls == 1
+  assert env.reward_manager.cfg["probe"].weight == -0.5
+  assert snapshot["curriculum_state"]["torque_margin"] == 1
+  env.common_step_counter = 0
+  try:
+    synchronize_resumed_curriculum(env, {"env_state": {"common_step_counter": 48_000}})
+  except RuntimeError:
+    pass
+  else:
+    raise AssertionError("resume accepted an unrestored global counter")
+
+
 def main() -> None:
   """Run every local improvement-contract assertion."""
   verify_distribution()
@@ -205,6 +365,8 @@ def main() -> None:
   verify_rollout_schedule()
   verify_impulse_curricula()
   verify_environment_variants()
+  verify_effective_training_manifest()
+  verify_resume_curriculum_synchronization()
   print("improvement contract assertions passed")
 
 

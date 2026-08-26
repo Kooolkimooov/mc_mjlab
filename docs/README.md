@@ -17,6 +17,7 @@ are *deciding* something, not when you are reading the line that implements it.
 
 | File | Covers |
 | --- | --- |
+| [leo-mjlab-review.md](leo-mjlab-review.md) | exhaustive adoption matrix and implementation order from `leo_mjlab` commits `1fcdcee..bdce238` |
 | [improvement-roadmap.md](improvement-roadmap.md) | ordered critique remediation, acceptance gates, and experiment program |
 | [improvement-screens.md](improvement-screens.md) | critique screen measurements, rejected variants, and qualification shortlist |
 | [difficulty.md](difficulty.md) | `push_velocity`, `push_angular_velocity`, `warmup_s`, `episode_length_s` |

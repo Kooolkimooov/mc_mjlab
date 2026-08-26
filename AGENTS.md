@@ -199,7 +199,11 @@ From mjlab down to mc_rtc:
   that as a `[WARN]` plus traceback rather than failing.
 - `tasks/residual_balance/residual_balance_runner.py` — snapshots external base
   controller inputs into the run directory and every checkpoint, and validates
-  them on load. Position and torque registrations use distinct full task ids as
+  them on load. Its effective-training manifest records live resolved manager
+  terms, callable defaults and source hashes: full resumes enforce the semantic
+  training contract and immediately recompute curricula after restoring the
+  global counter, while actor-only loads enforce the narrower observation/action
+  interface. Position and torque registrations use distinct full task ids as
   experiment names, so automatic resume cannot cross control modes.
 - `robots/<ROBOT>/<robot>_constants.py` — per-robot constants: spec loading
   (collisions disabled by default, geom groups 2=visual/3=collision/4=sites),
