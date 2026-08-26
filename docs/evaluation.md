@@ -11,6 +11,27 @@ through the real PD gains onto the joints doing the balancing. The sums also
 correlate with episode length at r = +0.98, so they move when the robot survives
 longer rather than when it tracks better.
 
+## audit_rewards.py
+
+Run the reward audit before changing an objective or spending a training run:
+
+```sh
+uv run python scripts/audit_rewards.py
+uv run python scripts/audit_rewards.py --checkpoint logs/.../model_180.pt
+```
+
+It reports each term before weighting, its effective live weight, weighted
+per-second rate, integrated window contribution, nonzero fraction, quantiles,
+and exact output shape. A checkpoint run splits environments between policy zero
+and the trained actor. This catches an inert or mis-scaled objective; it does not
+replace `compare_to_baseline.py`, because reward samples are not fixed-episode
+qualification outcomes and the two arms do not occupy identical states.
+
+The JSON report embeds the effective reward contract and records
+`zmp_grounded` and `recovery_active` beside conditional rewards. Read the full
+unit and zero-weight-call semantics in
+[reward-shaping.md](reward-shaping.md#reward_audit).
+
 ## compare_to_baseline.py
 
 Both arms run in the same env, with the same pushes, terminations and reward

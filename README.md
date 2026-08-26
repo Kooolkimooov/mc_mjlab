@@ -149,6 +149,8 @@ and those correlate with episode length at r = +0.98.
 ```sh
 # Score a checkpoint against the zero-residual controller, deterministically.
 uv run python scripts/compare_to_baseline.py --checkpoint <path/to/model_*.pt>
+# Inspect every raw reward, its live weight, rate, activity, and distribution.
+uv run python scripts/audit_rewards.py --checkpoint <path/to/model_*.pt>
 # Can a constant residual move the centre of pressure at all?
 uv run python scripts/probe_residual_authority.py --level 1.0
 uv run python scripts/probe_walking_reference.py

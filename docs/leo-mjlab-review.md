@@ -13,6 +13,9 @@ using manager-based rewards and curricula.
 - 2026-08-26 — mapped every reusable idea into the adoption matrix below and
   started the first implementation tranche: effective-config manifests and
   resume curriculum continuity.
+- 2026-08-26 — completed the second tranche with a live reward-call recorder,
+  policy-zero/checkpoint audit, shape and finite-value contracts, conditional
+  denominators, and effective curriculum-weight histories.
 
 ## Scope and reading rule
 
@@ -34,16 +37,17 @@ adds a larger curriculum.
 
 | Order | Tranche | Exit condition |
 | --- | --- | --- |
-| 1 | Effective configuration and resume integrity | every new checkpoint contains a canonical audit record, a semantic resume contract, a policy-interface contract, and the active curriculum is reapplied after restoring the global counter |
-| 2 | Reward audit and shape contracts | policy-zero and trained rollouts expose raw value, effective weight, weighted rate, active fraction, quantiles, and tensor shape for every reward |
+| 1 (done) | Effective configuration and resume integrity | every new checkpoint contains a canonical audit record, a semantic resume contract, a policy-interface contract, and the active curriculum is reapplied after restoring the global counter |
+| 2 (done) | Reward audit and shape contracts | policy-zero and trained rollouts expose raw value, effective weight, weighted rate, active fraction, quantiles, and tensor shape for every reward |
 | 3 | Stratified qualification metrics | reports separate startup/sustained behavior, nominal/disturbed regimes, direction/axis, termination cause, per-joint authority, grounded masks, and recovery windows |
 | 4 | Unattended-run watchdog | a run can warn, preserve a checkpoint, or stop on sustained degradation without killing the inherited checkpoint or mistaking a stopped trainer for watchdog failure |
 | 5 | Achievement-gated curriculum | difficulty advances only after repeated held-out qualification, retains rehearsal of earlier stages, and rolls back on regression |
 | 6 | Objective changes | one isolated hypothesis at a time, calibrated against raw magnitudes and accepted only by the baseline-relative qualifier |
 
-Tranche 1 is implemented first because later measurements are not trustworthy if
-a run can silently use different defaults or resume at the wrong curriculum
-stage. Tranches 2 and 3 are the next recommended code changes.
+Tranches 1 and 2 are implemented because later measurements are not trustworthy
+if a run can silently use different defaults, resume at the wrong curriculum
+stage, or optimize an inert or incorrectly shaped reward. Tranche 3 is the next
+recommended code change.
 
 ## Adopt now: experiment identity and resume integrity
 
@@ -69,16 +73,16 @@ answers “does this actor still consume and produce the same quantities?”
 
 | Idea from the range | Local interpretation | Decision |
 | --- | --- | --- |
-| Map every effective reward contribution | report raw mean, effective weight, weighted rate, episode contribution, active fraction, and sign | next tranche |
-| Resolve effective curriculum weights | reward reports must use the live manager weight at the sampled step, not the initial YAML value | next tranche |
+| Map every effective reward contribution | report raw mean, effective weight, weighted rate, episode contribution, active fraction, and sign | implemented |
+| Resolve effective curriculum weights | reward reports must use the live manager weight at the sampled step, not the initial YAML value | implemented |
 | Calibrate changed rewards with paired policy-zero rollouts | compare old/new term values on identical states before spending a training run | next tranche |
 | Give stateful reward variants separate instances | never share landing counters, debouncers, histories, or class-term caches across an A/B pair | next tranche |
-| Assert reward output shape | require `(num_envs,)`; a broadcasting bug can produce plausible aggregate curves | next tranche |
-| Resolve scene entities through the manager | audit terms after `SceneEntityCfg.resolve`, not with independently guessed site or joint ids | next tranche |
-| Make time units explicit | distinguish per-step, per-second, per-episode, touchdown-event, and conditional-contact objectives | next tranche |
-| Account for `dt` once | calibrate the manager's weighted rate and integrated episode contribution; do not hand-correct by an assumed control frequency | next tranche |
-| Expose inactive or inert terms | flag zero active fraction, unchanged target state, or zero gradient-relevant contribution | next tranche |
-| Track conditional denominators | pair contact-only, grounded-only, recovery-only, and touchdown-only metrics with sample counts | next tranche; extends the existing `zmp_grounded` rule |
+| Assert reward output shape | require `(num_envs,)`; a broadcasting bug can produce plausible aggregate curves | implemented |
+| Resolve scene entities through the manager | audit terms after `SceneEntityCfg.resolve`, not with independently guessed site or joint ids | implemented |
+| Make time units explicit | distinguish per-step, per-second, per-episode, touchdown-event, and conditional-contact objectives | implemented for the current reward family; extend with new event terms |
+| Account for `dt` once | calibrate the manager's weighted rate and integrated episode contribution; do not hand-correct by an assumed control frequency | implemented |
+| Expose inactive or inert terms | flag zero active fraction, unchanged target state, or zero gradient-relevant contribution | nonzero output and zero weighted contribution implemented; target-state and gradient probes remain later |
+| Track conditional denominators | pair contact-only, grounded-only, recovery-only, and touchdown-only metrics with sample counts | grounded and recovery implemented; add term-specific denominators with new gated rewards |
 | Separate price from ceiling | tune constraint-like shaping by violation frequency and magnitude before changing its weight | adopt as tuning protocol |
 | Use feasibility as the first gate | reject reward proposals whose target is outside controller authority or actuator limits | adopt; integrate residual-authority and baseline-deviation probes |
 
@@ -160,21 +164,18 @@ stable promotion metrics and tranche 4 provides rollback automation.
 
 ## Concrete backlog after tranche 1
 
-1. Add `scripts/audit_rewards.py` with identical-state policy-zero/trained modes,
-   effective live weights, shape assertions, active fractions, quantiles, and
-   conditional denominators.
-2. Extend `compare_to_baseline.py` output with startup/recovery/sustained windows,
+1. Extend `compare_to_baseline.py` output with startup/recovery/sustained windows,
    disturbance axis/direction, failure cause, per-joint residual clipping, and
    controller-command tracking.
-3. Add `scripts/diff_effective_manifest.py` so rejected resume contracts and
+2. Add `scripts/diff_effective_manifest.py` so rejected resume contracts and
    intentional evaluator differences are easy to inspect without loading a
    controller.
-4. Add a structured watchdog that monitors the qualifier metrics, GPU memory,
+3. Add a structured watchdog that monitors the qualifier metrics, GPU memory,
    controller-worker restarts, trainer liveness, and checkpoint age.
-5. Define curriculum promotion/rollback thresholds only after two independent
+4. Define curriculum promotion/rollback thresholds only after two independent
    seeds establish baseline variance for the new stratified metrics.
-6. Implement stage state in checkpoints, sample easier stages after promotion,
+5. Implement stage state in checkpoints, sample easier stages after promotion,
    and validate uninterrupted-versus-resumed stage traces.
-7. Run objective ablations only after these gates pass; begin with the failure
+6. Run objective ablations only after these gates pass; begin with the failure
    variable identified by the baseline-deviation map, not with a borrowed gait
    reward.

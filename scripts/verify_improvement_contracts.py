@@ -29,6 +29,10 @@ from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   _make_env_cfg,
   residual_balance_position_curriculum_env_cfg,
 )
+from mc_mjlab.tasks.residual_balance.reward_audit import (
+  RewardAuditRecorder,
+  RewardAuditShapeError,
+)
 from mc_mjlab.tasks.rollout_adaptive_ppo import RolloutAdaptivePPO
 from mc_mjlab.tasks.squashed_gaussian import SquashedGaussianDistribution
 from mc_mjlab.tasks.zero_init_actor import (
@@ -80,6 +84,52 @@ class _TermManager:
   def get_term_cfg(self, name: str) -> _TermCfg:
     """Return one configured fake term."""
     return self.cfg[name]
+
+
+class _CountingReward:
+  """Return fixed reward values while counting manager evaluations."""
+
+  def __init__(self, values: torch.Tensor) -> None:
+    self.values = values
+    self.calls = 0
+
+  def __call__(self, _env) -> torch.Tensor:
+    """Return the configured per-environment values."""
+    self.calls += 1
+    return self.values
+
+
+class _AuditRewardManager:
+  """Provide the private buffers used by the live reward-audit adapter."""
+
+  def __init__(self, terms: dict[str, _TermCfg]) -> None:
+    self.num_envs = 4
+    self.device = "cpu"
+    self.active_terms = list(terms)
+    self._term_cfgs = list(terms.values())
+    self._env = object()
+    self._scale_by_dt = True
+    self._episode_sums = {
+      name: torch.zeros(self.num_envs) for name in self.active_terms
+    }
+    self._reward_buf = torch.zeros(self.num_envs)
+    self._step_reward = torch.zeros(self.num_envs, len(terms))
+
+  def compute(self, dt: float) -> torch.Tensor:
+    """Match mjlab's weighted, dt-scaled reward accumulation."""
+    self._reward_buf.zero_()
+    for index, (name, cfg) in enumerate(
+      zip(self.active_terms, self._term_cfgs, strict=True)
+    ):
+      if cfg.weight == 0.0:
+        self._step_reward[:, index].zero_()
+        continue
+      value = cfg.func(self._env, **cfg.params)
+      scaled = torch.nan_to_num(value * cfg.weight * dt)
+      self._reward_buf += scaled
+      self._episode_sums[name] += scaled
+      self._step_reward[:, index] = scaled / dt
+    return self._reward_buf
 
 
 class _CurriculumManager(_TermManager):
@@ -338,6 +388,54 @@ def verify_effective_training_manifest() -> None:
     raise AssertionError("full resume accepted a changed training contract")
 
 
+def verify_reward_audit() -> None:
+  """Check single evaluation, zero-weight restoration, live weights, and shapes."""
+  active = _CountingReward(torch.tensor([1.0, 2.0, 3.0, 4.0]))
+  inactive = _CountingReward(torch.tensor([0.0, 0.5, 1.0, 1.5]))
+  manager = _AuditRewardManager(
+    {
+      "active": _TermCfg(func=active, weight=-2.0),
+      "inactive": _TermCfg(func=inactive, weight=0.0),
+    }
+  )
+  original_inactive = manager._term_cfgs[1].func
+  audit = RewardAuditRecorder(
+    manager, {"policy_zero": [0, 1], "checkpoint": [2, 3]}, 0.02
+  )
+  with audit:
+    reward = manager.compute(0.02).clone()
+    assert torch.allclose(reward, active.values * -2.0 * 0.02)
+    assert inactive.calls == 1
+    assert manager._term_cfgs[1].weight == 0.0
+    assert bool((manager._episode_sums["inactive"] == 0.0).all())
+    assert bool((manager._step_reward[:, 1] == 0.0).all())
+    audit.capture_denominator("grounded", torch.tensor([1.0, 1.0, 0.0, 0.0]))
+    manager._term_cfgs[0].weight = -4.0
+    manager.compute(0.02)
+  assert manager._term_cfgs[1].func is original_inactive
+  report = audit.report()
+  checkpoint = report["arms"]["checkpoint"]
+  assert checkpoint["terms"]["active"]["raw"]["mean"] == 3.5
+  assert checkpoint["terms"]["inactive"]["effective_weight"]["last"] == 0.0
+  assert checkpoint["terms"]["active"]["effective_weight"]["distinct"] == [
+    -4.0,
+    -2.0,
+  ]
+  assert checkpoint["conditional_denominators"]["grounded"]["mean"] == 0.0
+  assert audit.issues() == []
+
+  bad = _AuditRewardManager(
+    {"bad": _TermCfg(func=lambda _env: torch.zeros(4, 1), weight=1.0)}
+  )
+  try:
+    with RewardAuditRecorder(bad, {"all": [0, 1, 2, 3]}, 0.02):
+      bad.compute(0.02)
+  except RewardAuditShapeError:
+    pass
+  else:
+    raise AssertionError("reward audit accepted a broadcastable (num_envs, 1) term")
+
+
 def verify_resume_curriculum_synchronization() -> None:
   """Check restored counters immediately select the matching curriculum stage."""
   env = _ManifestEnv()
@@ -366,6 +464,7 @@ def main() -> None:
   verify_impulse_curricula()
   verify_environment_variants()
   verify_effective_training_manifest()
+  verify_reward_audit()
   verify_resume_curriculum_synchronization()
   print("improvement contract assertions passed")
 

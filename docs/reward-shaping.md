@@ -29,6 +29,65 @@ plan-tracking errors expresses a plan-independent stability margin.
 Constants in `tasks/residual_balance/residual_balance_env_cfg.py`; terms in
 `tasks/mdp.py`.
 
+## reward_audit
+
+**Current:** `scripts/audit_rewards.py` samples every manager-resolved reward in
+one live rollout. With `--checkpoint`, the first half of the environments runs
+policy zero and the second half runs the checkpoint under the same global
+configuration and wall-clock exposure. With no checkpoint, all environments run
+policy zero. The report includes the effective reward contract from the training
+manifest, so callable defaults and resolved entities travel with the numbers.
+
+The columns have deliberately different units:
+
+- `raw` is the callable's output before weight or time scaling. Its unit belongs
+  to that term: a kernel or indicator is dimensionless, while squared velocity,
+  momentum, slip, and action costs retain their natural squared units.
+- `effective_weight` is read from the live reward manager on every sampled step,
+  after curriculum updates. A range means the audit crossed a curriculum stage.
+- `weighted_rate_per_second` is `raw * effective_weight`. This is the manager's
+  `_step_reward` convention and is the comparable reward-budget quantity.
+- `integrated_contribution_per_env` sums `weighted_rate * step_dt` over the audit
+  window and divides by the number of environments in that arm. It is not an
+  episode average and remains interpretable when environments reset.
+- `nonzero_fraction` is the share whose absolute raw output exceeds `1e-12`. It
+  exposes inert outputs, but it is not always the term's physical gate: a valid
+  penalty can be zero while contact is active. `zmp_grounded` and
+  `recovery_active` are therefore reported separately as conditional
+  denominators.
+
+Zero-weight terms normally never execute. During this audit they execute exactly
+once through the manager's ordinary term call, then the recorder restores their
+weight, episodic sum, step-rate column, and total returned reward. This matters
+for stateful terms: `torque_margin`, for example, consumes the interval's peak
+torque and cannot be evaluated a second time without changing the measurement.
+Every reward must return exactly `(num_envs,)`; a broadcastable `(num_envs, 1)`
+is a failure. Non-finite raw values also fail the audit even though the production
+manager sanitizes them to protect the policy.
+
+```sh
+uv run python scripts/audit_rewards.py
+uv run python scripts/audit_rewards.py --checkpoint logs/.../model_180.pt
+uv run python scripts/audit_rewards.py --checkpoint logs/.../model_180.pt \
+  --steps 1500 --output logs/reward_audits/model_180_long.json
+```
+
+The policy-zero and checkpoint arms are descriptive samples, not an
+identical-state causal A/B: their environments have independent randomized
+states. Use them to find scale, sign, saturation, inactivity, and curriculum
+errors. A proposed replacement reward still needs separate instances evaluated
+on saved identical states before its formula can be credited with a difference.
+
+**Re-measure if:** reward-manager scaling or private buffers change in mjlab, a
+new gated term lacks a companion denominator, or the task adds a zero-weight term
+whose callable changes simulation state.
+
+**History:**
+
+- 2026-08-26 — added schema 1, live curriculum weights, policy-zero/checkpoint
+  arms, raw and weighted quantiles, shape assertions, conditional denominators,
+  and exact restoration of synthetic zero-weight contributions.
+
 ## ZMP_TRACKING_STD
 
 **Removed 2026-08-19** with its reward term; see `Pruning the agreement rewards`.
