@@ -630,6 +630,29 @@ def residual_balance_position_env_cfg(
   return cfg
 
 
+def residual_balance_position_curriculum_env_cfg(
+  schedule: Literal["frozen", "gradual"],
+  play: bool = False,
+) -> ManagerBasedRlEnvCfg:
+  """Build one ankle-authority impulse-curriculum diagnostic variant."""
+  cfg = residual_balance_position_env_cfg(play=play, authority_set="ankle")
+  push = cfg.events["push_robot"]
+  if schedule == "frozen":
+    push.params["stages"] = ((0, (0.10, 0.25)),)
+  elif schedule == "gradual":
+    push.func = mdp.gradual_finite_impulse_curriculum
+    push.params["stages"] = (
+      (0, (0.10, 0.25)),
+      (48_000, (0.10, 0.25)),
+      (80_000, (0.10, 0.40)),
+      (112_000, (0.10, 0.50)),
+    )
+  else:
+    raise ValueError(f"unknown curriculum schedule {schedule!r}")
+  cfg.curriculum.clear()
+  return cfg
+
+
 def residual_balance_torque_env_cfg(
   play: bool = False,
   authority_set: Literal["uniform", "ankle", "sagittal", "hardware"] = "uniform",

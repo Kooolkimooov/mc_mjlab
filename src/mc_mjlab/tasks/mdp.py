@@ -984,6 +984,51 @@ class finite_impulse_curriculum(recorded_disturbance):
     self.remaining[env_ids] = 0
 
 
+def interpolated_impulse_range(
+  step: int,
+  stages: tuple[tuple[int, tuple[float, float]], ...],
+) -> tuple[float, float]:
+  """Linearly interpolate an impulse range between ordered curriculum stages."""
+  if not stages:
+    raise ValueError("impulse curriculum requires at least one stage")
+  previous_step, previous_range = stages[0]
+  for next_step, next_range in stages[1:]:
+    if next_step <= previous_step:
+      raise ValueError("impulse curriculum stages must have increasing steps")
+    if step < next_step:
+      if step <= previous_step:
+        return previous_range
+      fraction = (step - previous_step) / (next_step - previous_step)
+      return (
+        previous_range[0] + fraction * (next_range[0] - previous_range[0]),
+        previous_range[1] + fraction * (next_range[1] - previous_range[1]),
+      )
+    previous_step, previous_range = next_step, next_range
+  return previous_range
+
+
+class gradual_finite_impulse_curriculum(finite_impulse_curriculum):
+  """Apply the finite impulse curriculum with linear stage interpolation."""
+
+  def _trigger(
+    self,
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor,
+    duration_range_s: tuple[float, float],
+    height_range_m: tuple[float, float],
+    stages: tuple[tuple[int, tuple[float, float]], ...],
+  ) -> None:
+    """Sample an impulse from the range interpolated at the current step."""
+    velocity_range = interpolated_impulse_range(env.common_step_counter, stages)
+    super()._trigger(
+      env,
+      env_ids,
+      duration_range_s,
+      height_range_m,
+      ((0, velocity_range),),
+    )
+
+
 #: Age reported for an env that has not been pushed inside its current episode.
 NEVER_AGE = 1 << 30
 

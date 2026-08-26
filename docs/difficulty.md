@@ -31,6 +31,37 @@ or controller gait changes.
   reached maximum authority `0.741`, mean duty `0.941%`, and exactly zero
   inactive residual.
 
+## curriculum_diagnostics
+
+**Current:** Two additive ankle-authority tasks isolate the difficulty change
+that coincides with the long run's early optimum. `Curriculum-Frozen` keeps the
+impulse range at `[0.10, 0.25] m/s`. `Curriculum-Gradual` holds that range through
+48,000 policy steps, then linearly raises its upper bound to `0.40 m/s` at 80,000
+and `0.50 m/s` at 112,000. Both keep the torque-margin weight at `-0.05`, so the
+diagnostic changes only impulse difficulty.
+
+`scripts/run_curriculum_diagnostics.py` runs two 2-iteration, 8-environment smoke
+tests before two 220-iteration, 128-environment diagnostics. Smoke tests use
+TensorBoard; diagnostics use W&B by default. Every run enables mjlab's NaN guard,
+saves locally every 20 iterations, and records resumable state under
+`logs/curriculum_diagnostics/`.
+
+The 220-iteration budget reaches 56,320 policy steps. The gradual arm therefore
+ends with a `0.289 m/s` upper bound: enough to cross the old 48,000-step boundary
+without introducing the old instantaneous `0.25 -> 0.40 m/s` jump. This is a
+mechanism diagnostic, not a promotion run. Compare pre-boundary and late-window
+ZMP/recovery metrics, then apply paired deterministic qualification to any
+shortlisted checkpoint.
+
+**Re-measure if:** the rollout length, policy-step budget, disturbance stages,
+authority set, or torque-margin schedule changes.
+
+**History:**
+- 2026-08-26 — prepared the frozen-versus-gradual experiment after the 500-iteration
+  budget run reached its best 60-iteration ZMP and recovery windows at iterations
+  175 and 178, just before the old stage boundary at iteration 188, then degraded
+  and produced NaNs at iteration 488.
+
 ## randomization_stage
 
 **Current:** stage zero is the standard task. The separately registered

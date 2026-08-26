@@ -14,7 +14,14 @@ from mc_mjlab.recovery_authority import (
   detector_target,
 )
 from mc_mjlab.residual_safety import project_residual
-from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import _make_env_cfg
+from mc_mjlab.tasks.mdp import (
+  gradual_finite_impulse_curriculum,
+  interpolated_impulse_range,
+)
+from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
+  _make_env_cfg,
+  residual_balance_position_curriculum_env_cfg,
+)
 from mc_mjlab.tasks.rollout_adaptive_ppo import RolloutAdaptivePPO
 from mc_mjlab.tasks.squashed_gaussian import SquashedGaussianDistribution
 from mc_mjlab.tasks.zero_init_actor import (
@@ -143,6 +150,24 @@ def verify_rollout_schedule() -> None:
   assert update(1.0e-2, 0.005, 0.02) == 1.0e-2
 
 
+def verify_impulse_curricula() -> None:
+  """Check the frozen and interpolated diagnostic schedules."""
+  stages = (
+    (0, (0.10, 0.25)),
+    (48_000, (0.10, 0.25)),
+    (80_000, (0.10, 0.40)),
+    (112_000, (0.10, 0.50)),
+  )
+  assert interpolated_impulse_range(48_000, stages) == (0.10, 0.25)
+  assert interpolated_impulse_range(64_000, stages) == (0.10, 0.325)
+  assert interpolated_impulse_range(112_000, stages) == (0.10, 0.50)
+  frozen = residual_balance_position_curriculum_env_cfg("frozen")
+  gradual = residual_balance_position_curriculum_env_cfg("gradual")
+  assert frozen.events["push_robot"].params["stages"] == ((0, (0.10, 0.25)),)
+  assert gradual.events["push_robot"].func is gradual_finite_impulse_curriculum
+  assert frozen.curriculum == gradual.curriculum == {}
+
+
 def verify_environment_variants() -> None:
   """Check deployable observations and staged-randomization configuration."""
   standard = _make_env_cfg("position", num_envs=1, disturbance="none")
@@ -178,6 +203,7 @@ def main() -> None:
   verify_projection()
   verify_recovery_detector()
   verify_rollout_schedule()
+  verify_impulse_curricula()
   verify_environment_variants()
   print("improvement contract assertions passed")
 

@@ -5,6 +5,7 @@ from pathlib import Path
 from mjlab.tasks.registry import register_mjlab_task
 
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
+  residual_balance_position_curriculum_env_cfg,
   residual_balance_position_env_cfg,
   residual_balance_position_velocity_env_cfg,
   residual_balance_torque_env_cfg,
@@ -46,6 +47,16 @@ for authority_set in ("ankle", "sagittal", "hardware"):
     play_env_cfg=residual_balance_position_env_cfg(
       play=True, authority_set=authority_set
     ),
+    rl_cfg=residual_balance_ppo_cfg(experiment_name=task_id),
+    runner_cls=ResidualBalanceOnPolicyRunner,
+  )
+
+for schedule in ("frozen", "gradual"):
+  task_id = get_task_name(TASK_DIR, f"position-ankle-curriculum-{schedule}")
+  register_mjlab_task(
+    task_id=task_id,
+    env_cfg=residual_balance_position_curriculum_env_cfg(schedule),
+    play_env_cfg=residual_balance_position_curriculum_env_cfg(schedule, play=True),
     rl_cfg=residual_balance_ppo_cfg(experiment_name=task_id),
     runner_cls=ResidualBalanceOnPolicyRunner,
   )
