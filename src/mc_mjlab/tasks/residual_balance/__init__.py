@@ -5,6 +5,7 @@ from pathlib import Path
 from mjlab.tasks.registry import register_mjlab_task
 
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
+  residual_balance_position_achievement_curriculum_env_cfg,
   residual_balance_position_curriculum_env_cfg,
   residual_balance_position_env_cfg,
   residual_balance_position_velocity_env_cfg,
@@ -60,6 +61,15 @@ for schedule in ("frozen", "gradual"):
     rl_cfg=residual_balance_ppo_cfg(experiment_name=task_id),
     runner_cls=ResidualBalanceOnPolicyRunner,
   )
+
+ACHIEVEMENT_TASK_ID = get_task_name(TASK_DIR, "position-ankle-curriculum-achievement")
+register_mjlab_task(
+  task_id=ACHIEVEMENT_TASK_ID,
+  env_cfg=residual_balance_position_achievement_curriculum_env_cfg(),
+  play_env_cfg=residual_balance_position_achievement_curriculum_env_cfg(play=True),
+  rl_cfg=residual_balance_ppo_cfg(experiment_name=ACHIEVEMENT_TASK_ID),
+  runner_cls=ResidualBalanceOnPolicyRunner,
+)
 
 for randomization_stage in (1, 2):
   task_id = get_task_name(TASK_DIR, f"position-robust{randomization_stage}")

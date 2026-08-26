@@ -38,6 +38,7 @@ from mc_mjlab.robots.robots_registry import (
   prepare_cfg_for_mc_rtc,
 )
 from mc_mjlab.tasks import mdp
+from mc_mjlab.tasks.residual_balance.curriculum_stages import ACHIEVEMENT_STAGES
 
 # Only values used twice or more live here; the rest sit in the term that uses them.
 DCM_STD = 0.10
@@ -650,6 +651,33 @@ def residual_balance_position_curriculum_env_cfg(
   else:
     raise ValueError(f"unknown curriculum schedule {schedule!r}")
   cfg.curriculum.clear()
+  return cfg
+
+
+def residual_balance_position_achievement_curriculum_env_cfg(
+  play: bool = False,
+) -> ManagerBasedRlEnvCfg:
+  """Build the ankle-authority achievement-gated training task."""
+  cfg = residual_balance_position_env_cfg(play=play, authority_set="ankle")
+  push = cfg.events["push_robot"]
+  push.func = mdp.achievement_finite_impulse_curriculum
+  push.params["stages"] = tuple(
+    (index, stage.training_velocity_range)
+    for index, stage in enumerate(ACHIEVEMENT_STAGES)
+  )
+  push.params["rehearsal_weights"] = tuple(
+    stage.rehearsal_weights for stage in ACHIEVEMENT_STAGES
+  )
+  push.params["initial_stage"] = len(ACHIEVEMENT_STAGES) - 1 if play else 0
+  if play:
+    weights = [0.0] * (len(ACHIEVEMENT_STAGES) + 1)
+    weights[-1] = 1.0
+    push.params["rehearsal_weights"] = tuple(
+      tuple(weights) for _stage in ACHIEVEMENT_STAGES
+    )
+  cfg.curriculum = {
+    "achievement_stage": CurriculumTermCfg(func=mdp.achievement_curriculum_state)
+  }
   return cfg
 
 

@@ -19,6 +19,14 @@ from mjlab.utils.lab_api.math import quat_apply
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
 from mc_mjlab.tasks import mdp
+from mc_mjlab.tasks.residual_balance.curriculum_stages import (
+  ACHIEVEMENT_STAGES,
+  MINIMUM_QUALIFICATION_SEEDS,
+  REQUIRED_QUALIFICATION_SCENARIOS,
+  achievement_contract,
+  achievement_contract_sha256,
+  achievement_stage,
+)
 from mc_mjlab.tasks.residual_balance.qualification_strata import (
   StratifiedDiagnostics,
   StratumRecord,
@@ -97,10 +105,17 @@ def scenario_cfg(name: str, seed: int, args) -> ManagerBasedRlEnvCfg:
 class PairedDisturbances:
   """Apply a deterministic schedule shared by both arms of each episode pair."""
 
-  def __init__(self, env, scenario: str, seed: int) -> None:
+  def __init__(
+    self, env, scenario: str, seed: int, achievement_stage_index: int | None = None
+  ) -> None:
     self.env = env
     self.scenario = scenario
     self.seed = seed
+    self.achievement_stage = (
+      achievement_stage(achievement_stage_index)
+      if achievement_stage_index is not None
+      else None
+    )
     self.asset = env.scene["robot"]
     self.remaining = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
     self.force = torch.zeros(env.num_envs, 1, 3, device=env.device)
@@ -151,7 +166,12 @@ class PairedDisturbances:
         + sum(map(ord, self.scenario))
       )
       angle = rng.uniform(-math.pi, math.pi)
-      dv = rng.uniform(0.50, 0.60) if self.scenario == "robust" else 0.40
+      if self.achievement_stage is None:
+        dv = rng.uniform(0.50, 0.60) if self.scenario == "robust" else 0.40
+      elif self.scenario == "robust":
+        dv = rng.uniform(*self.achievement_stage.robust_velocity_range)
+      else:
+        dv = self.achievement_stage.qualification_velocity
       delta_b[row, :2] = torch.tensor(
         [dv * math.cos(angle), dv * math.sin(angle)], device=self.env.device
       )
@@ -252,7 +272,7 @@ def run_checkpoint(
   stratified = StratifiedDiagnostics(
     env, residual_term, DISTURBANCE_WARMUP_S, recovery_s
   )
-  disturbances = PairedDisturbances(env, scenario, seed)
+  disturbances = PairedDisturbances(env, scenario, seed, args.achievement_stage)
   counts = [[0, 0] for _ in range(env.num_envs)]
   current_policy = torch.tensor(
     [bool(env_id % 2) for env_id in range(env.num_envs)],
@@ -774,11 +794,14 @@ def main() -> None:
   parser.add_argument("--num-workers", type=int, default=6)
   parser.add_argument("--episode-length-s", type=float, default=90.0)
   parser.add_argument("--seed", type=int, action="append")
+  parser.add_argument(
+    "--achievement-stage", type=int, choices=range(len(ACHIEVEMENT_STAGES))
+  )
   parser.add_argument("--control", choices=("position", "torque"), default="position")
   parser.add_argument(
     "--authority-set",
     choices=("uniform", "ankle", "sagittal", "hardware"),
-    default="uniform",
+    default=None,
   )
   parser.add_argument(
     "--controller-history", type=int, choices=(1, 5, 10, 20), default=20
@@ -788,9 +811,21 @@ def main() -> None:
   parser.add_argument("--device", default="cuda:0")
   parser.add_argument("--out-dir", type=Path, default=Path("logs/qualification"))
   args = parser.parse_args()
+  args.authority_set = args.authority_set or (
+    "ankle" if args.achievement_stage is not None else "uniform"
+  )
   checkpoints = resolve_checkpoints(args.checkpoints)
   scenarios = args.scenario or list(SCENARIOS)
-  seeds = args.seed or [42]
+  seeds = args.seed or ([42, 43] if args.achievement_stage is not None else [42])
+  if args.achievement_stage is not None:
+    if len(checkpoints) != 1:
+      parser.error("achievement qualification accepts exactly one checkpoint")
+    if set(scenarios) != set(REQUIRED_QUALIFICATION_SCENARIOS):
+      parser.error("achievement qualification requires every scenario")
+    if len(set(seeds)) < MINIMUM_QUALIFICATION_SEEDS:
+      parser.error(
+        f"achievement qualification requires {MINIMUM_QUALIFICATION_SEEDS} seeds"
+      )
   episodes: list[Episode] = []
   strata: list[StratumRecord] = []
   summaries: dict[str, dict] = {}
@@ -839,6 +874,15 @@ def main() -> None:
       "controller_history": args.controller_history,
       "proprio_history": args.proprio_history,
       "recurrent": args.recurrent,
+      "achievement": (
+        {
+          "stage": args.achievement_stage,
+          "contract": achievement_contract(args.achievement_stage),
+          "contract_sha256": achievement_contract_sha256(args.achievement_stage),
+        }
+        if args.achievement_stage is not None
+        else None
+      ),
       "strata": {
         "startup": f"episode age <= {DISTURBANCE_WARMUP_S:g} s",
         "recovery": "reward-configured post-disturbance window",

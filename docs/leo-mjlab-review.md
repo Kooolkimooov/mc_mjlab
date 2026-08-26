@@ -22,6 +22,9 @@ using manager-based rewards and curricula.
 - 2026-08-26 — completed the fourth tranche with PID-bound heartbeats,
   preserve-before-stop requests, GPU/checkpoint/worker/qualification guards,
   and distinct completion, failure, unexpected-exit, and watchdog-stop verdicts.
+- 2026-08-26 — completed the fifth tranche with held-out two-pass advancement,
+  reset-cohort rehearsal, three-regression rollback, preserved stage winners,
+  and checkpointed stage state.
 
 ## Scope and reading rule
 
@@ -47,14 +50,14 @@ adds a larger curriculum.
 | 2 (done) | Reward audit and shape contracts | policy-zero and trained rollouts expose raw value, effective weight, weighted rate, active fraction, quantiles, and tensor shape for every reward |
 | 3 (done) | Stratified qualification metrics | reports separate startup/sustained behavior, nominal/disturbed regimes, direction/axis, termination cause, per-joint authority, grounded masks, and recovery windows |
 | 4 (done) | Unattended-run watchdog | a run can warn, preserve a checkpoint, or stop on sustained degradation without killing the inherited checkpoint or mistaking a stopped trainer for watchdog failure |
-| 5 | Achievement-gated curriculum | difficulty advances only after repeated held-out qualification, retains rehearsal of earlier stages, and rolls back on regression |
+| 5 (done) | Achievement-gated curriculum | difficulty advances only after repeated held-out qualification, retains rehearsal of earlier stages, and rolls back on regression |
 | 6 | Objective changes | one isolated hypothesis at a time, calibrated against raw magnitudes and accepted only by the baseline-relative qualifier |
 
 Tranches 1 and 2 are implemented because later measurements are not trustworthy
 if a run can silently use different defaults, resume at the wrong curriculum
 stage, or optimize an inert or incorrectly shaped reward. Tranches 3 and 4
-passed their live output contracts. Tranche 5 is the next recommended code
-change.
+passed their live output contracts. Tranche 5 now supplies the main-capable
+curriculum gate; objective changes remain behind its qualification contract.
 
 ## Adopt now: experiment identity and resume integrity
 
@@ -135,10 +138,10 @@ that a term's name often did not match the physical event it measured.
 | Count curriculum calls deliberately | choose environment steps, policy steps, episodes, or events explicitly; never infer that `common_step_counter` means calls | adopt with naming/unit checks |
 | Change deployment scale separately | a cap that is safe during training may be too permissive at deployment; record both | later, after authority qualification |
 
-The local task already has frozen and gradual diagnostic schedules. Those remain
-diagnostics. Tranches 3 and 4 now provide their measurement and rollback gates;
-tranche 5 must still define achievement and rehearsal before either schedule can
-become the main curriculum.
+The local task's frozen and gradual schedules remain diagnostics. The separate
+achievement task consumes the tranche-3 qualifier at iteration boundaries,
+keeps standing and prior stages in its reset cohorts, and checkpoints the state
+that the tranche-4 watchdog can preserve.
 
 ## Unattended experiment operations
 
@@ -175,10 +178,8 @@ become the main curriculum.
 1. Add `scripts/diff_effective_manifest.py` so rejected resume contracts and
    intentional evaluator differences are easy to inspect without loading a
    controller.
-2. Define curriculum promotion/rollback thresholds only after two independent
-   seeds establish baseline variance for the new stratified metrics.
-3. Implement stage state in checkpoints, sample easier stages after promotion,
-   and validate uninterrupted-versus-resumed stage traces.
-4. Run objective ablations only after these gates pass; begin with the failure
+2. Re-measure curriculum promotion/rollback thresholds after qualification runs
+   establish variance beyond the initial two-seed minimum.
+3. Run objective ablations only after these gates pass; begin with the failure
    variable identified by the baseline-deviation map, not with a borrowed gait
    reward.

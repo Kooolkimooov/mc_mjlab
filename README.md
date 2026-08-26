@@ -152,6 +152,31 @@ boundary and only after a recoverable checkpoint has been acknowledged. See
 [docs/training-watchdog.md](docs/training-watchdog.md) for thresholds and
 artifacts.
 
+### Achievement-gated curriculum
+
+The `Position-Ankle-Curriculum-Achievement` task advances only from held-out
+qualification reports. Find its full controller/robot-specific id with
+`uv run list-envs`, then train it normally. The run publishes its current stage
+under `<run>/curriculum/qualification_request.json`.
+
+Evaluate one of that run's checkpoints against the requested stage:
+
+```sh
+run_dir=/absolute/path/to/the/run
+checkpoint="$run_dir/model_100.pt"
+stage=$(jq -r .stage "$run_dir/curriculum/qualification_request.json")
+uv run python scripts/qualify_checkpoints.py "$checkpoint" \
+  --achievement-stage "$stage" --out-dir "$run_dir/curriculum"
+```
+
+Achievement mode defaults to seeds 42 and 43, all four qualification scenarios,
+and ankle authority. A second distinct passing report advances the stage; three
+valid failing reports roll it back. Use a later checkpoint or different seeds
+when replacing the report. The exact stage-passing checkpoint is retained under
+`<run>/curriculum/`, and the complete hysteresis state is embedded in subsequent
+training checkpoints. See [docs/difficulty.md](docs/difficulty.md) for the
+mixtures and resume semantics.
+
 > [!TIP] 
 > To add a task, drop a package under `src/mc_mjlab/tasks/` whose
 > `__init__.py` calls `register_mjlab_task`; the walk picks it up with no

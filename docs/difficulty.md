@@ -62,6 +62,77 @@ authority set, or torque-margin schedule changes.
   175 and 178, just before the old stage boundary at iteration 188, then degraded
   and produced NaNs at iteration 488.
 
+## achievement_finite_impulse_curriculum
+
+**Current:** the separately registered
+`Position-Ankle-Curriculum-Achievement` task is the main-capable curriculum. Its
+stage is independent of `common_step_counter`; only a held-out report accepted
+by `AchievementCurriculumBridge` changes it. The physical stages are equivalent
+body-frame delta-velocity ranges `[0.10, 0.25]`, `[0.10, 0.40]`, and
+`[0.10, 0.50] m/s`. Push direction, interval, duration, point of application,
+residual authority, observations, randomization, and the `-0.05` torque-margin
+weight stay fixed, so one physical challenge changes.
+
+The reset-time mixtures list standing first, followed by physical stages zero
+through two:
+
+| Active stage | Standing | Stage 0 | Stage 1 | Stage 2 |
+| --- | ---: | ---: | ---: | ---: |
+| 0 | 25% | 75% | 0% | 0% |
+| 1 | 15% | 25% | 60% | 0% |
+| 2 | 15% | 15% | 20% | 50% |
+
+Existing episodes keep their sampled level when a report arrives; the new
+mixture enters as environments reset. This prevents an all-environment step
+change and retains both no-push balance and previously qualified recovery.
+
+**Re-measure if:** stage-zero feasibility, the baseline failure boundary,
+episode reset rate, push implementation, residual authority, or qualification
+variance changes.
+
+**History:**
+
+- 2026-08-26 — tranche 5 added reset-cohort rehearsal and held-out stage state;
+  the frozen and gradual tasks remain step-schedule diagnostics.
+
+## AchievementCurriculumBridge
+
+**Current:** the runner watches `<run>/curriculum/qualification.json` at PPO
+iteration boundaries. A valid report must describe exactly one checkpoint from
+the active run, match the requested stage contract, contain nominal,
+current-kick, finite-impulse, and robust scenarios, and use at least two unique
+seeds. Two distinct eligible reports qualify the stage. Three distinct
+ineligible reports demote one stage, including from a previously mastered final
+stage. A stage/checkpoint/seed identity hash prevents the same evidence from
+counting twice even if JSON formatting or reported metrics change.
+
+Stage qualification copies the evaluated checkpoint to
+`qualified_stage_<stage>_model_<iteration>.pt`. Rollback changes future training
+cohorts but deliberately does not rewind the live policy or optimizer; use the
+preserved checkpoint for an explicit policy rewind. `state.json`,
+`qualification_request.json`, and append-only `events.jsonl` expose the live
+protocol. Every subsequent model checkpoint embeds the stage, pass/regression
+streaks, processed-evidence hashes, mastery state, last-good path, and one
+qualified-checkpoint path per stage. Full resume restores those values exactly;
+actor-only evaluation does not change them. A report absent from the restored
+checkpoint's processed hashes is replayed after a same-directory resume, so an
+iteration-boundary decision is not silently discarded before the next save.
+
+Held-out stage pushes use `0.25`, `0.40`, and `0.50 m/s` for current-kick and
+finite-impulse scenarios. Their robust guards use `[0.30, 0.35]`,
+`[0.45, 0.50]`, and `[0.55, 0.60] m/s`, respectively, with the existing stage-one
+physics randomization. Promotion still uses the unchanged safety, nominal,
+recovery, and hazard gates in `qualify_checkpoints.py`.
+
+**Re-measure if:** the promotion gates, paired-sample variance, required seed
+count, stage magnitudes, or checkpoint cadence changes.
+
+**History:**
+
+- 2026-08-26 — schema 1 established two-pass advancement, three-regression
+  rollback, stage-contract hashing, last-good preservation, and checkpointed
+  resume continuity.
+
 ## randomization_stage
 
 **Current:** stage zero is the standard task. The separately registered

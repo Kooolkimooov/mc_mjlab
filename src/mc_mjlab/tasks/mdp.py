@@ -904,9 +904,18 @@ class finite_impulse_curriculum(recorded_disturbance):
     stages: tuple[tuple[int, tuple[float, float]], ...],
     enabled: bool = True,
     asset_cfg: SceneEntityCfg | None = None,
+    rehearsal_weights: tuple[tuple[float, ...], ...] | None = None,
+    initial_stage: int = 0,
   ) -> None:
     """Expire the current wrench and trigger any due curriculum impulse."""
-    del env_ids, interval_range_s, warmup_s, asset_cfg
+    del (
+      env_ids,
+      interval_range_s,
+      warmup_s,
+      asset_cfg,
+      rehearsal_weights,
+      initial_stage,
+    )
     active = self.remaining > 0
     self.remaining[active] -= 1
     expired = active & (self.remaining == 0)
@@ -914,7 +923,7 @@ class finite_impulse_curriculum(recorded_disturbance):
       self._write_zeros(expired.nonzero(as_tuple=False).flatten())
     if not enabled:
       return
-    due = self.enabled & (env.episode_length_buf >= self.next_push_step)
+    due = self._due(env)
     ids = due.nonzero(as_tuple=False).flatten()
     if ids.numel() == 0:
       return
@@ -925,6 +934,10 @@ class finite_impulse_curriculum(recorded_disturbance):
     self.next_push_step[ids] = env.episode_length_buf[ids] + torch.randint(
       low_steps, high_steps + 1, (len(ids),), device=env.device
     )
+
+  def _due(self, env: ManagerBasedRlEnv) -> torch.Tensor:
+    """Return environments whose next scheduled impulse has arrived."""
+    return self.enabled & (env.episode_length_buf >= self.next_push_step)
 
   def _trigger(
     self,
@@ -1029,6 +1042,83 @@ class gradual_finite_impulse_curriculum(finite_impulse_curriculum):
     )
 
 
+class achievement_finite_impulse_curriculum(finite_impulse_curriculum):
+  """Apply checkpointed difficulty with standing and prior-stage rehearsal."""
+
+  is_achievement_curriculum = True
+
+  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+    super().__init__(cfg, env)
+    self.rehearsal_weights = cfg.params["rehearsal_weights"]
+    self.current_stage = int(cfg.params.get("initial_stage", 0))
+    self.sampled_stage = torch.full(
+      (env.num_envs,), -1, dtype=torch.long, device=env.device
+    )
+    self.set_stage(self.current_stage)
+
+  def set_stage(self, stage: int) -> None:
+    """Select the mixture used by environments at their next reset."""
+    if not 0 <= stage < len(self.rehearsal_weights):
+      raise ValueError(f"invalid achievement stage {stage}")
+    weights = self.rehearsal_weights[stage]
+    if len(weights) != len(self.rehearsal_weights) + 1:
+      raise ValueError("rehearsal weights need standing plus every physical stage")
+    if abs(sum(weights) - 1.0) > 1e-9 or any(value < 0.0 for value in weights):
+      raise ValueError("rehearsal weights must be nonnegative and sum to one")
+    if any(weights[stage + 2 :]):
+      raise ValueError("rehearsal mixture cannot sample a future stage")
+    self.current_stage = stage
+
+  def reset(self, env_ids: torch.Tensor | None = None) -> None:
+    """Schedule an impulse and sample the reset cohort's rehearsal level."""
+    super().reset(env_ids)
+    ids = (
+      torch.arange(self._env.num_envs, device=self._env.device)
+      if env_ids is None
+      else env_ids
+    )
+    if ids.numel() == 0:
+      return
+    weights = torch.tensor(
+      self.rehearsal_weights[self.current_stage], device=self._env.device
+    )
+    self.sampled_stage[ids] = torch.multinomial(weights, len(ids), replacement=True) - 1
+
+  def _due(self, env: ManagerBasedRlEnv) -> torch.Tensor:
+    """Exclude the standing cohort from scheduled disturbances."""
+    return super()._due(env) & (self.sampled_stage >= 0)
+
+  def _trigger(
+    self,
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor,
+    duration_range_s: tuple[float, float],
+    height_range_m: tuple[float, float],
+    stages: tuple[tuple[int, tuple[float, float]], ...],
+  ) -> None:
+    """Sample each due environment from its reset-time rehearsal stage."""
+    for stage in range(self.current_stage + 1):
+      ids = env_ids[self.sampled_stage[env_ids] == stage]
+      if ids.numel():
+        super()._trigger(
+          env,
+          ids,
+          duration_range_s,
+          height_range_m,
+          ((0, stages[stage][1]),),
+        )
+
+  def curriculum_state(self) -> dict[str, float | int]:
+    """Expose current target, standing share, and earlier-stage rehearsal."""
+    weights = self.rehearsal_weights[self.current_stage]
+    return {
+      "stage": self.current_stage,
+      "standing_share": weights[0],
+      "earlier_stage_share": sum(weights[1 : self.current_stage + 1]),
+      "target_stage_share": weights[self.current_stage + 1],
+    }
+
+
 #: Age reported for an env that has not been pushed inside its current episode.
 NEVER_AGE = 1 << 30
 
@@ -1042,6 +1132,19 @@ def _push_term(env: ManagerBasedRlEnv, term_name: str) -> recorded_disturbance:
       f"disturbance-gated reward to know when it fired, got {type(term).__name__}"
     )
   return term
+
+
+def achievement_curriculum_state(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | slice | None,
+  term_name: str = "push_robot",
+) -> dict[str, float | int]:
+  """Report the achievement event's reset-cohort mixture."""
+  del env_ids
+  term = _push_term(env, term_name)
+  if not isinstance(term, achievement_finite_impulse_curriculum):
+    raise TypeError(f"event term {term_name!r} is not achievement gated")
+  return term.curriculum_state()
 
 
 def _age_since_push(env: ManagerBasedRlEnv, term: recorded_disturbance) -> torch.Tensor:

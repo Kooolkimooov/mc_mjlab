@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import math
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -17,8 +19,24 @@ from mc_mjlab.recovery_authority import (
 )
 from mc_mjlab.residual_safety import project_residual
 from mc_mjlab.tasks.mdp import (
+  achievement_finite_impulse_curriculum,
   gradual_finite_impulse_curriculum,
   interpolated_impulse_range,
+)
+from mc_mjlab.tasks.residual_balance.achievement_curriculum import (
+  AchievementCurriculumBridge,
+  AchievementState,
+  QualificationEvidence,
+  apply_qualification,
+  read_qualification_evidence,
+)
+from mc_mjlab.tasks.residual_balance.curriculum_stages import (
+  ACHIEVEMENT_STAGES,
+  REQUIRED_PASS_REPORTS,
+  REQUIRED_QUALIFICATION_SCENARIOS,
+  REQUIRED_REGRESSIONS,
+  achievement_contract,
+  achievement_contract_sha256,
 )
 from mc_mjlab.tasks.residual_balance.effective_training_manifest import (
   build_effective_training_manifest,
@@ -27,7 +45,9 @@ from mc_mjlab.tasks.residual_balance.effective_training_manifest import (
 )
 from mc_mjlab.tasks.residual_balance.qualification_strata import classify_strata
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
+  TORQUE_MARGIN_WEIGHT,
   _make_env_cfg,
+  residual_balance_position_achievement_curriculum_env_cfg,
   residual_balance_position_curriculum_env_cfg,
 )
 from mc_mjlab.tasks.residual_balance.reward_audit import (
@@ -156,6 +176,48 @@ class _CurriculumManager(_TermManager):
     stage = int(self.env.common_step_counter >= 48_000)
     self.env.reward_manager.cfg["probe"].weight = -0.5 if stage else -0.05
     self._curriculum_state["torque_margin"] = stage
+
+
+class _AchievementTerm:
+  """Expose the runner bridge's marked disturbance protocol."""
+
+  is_achievement_curriculum = True
+
+  def __init__(self) -> None:
+    self.current_stage = 0
+
+  def set_stage(self, stage: int) -> None:
+    """Record the selected fake stage."""
+    self.current_stage = stage
+
+
+class _StageCurriculumManager:
+  """Count bridge-driven manager-state refreshes."""
+
+  def __init__(self) -> None:
+    self.compute_calls = 0
+
+  def compute(self) -> None:
+    """Record a fake manager refresh."""
+    self.compute_calls += 1
+
+
+class _AchievementEnv:
+  """Provide the environment surface used by the runner bridge."""
+
+  def __init__(self) -> None:
+    self.unwrapped = self
+    self.term = _AchievementTerm()
+    self.event_manager = _TermManager({"push_robot": _TermCfg(func=self.term)})
+    self.curriculum_manager = _StageCurriculumManager()
+
+
+class _AchievementRunner:
+  """Provide the runner surface used by the curriculum bridge."""
+
+  def __init__(self) -> None:
+    self.env = _AchievementEnv()
+    self.is_distributed = False
 
 
 class _ObservationManager:
@@ -343,6 +405,189 @@ def verify_impulse_curricula() -> None:
   assert frozen.curriculum == gradual.curriculum == {}
 
 
+def _qualification(
+  token: str, stage: int, eligible: bool, iteration: int
+) -> QualificationEvidence:
+  """Build compact deterministic evidence for curriculum assertions."""
+  return QualificationEvidence(
+    token=token,
+    report_sha256=f"sha-{token}",
+    stage=stage,
+    checkpoint=f"/run/model_{iteration}.pt",
+    checkpoint_iteration=iteration,
+    seeds=(42, 43),
+    eligible=eligible,
+    reasons=() if eligible else ("gate failed",),
+  )
+
+
+def verify_achievement_curriculum() -> None:
+  """Check rehearsal, hysteresis, rollback, and exact resume continuity."""
+  assert REQUIRED_PASS_REPORTS == 2
+  assert REQUIRED_REGRESSIONS == 3
+  for index, stage in enumerate(ACHIEVEMENT_STAGES):
+    assert math.isclose(sum(stage.rehearsal_weights), 1.0)
+    assert stage.rehearsal_weights[0] > 0.0
+    assert not any(stage.rehearsal_weights[index + 2 :])
+    if index:
+      assert sum(stage.rehearsal_weights[1 : index + 1]) > 0.0
+  assert achievement_contract_sha256(0) != achievement_contract_sha256(1)
+
+  first = apply_qualification(AchievementState(), _qualification("pass-a", 0, True, 20))
+  assert first.event == "pass_pending" and first.state.current_stage == 0
+  restored = AchievementState.from_dict(first.state.to_dict())
+  uninterrupted = apply_qualification(
+    first.state, _qualification("pass-b", 0, True, 40)
+  )
+  resumed = apply_qualification(restored, _qualification("pass-b", 0, True, 40))
+  assert uninterrupted == resumed
+  assert resumed.event == "advanced"
+  assert resumed.state.current_stage == 1
+  assert resumed.state.highest_passed_stage == 0
+  assert resumed.state.qualified_checkpoints[0] == "/run/model_40.pt"
+  assert resumed.state.last_good_checkpoint == "/run/model_40.pt"
+  assert (
+    apply_qualification(resumed.state, _qualification("pass-b", 1, True, 40)).event
+    == "duplicate"
+  )
+
+  state = resumed.state
+  for index in range(REQUIRED_REGRESSIONS):
+    decision = apply_qualification(
+      state, _qualification(f"fail-{index}", 1, False, 60 + index)
+    )
+    state = decision.state
+  assert decision.event == "rolled_back"
+  assert state.current_stage == 0
+  assert state.highest_passed_stage == 0
+  assert state.last_good_checkpoint == "/run/model_40.pt"
+
+  state = AchievementState(
+    current_stage=2,
+    highest_passed_stage=2,
+    mastered=True,
+    qualified_checkpoints=("stage-0.pt", "stage-1.pt", "stage-2.pt"),
+    last_good_checkpoint="stage-2.pt",
+  )
+  for index in range(REQUIRED_REGRESSIONS):
+    decision = apply_qualification(
+      state, _qualification(f"hard-fail-{index}", 2, False, 80 + index)
+    )
+    state = decision.state
+  assert state.current_stage == state.highest_passed_stage == 1
+  assert state.last_good_checkpoint == "stage-1.pt"
+  assert not state.mastered
+
+  cfg = residual_balance_position_achievement_curriculum_env_cfg()
+  push = cfg.events["push_robot"]
+  assert push.func is achievement_finite_impulse_curriculum
+  assert push.params["initial_stage"] == 0
+  assert tuple(push.params["rehearsal_weights"]) == tuple(
+    stage.rehearsal_weights for stage in ACHIEVEMENT_STAGES
+  )
+  assert set(cfg.curriculum) == {"achievement_stage"}
+  assert cfg.rewards["torque_margin"].weight == TORQUE_MARGIN_WEIGHT
+
+
+def verify_achievement_report_contract() -> None:
+  """Check the on-disk evaluator/trainer handshake and path boundary."""
+  with tempfile.TemporaryDirectory() as directory:
+    run_dir = Path(directory)
+    checkpoint = run_dir / "model_20.pt"
+    checkpoint.write_bytes(b"checkpoint")
+    stage = 0
+    report = {
+      "config": {
+        "seeds": [42, 43],
+        "scenarios": list(REQUIRED_QUALIFICATION_SCENARIOS),
+        "achievement": {
+          "stage": stage,
+          "contract": achievement_contract(stage),
+          "contract_sha256": achievement_contract_sha256(stage),
+        },
+      },
+      "checkpoints": {
+        str(checkpoint): {"promotion": {"eligible": True, "reasons": []}}
+      },
+    }
+    path = run_dir / "qualification.json"
+    path.write_text(json.dumps(report))
+    evidence = read_qualification_evidence(path, stage, run_dir, 21)
+    assert evidence.checkpoint == str(checkpoint)
+    assert evidence.eligible
+    report["config"]["seeds"] = [42]
+    path.write_text(json.dumps(report))
+    try:
+      read_qualification_evidence(path, stage, run_dir, 21)
+    except ValueError:
+      pass
+    else:
+      raise AssertionError("achievement report accepted a single seed")
+
+
+def _write_achievement_report(
+  path: Path,
+  checkpoint: Path,
+  stage: int,
+  seeds: list[int],
+  eligible: bool = True,
+) -> None:
+  """Write one minimal valid qualifier report for bridge assertions."""
+  report = {
+    "config": {
+      "seeds": seeds,
+      "scenarios": list(REQUIRED_QUALIFICATION_SCENARIOS),
+      "achievement": {
+        "stage": stage,
+        "contract": achievement_contract(stage),
+        "contract_sha256": achievement_contract_sha256(stage),
+      },
+    },
+    "checkpoints": {
+      str(checkpoint): {
+        "promotion": {
+          "eligible": eligible,
+          "reasons": [] if eligible else ["gate failed"],
+        }
+      }
+    },
+  }
+  path.write_text(json.dumps(report))
+
+
+def verify_achievement_runner_bridge() -> None:
+  """Check report consumption, preservation, publication, and restored deduping."""
+  with tempfile.TemporaryDirectory() as directory:
+    run_dir = Path(directory)
+    runner = _AchievementRunner()
+    bridge = AchievementCurriculumBridge(runner, run_dir)
+    report_path = run_dir / "curriculum" / "qualification.json"
+    first = run_dir / "model_20.pt"
+    first.write_bytes(b"first")
+    _write_achievement_report(report_path, first, 0, [42, 43])
+    bridge.iteration(20)
+    assert bridge.state.pass_streak == 1
+
+    second = run_dir / "model_40.pt"
+    second.write_bytes(b"second")
+    _write_achievement_report(report_path, second, 0, [42, 43])
+    bridge.iteration(40)
+    assert bridge.state.current_stage == 1
+    assert runner.env.term.current_stage == 1
+    preserved = run_dir / "curriculum" / "qualified_stage_0_model_40.pt"
+    assert preserved.read_bytes() == b"second"
+    saved = bridge.snapshot()
+    assert saved is not None
+
+    resumed_runner = _AchievementRunner()
+    resumed = AchievementCurriculumBridge(resumed_runner, run_dir)
+    resumed.restore(saved)
+    before = resumed.state
+    resumed.iteration(41)
+    assert resumed.state == before
+    assert resumed_runner.env.term.current_stage == 1
+
+
 def verify_environment_variants() -> None:
   """Check deployable observations and staged-randomization configuration."""
   standard = _make_env_cfg("position", num_envs=1, disturbance="none")
@@ -516,6 +761,9 @@ def main() -> None:
   verify_recovery_detector()
   verify_rollout_schedule()
   verify_impulse_curricula()
+  verify_achievement_curriculum()
+  verify_achievement_report_contract()
+  verify_achievement_runner_bridge()
   verify_environment_variants()
   verify_effective_training_manifest()
   verify_reward_audit()

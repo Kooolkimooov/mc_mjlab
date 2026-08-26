@@ -10,6 +10,9 @@ from pathlib import Path
 
 from mjlab.rl import MjlabOnPolicyRunner
 
+from mc_mjlab.tasks.residual_balance.achievement_curriculum import (
+  AchievementCurriculumBridge,
+)
 from mc_mjlab.tasks.residual_balance.effective_training_manifest import (
   build_effective_training_manifest,
   curriculum_runtime_snapshot,
@@ -105,6 +108,7 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
   BUDGET_KEY = "training_budget"
   MANIFEST_KEY = "effective_training_manifest"
   CURRICULUM_KEY = "curriculum_runtime"
+  ACHIEVEMENT_KEY = "achievement_curriculum"
   WATCHDOG_KEY = "training_watchdog"
 
   def __init__(self, env, train_cfg: dict, log_dir=None, device: str = "cpu") -> None:
@@ -112,6 +116,7 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
     self._controller_provenance = collect_controller_provenance(env)
     self._training_budget = training_budget(env.num_envs, train_cfg)
     self._effective_manifest = build_effective_training_manifest(env, train_cfg)
+    self._achievement = AchievementCurriculumBridge(self, log_dir)
     self._watchdog = RunnerWatchdogBridge(self, log_dir)
     # rsl_rl's `learn()` offers no per-iteration hook, so the one logging call it
     # makes is where the diagnostics attach. docs/ppo.md#training-diagnostics
@@ -133,6 +138,10 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
       if writer is not None and iteration is not None:
         for name, value in diagnostics.items():
           writer.add_scalar(f"Diagnostics/{name}", value, iteration)
+        for name, value in self._achievement.iteration(iteration).items():
+          writer.add_scalar(f"Curriculum/Achievement/{name}", value, iteration)
+      elif iteration is not None:
+        self._achievement.iteration(iteration)
       episode_extras = list(self.logger.ep_extras)
       result = log(*args, **kwargs)
       if iteration is not None:
@@ -164,6 +173,7 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
 
   def save(self, path: str, infos=None) -> None:
     """Embed controller inputs in every checkpoint as well as the run directory."""
+    achievement = self._achievement.snapshot()
     infos = {
       **(infos or {}),
       self.PROVENANCE_KEY: self._controller_provenance,
@@ -171,6 +181,7 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
       self.MANIFEST_KEY: self._effective_manifest,
       self.CURRICULUM_KEY: curriculum_runtime_snapshot(self.env),
       self.WATCHDOG_KEY: self._watchdog.as_config(),
+      **({self.ACHIEVEMENT_KEY: achievement} if achievement is not None else {}),
     }
     super().save(path, infos)
     self._watchdog.checkpoint_saved(path)
@@ -206,7 +217,9 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
         full_resume=load_cfg is None,
       )
     if load_cfg is None:
-      synchronized = synchronize_resumed_curriculum(self.env, checkpoint_infos)
+      synchronize_resumed_curriculum(self.env, checkpoint_infos)
+      self._achievement.restore(checkpoint_infos.get(self.ACHIEVEMENT_KEY))
+      synchronized = curriculum_runtime_snapshot(self.env)
       saved_curriculum = checkpoint_infos.get(self.CURRICULUM_KEY)
       if saved_curriculum is not None and saved_curriculum != synchronized:
         print(
