@@ -130,7 +130,43 @@ measure.
 **Re-measure if:** the band mixture, authority set, detector calibration, or
 training budget changes.
 
+**Paired qualification rejected both checkpoints.** 16 environments, seeds 42 and
+43, all four scenarios, 32 clusters. `model_140` lost `current_kick` and
+`finite_impulse` to wedged controller workers; `model_180` had four valid
+scenarios and is the read that counts.
+
+| scenario | baseline hazard | policy hazard | note |
+| --- | ---: | ---: | --- |
+| `nominal` | 0.000 | 0.000 | `zmp_error` 0.03229 -> 0.03229, gate duty 0.55% |
+| `current_kick` | 0.969 | 0.938 | |
+| `finite_impulse` | 1.000 | 1.000 | recovery DCM `+0.64%`, CI `[-0.0062, +0.0078]` |
+| `robust` | 1.000 | 1.000 | |
+
+Overall hazard ratio `0.989` against a required `<= 0.90`. Gates failed:
+`nominal` foot slip upper-CI, finite-impulse recovery DCM below 5%, and the
+hazard ratio.
+
+**The result also corrected the premise the bands were chosen on.** The
+`9.375%` and `78.125%` baseline hazards this design cited were measured under
+`--achievement-stage 0`, not at the qualifier's default `0.40` and
+`[0.50, 0.60] m/s`. At the defaults mc_rtc falls in `96.9%` to `100%` of
+disturbed episodes, so the hazard gate asks the policy to survive where the
+controller never does, and `recovery_dcm_error` averages recoveries that never
+complete. See [difficulty.md](difficulty.md#stratified_finite_impulse_curriculum).
+
+What the policy did do: total hazard `-1.1%`, `current_kick` hazard `-3.1`
+points, nominal ZMP unchanged to five decimals, gate duty `0.55%` against a `5%`
+cap, and `projection_fraction`, `near_bound_fraction` and `max_effort_ratio` all
+clean. The `nominal` failure is foot slip `0.000047 -> 0.000048`: a real
+regression of `1e-6` failing a 5% relative gate on a `4.7e-5` baseline.
+
+Both the nominal and hazard gates failed together, which the pre-registered rule
+in `difficulty.md` says falsifies the mixture hypothesis rather than selecting
+between `gait` and `hazard`. No mixture change follows from this run.
+
 **History:**
+- 2026-08-27 — paired qualification rejected `model_140` and `model_180`; the
+  run corrected the baseline-hazard premise the band shares were argued from.
 - 2026-08-27 — completed the qualification-matched seed; paired qualification of
   `model_140` and `model_180` at 32 clusters is the deciding read.
 

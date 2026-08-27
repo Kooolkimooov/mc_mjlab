@@ -43,9 +43,20 @@ policy steps per environment, so every arm trained essentially entirely inside
 `[0.10, 0.25]`. `PairedDisturbances` then scores `current_kick` and
 `finite_impulse` at `0.40 m/s` and `robust` at `[0.50, 0.60] m/s` — 1.6x to 2.4x
 above the training support. `promotion()` requires
-`sum(policy hazard) / sum(baseline hazard) <= 0.90` across all four scenarios,
-and the two measured baseline hazards are `9.375%` for finite impulse against
-`78.125%` for robust, so that sum is dominated by the band the policy never saw.
+`sum(policy hazard) / sum(baseline hazard) <= 0.90` across all four scenarios.
+
+**Correction, 2026-08-27.** This section originally justified the band shares
+with baseline hazards of `9.375%` for finite impulse and `78.125%` for robust,
+described as the qualifier's own. They are not: those were measured under
+`--achievement-stage 0`, whose pushes are `0.25 m/s` and `[0.30, 0.35] m/s`. The
+qualifier's defaults are `0.40` and `[0.50, 0.60]`, and the first paired run at
+those magnitudes measured baseline hazard `0.969`, `1.000` and `1.000` for
+current-kick, finite-impulse and robust. The controller falls in essentially
+every disturbed episode there, so the hazard gate does not ask for a share of a
+robust-dominated sum — it asks the policy to survive a regime that kills mc_rtc
+every time, and `recovery_dcm_error` is averaged over recoveries that never
+complete. The distribution-mismatch argument below still holds and is stronger
+for it; the claim about where the hazard denominator sits did not.
 
 The stage-0 achievement run measured exactly that split: finite-impulse hazard
 improved from `9.375%` to `6.25%` while robust hazard worsened from `78.125%` to
