@@ -85,6 +85,55 @@ scales, observation contract, or training budget changes.
 - 2026-08-25 — selected the standard and ankle checkpoints for deterministic
   paired qualification; no policy is promoted from training curves.
 
+## stratified_finite_impulse_curriculum
+
+**Current:** the qualification-matched seed completed 188 iterations at 128
+environments, 30 workers, seed 42, in 1 h 14 min with exit code zero, no
+controller failure, and one quarantined worker. Its control is the seed-42 ankle
+screen arm, which differs only in the disturbance distribution.
+
+Both smoothed minima fall together: `zmp_error` at iteration 137 and
+`recovery_dcm_error` at 127, then both decay. `model_140` is therefore the
+best-metric read and `model_180` the late read, the same bracket the ankle arm
+used.
+
+| diagnostic | ankle control | matched impulse | note |
+| --- | ---: | ---: | --- |
+| best `zmp_error` | 0.035626 at 138 | 0.040259 at 137 | not comparable, see below |
+| best `recovery_dcm_error` | 0.013121 at 89 | 0.014612 at 127 | not comparable |
+| `executed_residual_l2` | 0.000154 | 0.006623 | 43x |
+| `actor_update_fraction` | not logged | 0.137 | |
+| `impulse_speed` | not logged | 0.143 | |
+| `projection_fraction` | 0 | 0.000000 | gate `< 0.001` |
+| `near_bound_fraction` | 0 | 0.000001 | gate `< 0.01` |
+| `max_effort_ratio` | 0.580 | 0.365 | gate `<= 1.0` |
+| late `fell_over` + `collapsed` | 0.003598 | 0.542 | harder distribution |
+
+**The tracking columns are not evidence and must not be read as a regression.**
+Both arms score their own disturbance distribution, and this one is far harder:
+`0.40-0.60 m/s` impulses produce larger DCM and ZMP excursions than
+`[0.10, 0.25]` ones no matter how good the policy is. Comparing tracking error
+across different disturbance distributions measures the distributions. Only the
+paired qualifier, which gives both arms identical disturbances, can compare
+policies. The same applies to the hazard row.
+
+**What is evidence** is the residual column. Every arm in the 2026-08-25 matrix
+sat between `0.000154` and `0.000646` executed residual, and unclipped PPO
+reached `0.003230` only by saturating. This run uses `0.006623` while
+`projection_fraction`, `near_bound_fraction`, and `inactive_residual_violation`
+all stay at zero and peak effort stays at 0.365 of the hardware limit. The
+earlier arms were, functionally, near-zero policies, which is sufficient on its
+own to explain 13 statistically indistinguishable results. This is the first arm
+with a policy far enough from zero for the qualifier to have something to
+measure.
+
+**Re-measure if:** the band mixture, authority set, detector calibration, or
+training budget changes.
+
+**History:**
+- 2026-08-27 — completed the qualification-matched seed; paired qualification of
+  `model_140` and `model_180` at 32 clusters is the deciding read.
+
 ## actor_update_fraction
 
 **Current:** the active-authority correction completed its isolated seed-42
