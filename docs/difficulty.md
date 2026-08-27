@@ -90,6 +90,19 @@ robust band still has too little weight to move a denominator it dominates.
 Writing both down before the verdict is what keeps the second arm a test rather
 than a knob turned until something passes.
 
+**Two verdicts no mixture repairs.** `nominal: authority duty exceeds 5%` is a
+detector verdict, not a difficulty one: the `nominal` scenario applies no push,
+so duty there is whatever `etc/recovery_detector.json` fires on an undisturbed
+gait, and reweighting the training mixture cannot move it. The repair is
+recalibration, and `recovery_authority_coverage` is the reading that says whether
+the same calibration has also lost recall where it matters. The seed's `gate_mean`
+of `0.066` is measured under pushes and is not that number.
+
+Likewise a *simultaneous* `nominal` and hazard failure falsifies the mixture
+hypothesis rather than selecting between its alternates: no reweighting buys both
+at once, and the next variable is residual authority or the detector, not the
+band shares.
+
 **Why stationary rather than a curriculum.** The 500-iteration budget run took
 its best 60-iteration ZMP and recovery windows at iterations 175 and 178,
 immediately before the stage boundary at 188, then degraded and produced NaNs at
