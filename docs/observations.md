@@ -78,12 +78,12 @@ and joint state are near-Markov, whereas the plan's recent history is what encod
 where in the stride the robot is.
 
 Actor width is `1099` at 20 controller frames after removing the two sole
-velocimeters. The registered history screens are `649` dimensions at 10 frames
-and `424` at 5. The one-frame GRU input is `172` dimensions, with hidden size
-`256`; both its recurrent policy and the feed-forward policy zero-initialize the
-mean head. These remain affordable because collection dominates
-completely — 6.94 s against 0.014 s of learning per iteration at 2x2 epochs x
-minibatches, so a wider first layer costs no wall clock.
+velocimeters. The archived history screens are `649` dimensions at 10 frames and
+`424` at 5. The one-frame GRU input is `172` dimensions, with hidden size `256`;
+all three are opt-in through `MC_MJLAB_REGISTER_ARCHIVED_TASKS=1`. Both recurrent
+and feed-forward policies zero-initialize the mean head. They remain affordable
+because collection dominates completely — 6.94 s against 0.014 s of learning per
+iteration at 2x2 epochs x minibatches, so a wider first layer costs no wall clock.
 
 ## Gait phase proxies
 

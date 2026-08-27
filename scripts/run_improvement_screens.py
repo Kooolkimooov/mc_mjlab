@@ -1,4 +1,4 @@
-"""Run the fixed-budget critique screen matrix sequentially and resumably."""
+"""Run the retained standard-versus-ankle comparison resumably."""
 
 from __future__ import annotations
 
@@ -8,70 +8,20 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from mc_mjlab.tasks.residual_balance import POSITION_TASK_ID, POSITION_VELOCITY_TASK_ID
-from mc_mjlab.utils.task_naming import get_task_name
-
-TASK_DIR = "residual_balance"
+from mc_mjlab.tasks.residual_balance import ANKLE_TASK_ID, POSITION_TASK_ID
 
 
 @dataclass(frozen=True)
 class Screen:
-  """One task/configuration arm in the short experiment matrix."""
+  """One supported task in the short comparison."""
 
   name: str
   task_id: str
-  overrides: tuple[str, ...] = ()
-
-
-def task_id(suffix: str) -> str:
-  """Resolve a registered position-task suffix through the naming utility."""
-  return get_task_name(TASK_DIR, f"position-{suffix}")
 
 
 SCREENS = (
   Screen("standard", POSITION_TASK_ID),
-  Screen("position-velocity", POSITION_VELOCITY_TASK_ID),
-  Screen("authority-ankle", task_id("ankle")),
-  Screen("authority-sagittal", task_id("sagittal")),
-  Screen("authority-hardware", task_id("hardware")),
-  Screen("history-10", task_id("history10")),
-  Screen("history-5", task_id("history5")),
-  Screen("history-gru256", task_id("gru256")),
-  Screen(
-    "ppo-fixed-1e-4",
-    POSITION_TASK_ID,
-    ("--agent.algorithm.schedule", "fixed", "--agent.algorithm.learning-rate", "1e-4"),
-  ),
-  Screen(
-    "ppo-fixed-3e-4",
-    POSITION_TASK_ID,
-    ("--agent.algorithm.schedule", "fixed", "--agent.algorithm.learning-rate", "3e-4"),
-  ),
-  Screen(
-    "ppo-fixed-1e-3",
-    POSITION_TASK_ID,
-    ("--agent.algorithm.schedule", "fixed", "--agent.algorithm.learning-rate", "1e-3"),
-  ),
-  Screen(
-    "ppo-epochs-5x4",
-    POSITION_TASK_ID,
-    (
-      "--agent.algorithm.num-learning-epochs",
-      "5",
-      "--agent.algorithm.num-mini-batches",
-      "4",
-    ),
-  ),
-  Screen(
-    "ppo-unclipped",
-    POSITION_TASK_ID,
-    (
-      "--agent.algorithm.clip-param",
-      "1000000",
-      "--agent.algorithm.use-clipped-value-loss",
-      "False",
-    ),
-  ),
+  Screen("authority-ankle", ANKLE_TASK_ID),
 )
 
 
@@ -135,7 +85,6 @@ def main() -> None:
       "False",
       "--log-root",
       str(args.log_root),
-      *arm.overrides,
     ]
     log_path = args.log_root / f"{arm.name}.log"
     print(f"[screen] start {arm.name}; log {log_path}", flush=True)

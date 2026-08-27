@@ -135,6 +135,18 @@ uv run play  Mc-Mjlab-Residual-Balance-Posture-Jvrc1-Position \
   --checkpoint-file <path/to/model_*.pt>
 ```
 
+The default mc_mjlab surface is six tasks: zero-residual position/torque,
+residual position/torque, residual position-ankle, and the ankle achievement
+curriculum. Ten completed ablations are hidden so `import mjlab` does not build
+them. To play an old velocity, sagittal, hardware, frozen/gradual, robust,
+history, or GRU checkpoint under its original id:
+
+```sh
+MC_MJLAB_REGISTER_ARCHIVED_TASKS=1 uv run list-envs
+MC_MJLAB_REGISTER_ARCHIVED_TASKS=1 uv run play <archived-task-id> \
+  --checkpoint-file <path/to/model_*.pt>
+```
+
 Every residual-balance training run publishes a PID-bound heartbeat under
 `<run>/watchdog/`. For an unattended run, attach the cooperative monitor from a
 second tmux window:

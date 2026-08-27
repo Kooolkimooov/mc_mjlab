@@ -282,11 +282,12 @@ The question arose because the reward proved blind to the policy — see
 
 ## AUTHORITY_SETS
 
-**Current:** position-control screens are registered for `ankle`, `sagittal`,
-`hardware`, and the unchanged `uniform` default. Ankle authority selects the
-last two joints of each leg. Sagittal authority selects hip pitch, knee pitch,
-and ankle pitch. Hardware and uniform retain all twelve leg joints. Selection is
-derived from each mc_rtc robot module rather than HRP5P names typed into the task.
+**Current:** `uniform` and `ankle` are registered by default. The completed
+`sagittal` and `hardware` screens are available only through
+`MC_MJLAB_REGISTER_ARCHIVED_TASKS=1`. Ankle authority selects the last two joints
+of each leg. Sagittal authority selects hip pitch, knee pitch, and ankle pitch.
+Hardware and uniform retain all twelve leg joints. Selection is derived from each
+mc_rtc robot module rather than HRP5P names typed into the task.
 
 For every non-uniform position set, per-joint authority is
 `min(0.01 rad, 0.20 * effort_limit / kp)`. Torque uses
@@ -298,6 +299,8 @@ back to mjlab's unit scale.
 mode changes.
 
 **History:**
+- 2026-08-27 — retained ankle as the active policy task and moved sagittal and
+  hardware registrations behind the archive compatibility switch.
 - 2026-08-24 — HRP5P hardware-normalized position scales are `0.009293` rad
   (hip yaw), `0.009318` (hip roll), `0.007527` (hip pitch), `0.007886` (knee
   pitch), `0.007602` (ankle pitch), and `0.010000` (ankle roll), symmetrically

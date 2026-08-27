@@ -135,13 +135,14 @@ count, stage magnitudes, or checkpoint cadence changes.
 
 ## randomization_stage
 
-**Current:** stage zero is the standard task. The separately registered
-`Position-Robust1` samples friction `+-10%`, active PD gains `+-5%`, and motor
-strength `+-5%`. Actor observations sample `0-1` policy-step delay, while
+**Current:** stage zero is the standard task. Archived `Position-Robust1` samples
+friction `+-10%`, active PD gains `+-5%`, and motor strength `+-5%`. Actor
+observations sample `0-1` policy-step delay, while
 actuator commands sample `0-1` mc_rtc controller-period delay (`0-2` physics
-substeps). `Position-Robust2` doubles every range and permits two delay steps.
-Randomization is static per environment construction; ordinary training does
-not enable it before the standard-task promotion gate is met.
+substeps). Archived `Position-Robust2` doubles every range and permits two delay
+steps. Both require `MC_MJLAB_REGISTER_ARCHIVED_TASKS=1`. Randomization is static
+per environment construction; ordinary training does not enable it before the
+standard-task promotion gate is met.
 
 Mass/inertia and COM are intentionally excluded. Expanding either family for
 per-world randomization and recomputing MuJoCo constants changed HRP5P's walking

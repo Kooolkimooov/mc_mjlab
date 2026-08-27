@@ -194,7 +194,9 @@ From mjlab down to mc_rtc:
   sub-*packages* are walked, so a task added as a bare module never registers;
   and `register_mjlab_task` takes built cfgs, so `import mjlab` now builds this
   repo's env cfgs — without a sourced mc_rtc workspace mjlab's loader reports
-  that as a `[WARN]` plus traceback rather than failing.
+  that as a `[WARN]` plus traceback rather than failing. Only six supported ids
+  register by default; `MC_MJLAB_REGISTER_ARCHIVED_TASKS=1` restores ten
+  historical residual ablations for old-checkpoint compatibility.
 - `tasks/residual_balance/residual_balance_runner.py` — snapshots external base
   controller inputs into the run directory and every checkpoint, and validates
   them on load. Its effective-training manifest records live resolved manager

@@ -181,14 +181,19 @@ slicing.
 
 ## residual_balance task registrations
 
-**Current:** twelve residual-balance task ids are registered, most one-off failed
-ablations. They are constructed on every `import mjlab`, enlarge the supported
-surface, and have no qualified result. The achievement task also uses a different
-reward schedule, so the preceding 13-arm screen does not transfer to it.
+**Current:** four residual-balance ids are registered by default: position,
+torque, ankle, and ankle achievement. Together with the two zero-residual play
+ids, mc_mjlab exposes six tasks. Ten completed ablations no longer build during
+`import mjlab`; `MC_MJLAB_REGISTER_ARCHIVED_TASKS=1` restores their original ids
+for old-checkpoint compatibility. The screen launcher now contains only the
+supported standard and ankle comparison.
 
-**Decision:** deferred cleanup. Keep the controller baseline, main residual task,
-and current policy-correction task; remove or move historical ablations to a
-script-local registry after checkpoint compatibility is accounted for.
+**Re-measure if:** a retained task is rejected, a new policy direction qualifies,
+or an archived checkpoint needs a compatibility path beyond its original id.
+
+**History:**
+- 2026-08-27 — reduced 14 default residual registrations to four while retaining
+  ten historical ids behind an explicit compatibility switch.
 
 ## verify_improvement_contracts.py
 

@@ -95,12 +95,11 @@ distribution changes.
 
 ## SELECTIVE_AUTHORITY
 
-**Current:** Probe two-second DCM, centre-of-pressure, and effort responses to
-per-joint and grouped residual pulses. Position authority per joint is
+**Current:** Position authority per joint is
 `min(0.01 rad, 0.20 * effort_limit / kp)` and torque authority is
-`min(10 Nm, 0.20 * effort_limit)`. Screen ankle-only, sagittal-leg, full
-hardware-normalized, and current uniform authority, promoting the smallest
-passing set.
+`min(10 Nm, 0.20 * effort_limit)`. The completed ankle, sagittal, hardware, and
+uniform screens promoted no policy. Uniform and ankle remain supported; the two
+other task ids are archived.
 
 **Re-measure if:** hardware limits, PD gains, controller, or robot changes.
 

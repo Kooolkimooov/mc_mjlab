@@ -268,12 +268,10 @@ validation checkpoints from the current tree is the clean migration path.
 
 ## run_improvement_screens.py
 
-**Current:** a resumable sequential matrix runs the roadmap's 188-iteration,
-seed-42, 128-environment, 30-worker screens. Arms cover standard, three selective
-authority variants, 10/5-frame and GRU-256 observation variants, fixed learning
-rates `1e-4`/`3e-4`/`1e-3`, `5 x 4` optimization, and an unclipped objective.
-TensorBoard is used so the matrix has no network dependency. Completion state and
-one console log per arm live under `logs/critique_screens/`.
+**Current:** the resumable launcher contains only the supported standard and
+ankle tasks. It retains the 188-iteration, seed-42, 128-environment, 30-worker
+comparison budget and TensorBoard logging. Completion state and one console log
+per arm live under `logs/critique_screens/`.
 
 Launch it inside tmux:
 
@@ -282,15 +280,17 @@ uv run python scripts/run_improvement_screens.py
 ```
 
 Qualification accepts `--authority-set`, `--controller-history`,
-`--proprio-history`, and `--recurrent`, so every variant reconstructs the actor
-shape it trained with. Robust training is intentionally absent from the matrix;
-the registered `Position-Robust1/2` tasks remain gated on beating the standard
-task first.
+`--proprio-history`, and `--recurrent` to reconstruct archived actor shapes.
+`compare_to_baseline.py --walking-reference` reconstructs the velocity variant.
+Historical variants therefore remain evaluable without keeping their task ids in
+the default registry.
 
 **Re-measure if:** screen budget, worker capacity, task registrations, or PPO
 screen axes change.
 
 **History:**
+- 2026-08-27 — removed the eleven failed/non-policy arms after the original
+  matrix completed; the launcher now compares only standard and ankle authority.
 - 2026-08-24 — added after implementing the critique changes so interrupted
   multi-hour screens resume at arm boundaries instead of silently duplicating
   completed runs.
