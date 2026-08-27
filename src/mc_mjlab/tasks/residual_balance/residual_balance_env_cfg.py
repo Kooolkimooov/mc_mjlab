@@ -41,6 +41,11 @@ from mc_mjlab.tasks import mdp
 from mc_mjlab.tasks.residual_balance.curriculum_stages import ACHIEVEMENT_STAGES
 
 # Only values used twice or more live here; the rest sit in the term that uses them.
+# Training bands chosen to cover the qualifier's own push magnitudes (0.40 and
+# 0.50-0.60 m/s), which the step curriculum never reaches inside a screen budget.
+# docs/difficulty.md#stratified_finite_impulse_curriculum
+QUALIFICATION_MATCHED_BANDS = ((0.10, 0.25), (0.25, 0.40), (0.40, 0.60))
+QUALIFICATION_MATCHED_WEIGHTS = (0.20, 0.25, 0.25, 0.30)
 DCM_STD = 0.10
 FALL_LIMIT_ANGLE = math.radians(45.0)
 TORQUE_MARGIN_WEIGHT = -0.05
@@ -522,6 +527,7 @@ def _make_env_cfg(
     "projection_fraction": MetricsTermCfg(func=mdp.projection_fraction),
     "near_bound_fraction": MetricsTermCfg(func=mdp.near_bound_fraction),
     "executed_residual_l2": MetricsTermCfg(func=mdp.action_l2),
+    "impulse_speed": MetricsTermCfg(func=mdp.impulse_speed),
     "requested_residual_l2": MetricsTermCfg(func=mdp.requested_action_l2),
     "requested_residual_rate_l2": MetricsTermCfg(func=mdp.requested_action_rate_l2),
     "max_effort_ratio": MetricsTermCfg(
@@ -630,6 +636,23 @@ def residual_balance_position_env_cfg(
   )
   if play:
     _apply_play_overrides(cfg)
+  return cfg
+
+
+def residual_balance_position_matched_impulse_env_cfg(
+  play: bool = False,
+) -> ManagerBasedRlEnvCfg:
+  """Build the ankle-authority task whose pushes span the qualifier's range."""
+  cfg = residual_balance_position_env_cfg(play=play, authority_set="ankle")
+  push = cfg.events["push_robot"]
+  push.func = mdp.stratified_finite_impulse_curriculum
+  push.params["bands"] = QUALIFICATION_MATCHED_BANDS
+  push.params["band_weights"] = QUALIFICATION_MATCHED_WEIGHTS
+  union = (
+    QUALIFICATION_MATCHED_BANDS[0][0],
+    QUALIFICATION_MATCHED_BANDS[-1][1],
+  )
+  push.params["stages"] = ((0, union),)
   return cfg
 
 

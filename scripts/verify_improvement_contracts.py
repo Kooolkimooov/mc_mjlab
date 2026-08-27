@@ -23,10 +23,12 @@ from mc_mjlab.residual_safety import project_residual
 from mc_mjlab.tasks.mdp import (
   achievement_finite_impulse_curriculum,
   action_l2,
+  finite_impulse_curriculum,
   gradual_finite_impulse_curriculum,
   interpolated_impulse_range,
   requested_action_l2,
   requested_action_rate_l2,
+  stratified_finite_impulse_curriculum,
 )
 from mc_mjlab.tasks.residual_balance.achievement_curriculum import (
   AchievementCurriculumBridge,
@@ -50,10 +52,13 @@ from mc_mjlab.tasks.residual_balance.effective_training_manifest import (
 )
 from mc_mjlab.tasks.residual_balance.qualification_strata import classify_strata
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
+  QUALIFICATION_MATCHED_BANDS,
+  QUALIFICATION_MATCHED_WEIGHTS,
   TORQUE_MARGIN_WEIGHT,
   _make_env_cfg,
   residual_balance_position_achievement_curriculum_env_cfg,
   residual_balance_position_curriculum_env_cfg,
+  residual_balance_position_matched_impulse_env_cfg,
 )
 from mc_mjlab.tasks.residual_balance.reward_audit import (
   RewardAuditRecorder,
@@ -383,8 +388,8 @@ def verify_request_pricing() -> None:
   gate = torch.tensor([1.0, 1.0, 0.0, 0.4])
   previous_gate = torch.tensor([0.0, 1.0, 1.0, 1.0])
   env = _request_pricing_env(request, previous, gate, previous_gate)
-  magnitude = requested_action_l2(env)  # type: ignore[arg-type]
-  rate = requested_action_rate_l2(env)  # type: ignore[arg-type]
+  magnitude = requested_action_l2(env)  # ty: ignore[invalid-argument-type]
+  rate = requested_action_rate_l2(env)  # ty: ignore[invalid-argument-type]
   assert torch.allclose(magnitude, torch.tensor([0.25, 0.25, 0.0, 0.25]))
   assert torch.allclose(rate, torch.tensor([0.0, 0.08, 0.0, 0.08]))
   assert float(rate[0]) == 0.0 and float(magnitude[0]) > 0.0
@@ -554,6 +559,78 @@ def _qualification(
     eligible=eligible,
     reasons=() if eligible else ("gate failed",),
   )
+
+
+class _StratifiedEnv:
+  """Provide the fields the stratified impulse term reads."""
+
+  def __init__(self) -> None:
+    self.num_envs = 4
+    self.device = "cpu"
+    self.episode_length_buf = torch.ones(4, dtype=torch.long)
+
+
+def verify_stratified_impulse() -> None:
+  """Check qualifier coverage, band validation, standing exclusion, routing."""
+  push = residual_balance_position_matched_impulse_env_cfg().events["push_robot"]
+  assert push.func is stratified_finite_impulse_curriculum
+  assert push.params["bands"] == QUALIFICATION_MATCHED_BANDS
+  assert push.params["band_weights"] == QUALIFICATION_MATCHED_WEIGHTS
+  assert push.params["stages"] == ((0, (0.10, 0.60)),)
+  assert math.isclose(sum(QUALIFICATION_MATCHED_WEIGHTS), 1.0)
+  for magnitude in (0.25, 0.40, 0.50, 0.60):
+    assert any(low <= magnitude <= high for low, high in QUALIFICATION_MATCHED_BANDS)
+
+  env = _StratifiedEnv()
+  original_init = finite_impulse_curriculum.__init__
+  finite_impulse_curriculum.__init__ = lambda self, cfg, env: None
+  try:
+    for weights, stages in (
+      ((0.2, 0.3, 0.3, 0.3), ((0, (0.10, 0.60)),)),
+      ((0.5, 0.5), ((0, (0.10, 0.60)),)),
+      (QUALIFICATION_MATCHED_WEIGHTS, ((0, (0.10, 0.50)),)),
+      (QUALIFICATION_MATCHED_WEIGHTS, ((0, (0.10, 0.60)), (1, (0.10, 0.60)))),
+    ):
+      params = {
+        "bands": QUALIFICATION_MATCHED_BANDS,
+        "band_weights": weights,
+        "stages": stages,
+      }
+      try:
+        stratified_finite_impulse_curriculum(_TermCfg(func=None, params=params), env)
+      except ValueError:
+        continue
+      raise AssertionError(f"accepted invalid band configuration {params}")
+    params = {
+      "bands": QUALIFICATION_MATCHED_BANDS,
+      "band_weights": QUALIFICATION_MATCHED_WEIGHTS,
+      "stages": ((0, (0.10, 0.60)),),
+    }
+    term = stratified_finite_impulse_curriculum(_TermCfg(func=None, params=params), env)
+  finally:
+    finite_impulse_curriculum.__init__ = original_init
+
+  term.enabled = torch.ones(4, dtype=torch.bool)
+  term.next_push_step = torch.zeros(4, dtype=torch.long)
+  term.sampled_band = torch.tensor([-1, 0, 1, 2])
+  assert torch.equal(term._due(env), torch.tensor([False, True, True, True]))
+
+  routed: list[tuple[list[int], tuple[float, float]]] = []
+  original_trigger = finite_impulse_curriculum._trigger
+  finite_impulse_curriculum._trigger = (
+    lambda self, env, env_ids, duration_range_s, height_range_m, stages: routed.append(
+      (sorted(int(value) for value in env_ids), stages[0][1])
+    )
+  )
+  try:
+    term._trigger(env, torch.tensor([0, 1, 2, 3]), (0.08, 0.20), (0.0, 0.25), ())
+  finally:
+    finite_impulse_curriculum._trigger = original_trigger
+  assert routed == [
+    ([1], (0.10, 0.25)),
+    ([2], (0.25, 0.40)),
+    ([3], (0.40, 0.60)),
+  ]
 
 
 def verify_achievement_curriculum() -> None:
@@ -898,6 +975,7 @@ def main() -> None:
   verify_rollout_schedule()
   verify_masked_policy_objective()
   verify_impulse_curricula()
+  verify_stratified_impulse()
   verify_achievement_curriculum()
   verify_achievement_report_contract()
   verify_achievement_runner_bridge()

@@ -927,6 +927,8 @@ class finite_impulse_curriculum(recorded_disturbance):
     asset_cfg: SceneEntityCfg | None = None,
     rehearsal_weights: tuple[tuple[float, ...], ...] | None = None,
     initial_stage: int = 0,
+    bands: tuple[tuple[float, float], ...] | None = None,
+    band_weights: tuple[float, ...] | None = None,
   ) -> None:
     """Expire the current wrench and trigger any due curriculum impulse."""
     del (
@@ -936,6 +938,8 @@ class finite_impulse_curriculum(recorded_disturbance):
       asset_cfg,
       rehearsal_weights,
       initial_stage,
+      bands,
+      band_weights,
     )
     active = self.remaining > 0
     self.remaining[active] -= 1
@@ -1063,6 +1067,62 @@ class gradual_finite_impulse_curriculum(finite_impulse_curriculum):
     )
 
 
+class stratified_finite_impulse_curriculum(finite_impulse_curriculum):
+  """Draw each reset cohort from a stationary standing-plus-band mixture."""
+
+  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+    super().__init__(cfg, env)
+    self.bands = tuple(tuple(band) for band in cfg.params["bands"])
+    weights = tuple(float(value) for value in cfg.params["band_weights"])
+    if len(weights) != len(self.bands) + 1:
+      raise ValueError("band weights need standing plus every impulse band")
+    if abs(sum(weights) - 1.0) > 1e-9 or any(value < 0.0 for value in weights):
+      raise ValueError("band weights must be nonnegative and sum to one")
+    union = (min(low for low, _ in self.bands), max(high for _, high in self.bands))
+    stages = cfg.params["stages"]
+    # `stages` is inert here but reaches the manifest, so keep it honest.
+    if len(stages) != 1 or tuple(stages[0][1]) != union:
+      raise ValueError(f"stages must record the single band union {union}")
+    self.band_weights = weights
+    self._band_weights = torch.tensor(weights, device=env.device)
+    self.sampled_band = torch.full(
+      (env.num_envs,), -1, dtype=torch.long, device=env.device
+    )
+
+  def reset(self, env_ids: torch.Tensor | None = None) -> None:
+    """Schedule an impulse and draw the reset cohort's magnitude band."""
+    super().reset(env_ids)
+    ids = (
+      torch.arange(self._env.num_envs, device=self._env.device)
+      if env_ids is None
+      else env_ids
+    )
+    if ids.numel() == 0:
+      return
+    self.sampled_band[ids] = (
+      torch.multinomial(self._band_weights, len(ids), replacement=True) - 1
+    )
+
+  def _due(self, env: ManagerBasedRlEnv) -> torch.Tensor:
+    """Exclude the standing cohort from scheduled disturbances."""
+    return super()._due(env) & (self.sampled_band >= 0)
+
+  def _trigger(
+    self,
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor,
+    duration_range_s: tuple[float, float],
+    height_range_m: tuple[float, float],
+    stages: tuple[tuple[int, tuple[float, float]], ...],
+  ) -> None:
+    """Draw each due environment inside the band chosen at its last reset."""
+    del stages
+    for band, values in enumerate(self.bands):
+      ids = env_ids[self.sampled_band[env_ids] == band]
+      if ids.numel():
+        super()._trigger(env, ids, duration_range_s, height_range_m, ((0, values),))
+
+
 class achievement_finite_impulse_curriculum(finite_impulse_curriculum):
   """Apply checkpointed difficulty with standing and prior-stage rehearsal."""
 
@@ -1166,6 +1226,13 @@ def achievement_curriculum_state(
   if not isinstance(term, achievement_finite_impulse_curriculum):
     raise TypeError(f"event term {term_name!r} is not achievement gated")
   return term.curriculum_state()
+
+
+def impulse_speed(
+  env: ManagerBasedRlEnv, term_name: str = "push_robot"
+) -> torch.Tensor:
+  """Equivalent delta-velocity magnitude of each environment's last impulse."""
+  return torch.linalg.vector_norm(_push_term(env, term_name).last_push_vel, dim=1)
 
 
 def _age_since_push(env: ManagerBasedRlEnv, term: recorded_disturbance) -> torch.Tensor:

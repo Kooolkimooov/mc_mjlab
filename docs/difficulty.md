@@ -31,6 +31,70 @@ or controller gait changes.
   reached maximum authority `0.741`, mean duty `0.941%`, and exactly zero
   inactive residual.
 
+## stratified_finite_impulse_curriculum
+
+**Current:** the `Position-Ankle-Matched-Impulse` task replaces the global-step
+impulse curriculum with a stationary mixture drawn once per environment reset.
+It exists because training and qualification did not share a support.
+
+**The mismatch.** `finite_impulse_curriculum` holds `[0.10, 0.25] m/s` for the
+first 48,000 policy steps. The 13-arm screen ran 188 iterations, which is 48,128
+policy steps per environment, so every arm trained essentially entirely inside
+`[0.10, 0.25]`. `PairedDisturbances` then scores `current_kick` and
+`finite_impulse` at `0.40 m/s` and `robust` at `[0.50, 0.60] m/s` — 1.6x to 2.4x
+above the training support. `promotion()` requires
+`sum(policy hazard) / sum(baseline hazard) <= 0.90` across all four scenarios,
+and the two measured baseline hazards are `9.375%` for finite impulse against
+`78.125%` for robust, so that sum is dominated by the band the policy never saw.
+
+The stage-0 achievement run measured exactly that split: finite-impulse hazard
+improved from `9.375%` to `6.25%` while robust hazard worsened from `78.125%` to
+`90.625%`, for an overall ratio of `1.107`. The policy improved what it trained
+on and degraded what it did not. Advancing past stage 0 required passing a gate
+containing the robust band, so the curriculum could not reach the difficulty its
+own gate scored.
+
+**The mixture.** Bands are `QUALIFICATION_MATCHED_BANDS`, weights are
+`QUALIFICATION_MATCHED_WEIGHTS`:
+
+| Cohort | Equivalent delta velocity | Share | Covers |
+| --- | --- | ---: | --- |
+| standing | none | 20% | `nominal` gait, duty, and foot-slip gates |
+| band 0 | `[0.10, 0.25] m/s` | 25% | the historical training support |
+| band 1 | `[0.25, 0.40] m/s` | 25% | `current_kick` and `finite_impulse` at `0.40` |
+| band 2 | `[0.40, 0.60] m/s` | 30% | `robust` at `[0.50, 0.60]` |
+
+Standing keeps 20% because `nominal` carries its own promotion gates: authority
+duty at most `5%`, and `zmp_error` and `foot_slip` upper-CI regression under
+`5%`. Band 2 takes the largest share because it dominates the hazard denominator,
+but not more: a fallen robot has no recovery window to track, so flooding the
+rollout with the hardest band would starve the very `recovery_dcm_error` measure
+that the promotion gate ranks on. 45% of episodes stay at or below the
+historical distribution.
+
+**Why stationary rather than a curriculum.** The 500-iteration budget run took
+its best 60-iteration ZMP and recovery windows at iterations 175 and 178,
+immediately before the stage boundary at 188, then degraded and produced NaNs at
+488. Non-stationary difficulty is implicated in that decay, and any schedule that
+reaches the robust band at 96,000 steps never arrives inside a screen budget.
+Sampling the mixture at reset rather than per step keeps an episode's difficulty
+fixed while it runs, so a recovery window is not scored across a difficulty
+change.
+
+**How to read it.** The `impulse_speed` metric reports the equivalent delta
+velocity of each environment's last impulse. Against the ankle screen arm it must
+rise; if it does not, the mixture is not reaching the sampler. The hypothesis is
+falsified if robust-scenario hazard does not improve relative to the ankle
+control, and it is only supported by paired qualification, never by the training
+curves.
+
+**Re-measure if:** `PairedDisturbances` magnitudes, the promotion hazard gate,
+episode length, reset rate, or the baseline failure boundary changes.
+
+**History:**
+- 2026-08-27 — created after the stage-0 achievement run showed in-distribution
+  improvement and out-of-distribution degradation on the same checkpoint.
+
 ## curriculum_diagnostics
 
 **Current:** Two additive ankle-authority tasks isolate the difficulty change
