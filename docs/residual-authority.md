@@ -119,6 +119,32 @@ it is scrubbing the stance foot sideways.
 pitch and ankle **roll**. Roll is the lateral actuator, sagittal recoveries are
 pitch, and the split falls exactly on that line.
 
+**But roll magnitude does not predict the harm, and the first draft of this
+section implied it did.** Executed physical residual RMS per joint, x1000 rad:
+
+| stratum | LAP | LAR | RAP | RAR | roll total | DCM |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| recovery/backward | 0.584 | 0.615 | 0.878 | 0.658 | 1.273 | `-8.9%` |
+| recovery/left | 0.664 | 0.376 | 0.660 | 0.859 | 1.235 | `+11.7%` |
+| recovery/forward | 0.798 | 0.346 | 0.896 | 0.538 | 0.884 | `-3.7%` |
+| recovery/right | 0.736 | 0.321 | 0.895 | 0.575 | 0.896 | `+5.6%` |
+
+Backward and left use nearly identical roll (`1.273` against `1.235`) for
+opposite outcomes. Roll is `40.8%` of all executed residual. So the defect is not
+that roll is over-used; it is that **the policy's lateral control law is wrong,
+and roll is the only actuator that can produce a lateral centre-of-pressure
+shift.** Sagittal pushes are recovered by pitch and are largely indifferent to
+what roll does.
+
+**What that predicts for `ankle_pitch`, stated before the run.** Removing roll
+removes the ability to help laterally as well as the ability to harm, so the
+lateral strata should move to roughly baseline — `0%`, not negative — while the
+sagittal ones keep their gains. The recovery-DCM average over four directions
+would then be near `(-8.9 - 3.7 + 0 + 0) / 4 = -3.2%`, which is **still below the
+`5%` promotion gate**. The ablation is worth running because it should also close
+the `sustained/none` feedback loop and the `+442%` foot slip, but on its own it is
+not predicted to clear that gate at the qualifier's default magnitudes.
+
 **Why this also explains the failed hazard gate.** In `sustained/none` — ordinary
 walking between pushes — the detector fires `31.8%` more often and grounded DCM
 error degrades `38.1%`. That is a loop: lateral residual disturbs the gait, the
