@@ -266,6 +266,43 @@ old Gaussian checkpoints. Those remain valid only in a worktree containing their
 original actor, observation layout, and controller inputs; generating new
 validation checkpoints from the current tree is the clean migration path.
 
+## source_drift
+
+**Current:** defining-file digests live in the manifest's audit `record` and in
+neither enforced contract. `validate_effective_training_manifest` strips
+`source_sha256` from both the training contract and the policy interface, then
+re-digests both sides rather than comparing the stored digest, and prints the
+drifted audit paths when the contract still matches.
+
+**Why.** On 2026-08-27 a stage-0 re-qualification of a checkpoint trained the
+same afternoon died with
+`Checkpoint policy interface differs from the active run:
+observations.groups.actor.terms.controller_ref_pos.callable.source_sha256, ...`.
+Nothing about the actor's interface had changed. Unrelated additions to
+`tasks/mdp.py` — a new metric and a new event class — changed the digest of the
+file that happens to define six observation terms, and that stranded the
+checkpoint. Source identity is evidence about semantics; it is not semantics, and
+making it the enforced contract means any edit to a shared module retires every
+checkpoint that module touches.
+
+The enforced contract still catches what matters: a renamed or relocated
+callable changes its qualified name, and term ordering, dimensions, group
+settings and effective parameters are all still compared.
+
+**Re-digesting both sides is also a strengthening.** Validation previously
+compared the `*_sha256` fields stored in the checkpoint. Those are derived
+values, so a stale or forged digest could mask a real difference or invent one.
+The payload now decides.
+
+**Re-measure if:** the manifest schema changes or a new field is added that
+should be enforced rather than recorded.
+
+**History:**
+- 2026-08-27 — moved source hashes to audit-only after they stranded a
+  same-day checkpoint; the branch review had flagged this as the most dangerous
+  defect on the branch and `leo-mjlab-review.md` had already recorded the
+  decision to exclude them.
+
 ## invalidated_scenarios
 
 **Current:** a scenario whose baseline or policy arm lost a controller worker is

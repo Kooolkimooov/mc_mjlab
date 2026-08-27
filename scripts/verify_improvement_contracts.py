@@ -61,6 +61,7 @@ from mc_mjlab.tasks.residual_balance.curriculum_stages import (
 )
 from mc_mjlab.tasks.residual_balance.effective_training_manifest import (
   build_effective_training_manifest,
+  source_drift,
   synchronize_resumed_curriculum,
   validate_effective_training_manifest,
 )
@@ -765,6 +766,51 @@ def verify_curriculum_reachability() -> None:
   assert seen, "no staged reward curriculum was checked"
 
 
+def verify_source_hash_is_audit_only() -> None:
+  """Check an unrelated source edit cannot strand a checkpoint."""
+  saved = {
+    "schema_version": 1,
+    "record": {"terms": {"a": {"callable": {"name": "m:f", "source_sha256": "old"}}}},
+    "training_contract": {"terms": {"a": {"callable": {"name": "m:f"}}}},
+    "training_sha256": "same",
+    "policy_interface": {"terms": {"a": {"callable": {"name": "m:f"}}}},
+    "policy_interface_sha256": "same",
+  }
+  active = json.loads(json.dumps(saved))
+  active["record"]["terms"]["a"]["callable"]["source_sha256"] = "new"
+
+  # Neither enforced contract may carry a file digest.
+  for key in ("training_contract", "policy_interface"):
+    assert "source_sha256" not in json.dumps(saved[key])
+
+  # Source drift is reported, never fatal, on either contract.
+  for full in (True, False):
+    validate_effective_training_manifest(saved, active, full_resume=full)
+
+  # A checkpoint written before the change still carries hashes; both sides are
+  # re-digested, so a legacy manifest still loads.
+  legacy = json.loads(json.dumps(saved))
+  for key in ("training_contract", "policy_interface"):
+    legacy[key]["terms"]["a"]["callable"]["source_sha256"] = "old"
+  legacy["training_sha256"] = "legacy"
+  legacy["policy_interface_sha256"] = "legacy"
+  for full in (True, False):
+    validate_effective_training_manifest(legacy, active, full_resume=full)
+  assert source_drift(saved, active) == ["terms.a.callable.source_sha256"]
+  assert source_drift(saved, saved) == []
+
+  # A genuine interface change still raises.
+  renamed = json.loads(json.dumps(saved))
+  renamed["policy_interface"]["terms"]["a"]["callable"]["name"] = "m:other"
+  renamed["policy_interface_sha256"] = "different"
+  try:
+    validate_effective_training_manifest(saved, renamed, full_resume=False)
+  except RuntimeError:
+    pass
+  else:
+    raise AssertionError("a renamed observation callable was accepted")
+
+
 def verify_qualifier_power() -> None:
   """Check the Student-t interval, the one-cluster hole, and power reporting."""
   assert _t_critical(1) == math.inf
@@ -1123,8 +1169,13 @@ def verify_effective_training_manifest() -> None:
   effective_gain = probe["terms"]["probe"]["effective_parameters"]["gain"]
   assert effective_gain == {"source": "default", "value": 2.0}
 
-  evaluation = dict(manifest)
+  # The payload decides, not the stored digest: a stale or forged digest can no
+  # longer mask a real change, nor invent one.
+  evaluation = json.loads(json.dumps(manifest))
   evaluation["training_sha256"] = "different-training-runtime"
+  for full in (False, True):
+    validate_effective_training_manifest(manifest, evaluation, full_resume=full)
+  evaluation["training_contract"]["runtime"] = {"changed": True}
   validate_effective_training_manifest(manifest, evaluation, full_resume=False)
   try:
     validate_effective_training_manifest(manifest, evaluation, full_resume=True)
@@ -1257,6 +1308,7 @@ def main() -> None:
   verify_impulse_curricula()
   verify_episode_length_ladder()
   verify_curriculum_reachability()
+  verify_source_hash_is_audit_only()
   verify_qualifier_power()
   verify_paired_clustering()
   verify_stratified_impulse()

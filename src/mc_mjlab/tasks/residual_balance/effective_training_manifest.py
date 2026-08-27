@@ -403,6 +403,11 @@ def build_effective_training_manifest(env: Any, train_cfg: Mapping[str, Any]) ->
     "actor_sources": _configured_class_sources({"actor": train_cfg.get("actor")}),
     "observations": _policy_observations(managers["observations"], train_cfg),
   }
+  # Source bytes stay in `record` for audit and out of both enforced contracts:
+  # an unrelated edit to a defining file must not strand a checkpoint.
+  # docs/leo-mjlab-review.md, docs/evaluation.md#source_drift
+  training = _strip_source_hashes(training)
+  policy_interface = _strip_source_hashes(policy_interface)
   return {
     "schema_version": SCHEMA_VERSION,
     "record": record,
@@ -412,6 +417,24 @@ def build_effective_training_manifest(env: Any, train_cfg: Mapping[str, Any]) ->
     "policy_interface": policy_interface,
     "policy_interface_sha256": _digest(policy_interface),
   }
+
+
+def _strip_source_hashes(value: Any) -> Any:
+  """Drop file digests so an enforced contract is semantic, not byte identity."""
+  if isinstance(value, dict):
+    return {
+      key: _strip_source_hashes(item)
+      for key, item in value.items()
+      if key != "source_sha256"
+    }
+  if isinstance(value, list):
+    return [_strip_source_hashes(item) for item in value]
+  return value
+
+
+def source_drift(saved: Mapping[str, Any], active: Mapping[str, Any]) -> list[str]:
+  """Return the audit-record paths whose defining source file changed."""
+  return _differences(saved.get("record"), active.get("record"))
 
 
 def _differences(saved: Any, active: Any, prefix: str = "") -> list[str]:
@@ -446,14 +469,30 @@ def validate_effective_training_manifest(
   if saved.get("schema_version") != active.get("schema_version"):
     raise RuntimeError("Checkpoint effective-training manifest schema is unsupported.")
   contract = "training" if full_resume else "policy_interface"
-  key = f"{contract}_sha256"
   payload_key = f"{contract}_contract" if full_resume else contract
-  if saved.get(key) == active.get(key):
+  # Re-digest both sides: a checkpoint written before source hashes became
+  # audit-only still carries them. docs/evaluation.md#source_drift
+  saved_payload = _strip_source_hashes(saved.get(payload_key))
+  active_payload = _strip_source_hashes(active.get(payload_key))
+  if _digest(saved_payload) == _digest(active_payload):
+    _warn_source_drift(saved, active)
     return
-  paths = _differences(saved.get(payload_key), active.get(payload_key))[:12]
+  paths = _differences(saved_payload, active_payload)[:12]
   detail = ", ".join(paths) if paths else "digest only"
   raise RuntimeError(
     f"Checkpoint {contract.replace('_', ' ')} differs from the active run: {detail}."
+  )
+
+
+def _warn_source_drift(saved: Mapping[str, Any], active: Mapping[str, Any]) -> None:
+  """Report defining files that changed while the contract still matches."""
+  drift = source_drift(saved, active)
+  if not drift:
+    return
+  print(
+    f"[mc_mjlab] checkpoint contract matches but {len(drift)} audit-record "
+    f"entries changed, first: {', '.join(drift[:4])}",
+    flush=True,
   )
 
 
