@@ -62,9 +62,17 @@ appears in the environment config. The enforced identity is therefore stricter
 on incidental source bytes than on an external file that controls action
 authority.
 
-**Decision:** deferred from the policy-only tranche. Split semantic enforcement
-from audit identity, add an explicit and logged drift override, and content-hash
-the detector before the next resumable long run.
+**Decision:** the manifest half is **done**, 2026-08-27. Source digests are
+audit-only, drift is logged rather than fatal, and both sides are re-digested so
+existing checkpoints still load; see
+[evaluation.md](evaluation.md#source_drift). It was not deferred in the end
+because it stopped a same-day checkpoint from being evaluated at all.
+
+Still deferred: content-hashing `etc/recovery_detector.json` into controller
+provenance. That file decides when the policy may act, and the 2026-08-27
+stratified read showed its duty rising `31.8%` between pushes under a policy it
+was never calibrated against, so it is now load-bearing evidence rather than a
+tidiness item.
 
 ## requested_action_l2
 

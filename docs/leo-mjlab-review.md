@@ -71,7 +71,7 @@ run stayed at stage 0 and confirmed that qualification still needs a manual loop
 | Diff training, play, and qualifier configs | keep an actor-interface contract strict while permitting evaluator-only corruption and runtime changes | adopt now; add a human diff CLI later |
 | Preserve curriculum position over resume | restore the counter and immediately recompute mutable curriculum targets | adopt now |
 | Detect a checkpoint inherited from a different experiment | reject semantic full-resume mismatches even when model tensor shapes happen to fit | adopt now |
-| Record source identity for hidden semantics | record defining callable files and core manager/runner modules without making source bytes the semantic resume contract | audit only; exclude from `training_sha256` |
+| Record source identity for hidden semantics | record defining callable files and core manager/runner modules without making source bytes the semantic resume contract | **done 2026-08-27**; audit only, excluded from both enforced contracts |
 | Keep operational changes from invalidating evaluation | exclude viewer, environment count, controller-worker count, console output, corruption, and observation latency from the actor-only interface | adopt now |
 | Keep old checkpoints evaluable | warn when a legacy checkpoint lacks the new manifest; retain the existing controller-provenance check | adopt now |
 
