@@ -24,6 +24,7 @@ POSITION_TASK_ID = get_task_name(TASK_DIR, "position")
 ANKLE_TASK_ID = get_task_name(TASK_DIR, "position-ankle")
 ACHIEVEMENT_TASK_ID = get_task_name(TASK_DIR, "position-ankle-curriculum-achievement")
 MATCHED_TASK_ID = get_task_name(TASK_DIR, "position-ankle-matched-impulse")
+PITCH_TASK_ID = get_task_name(TASK_DIR, "position-ankle-pitch-matched-impulse")
 TORQUE_TASK_ID = get_task_name(TASK_DIR, "torque")
 
 register_mjlab_task(
@@ -55,6 +56,18 @@ register_mjlab_task(
   env_cfg=residual_balance_position_matched_impulse_env_cfg(),
   play_env_cfg=residual_balance_position_matched_impulse_env_cfg(play=True),
   rl_cfg=residual_balance_ppo_cfg(experiment_name=MATCHED_TASK_ID),
+  runner_cls=ResidualBalanceOnPolicyRunner,
+)
+
+register_mjlab_task(
+  task_id=PITCH_TASK_ID,
+  env_cfg=residual_balance_position_matched_impulse_env_cfg(
+    authority_set="ankle_pitch"
+  ),
+  play_env_cfg=residual_balance_position_matched_impulse_env_cfg(
+    play=True, authority_set="ankle_pitch"
+  ),
+  rl_cfg=residual_balance_ppo_cfg(experiment_name=PITCH_TASK_ID),
   runner_cls=ResidualBalanceOnPolicyRunner,
 )
 

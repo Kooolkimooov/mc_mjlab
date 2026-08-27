@@ -75,6 +75,10 @@ def _select_residual_joints(
     ]
     if authority_set == "ankle":
       selected.update(leg[-2:])
+    elif authority_set == "ankle_pitch":
+      # Ankle pitch without roll; roll degraded every lateral recovery.
+      # docs/residual-authority.md#ankle_pitch
+      selected.update(leg[-2:-1])
     elif authority_set == "sagittal":
       selected.update(leg[2:-1])
     else:
@@ -132,7 +136,9 @@ def _make_env_cfg(
   mc_rtc_yaml: Path = MC_RTC_YAML_PATH,
   recovery_detector_path: Path | None = RECOVERY_DETECTOR_PATH,
   disturbance: Literal["finite", "velocity", "none"] = "finite",
-  authority_set: Literal["uniform", "ankle", "sagittal", "hardware"] = "uniform",
+  authority_set: Literal[
+    "uniform", "ankle", "ankle_pitch", "sagittal", "hardware"
+  ] = "uniform",
   controller_history: Literal[1, 5, 10, 20] = CONTROLLER_HISTORY,
   proprio_history: Literal[1, 5] = 5,
   randomization_stage: Literal[0, 1, 2] = 0,
@@ -630,7 +636,9 @@ PLAY_PRINT_RESIDUAL_EVERY = 10
 
 def residual_balance_position_env_cfg(
   play: bool = False,
-  authority_set: Literal["uniform", "ankle", "sagittal", "hardware"] = "uniform",
+  authority_set: Literal[
+    "uniform", "ankle", "ankle_pitch", "sagittal", "hardware"
+  ] = "uniform",
   controller_history: Literal[1, 5, 10, 20] = CONTROLLER_HISTORY,
   proprio_history: Literal[1, 5] = 5,
   randomization_stage: Literal[0, 1, 2] = 0,
@@ -653,9 +661,10 @@ def residual_balance_position_env_cfg(
 def residual_balance_position_matched_impulse_env_cfg(
   play: bool = False,
   mixture: Literal["matched", "gait", "hazard"] = "matched",
+  authority_set: Literal["ankle", "ankle_pitch"] = "ankle",
 ) -> ManagerBasedRlEnvCfg:
-  """Build the ankle-authority task whose pushes span the qualifier's range."""
-  cfg = residual_balance_position_env_cfg(play=play, authority_set="ankle")
+  """Build the task whose pushes span the qualifier's range at one authority."""
+  cfg = residual_balance_position_env_cfg(play=play, authority_set=authority_set)
   push = cfg.events["push_robot"]
   push.func = mdp.stratified_finite_impulse_curriculum
   push.params["bands"] = QUALIFICATION_MATCHED_BANDS
@@ -720,7 +729,9 @@ def residual_balance_position_achievement_curriculum_env_cfg(
 
 def residual_balance_torque_env_cfg(
   play: bool = False,
-  authority_set: Literal["uniform", "ankle", "sagittal", "hardware"] = "uniform",
+  authority_set: Literal[
+    "uniform", "ankle", "ankle_pitch", "sagittal", "hardware"
+  ] = "uniform",
   controller_history: Literal[1, 5, 10, 20] = CONTROLLER_HISTORY,
   proprio_history: Literal[1, 5] = 5,
   randomization_stage: Literal[0, 1, 2] = 0,

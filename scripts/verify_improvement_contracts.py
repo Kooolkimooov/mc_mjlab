@@ -828,6 +828,25 @@ def verify_stratified_impulse() -> None:
   hazard = QUALIFICATION_MATCHED_MIXTURES["hazard"]
   assert gait[0] > matched[0] > hazard[0]
   assert gait[-1] < matched[-1] < hazard[-1]
+  # Ankle roll degraded every lateral recovery; the ablation must drop it.
+  from mc_mjlab.robots import mc_rtc_robot_configuration as robot_cfg
+
+  pitch = residual_balance_position_matched_impulse_env_cfg(
+    authority_set="ankle_pitch"
+  ).actions["mc_rtc_residual"]
+  ankle = residual_balance_position_matched_impulse_env_cfg().actions["mc_rtc_residual"]
+  pitch_joints = set(pitch.residual_actuator_names)  # ty: ignore[unresolved-attribute]
+  roll = {
+    joint
+    for side in ("left", "right")
+    for joint in robot_cfg.get_leg_joints("HRP5P", side)[-1:]
+  }
+  assert pitch_joints, "the ankle-pitch authority set is empty"
+  assert not pitch_joints & roll, sorted(pitch_joints & roll)
+  ankle_joints = set(ankle.residual_actuator_names)  # ty: ignore[unresolved-attribute]
+  assert pitch_joints < ankle_joints
+  assert ankle_joints & roll == roll
+
   named = ("matched", "gait", "hazard")
   assert set(named) == set(QUALIFICATION_MATCHED_MIXTURES)
   for name in named:

@@ -93,6 +93,51 @@ Rewards price the bounded request only while authority is nonzero, so a partial
 gate or later projection cannot hide a large active request. Metrics report the
 requested and executed quantities separately.
 
+## ankle_pitch
+
+**Current:** `(LAP, RAP)` for HRP5P — the `ankle` set with ankle roll removed.
+It exists because direction-resolved qualification showed roll doing active harm.
+
+**The measurement.** `model_180` of the matched-impulse seed, paired against the
+controller over 16 environments and two seeds, split by push direction in the
+`finite_impulse` scenario:
+
+| stratum | episodes | gate duty | grounded DCM error | foot slip |
+| --- | ---: | ---: | ---: | ---: |
+| recovery/backward | 69 | `-7.6%` | **`-8.9%`** | `+27.8%` |
+| recovery/forward | 54 | `+6.3%` | **`-3.7%`** | `-16.7%` |
+| recovery/right | 72 | `+10.2%` | `+5.6%` | **`+442%`** |
+| recovery/left | 62 | `+25.1%` | `+11.7%` | `+20.8%` |
+| sustained/none | 104 | `+31.8%` | `+38.1%` | `-8.4%` |
+
+Both sagittal recoveries improve and both lateral ones degrade, and the gate duty
+moves the same way: the policy claims *more* authority on exactly the directions
+it makes worse. Foot slip rising 442% on right-side recoveries is the mechanism —
+it is scrubbing the stance foot sideways.
+
+`ankle` is `leg[-2:]`, which for HRP5P is `(LAP, LAR)` and `(RAP, RAR)`: ankle
+pitch and ankle **roll**. Roll is the lateral actuator, sagittal recoveries are
+pitch, and the split falls exactly on that line.
+
+**Why this also explains the failed hazard gate.** In `sustained/none` — ordinary
+walking between pushes — the detector fires `31.8%` more often and grounded DCM
+error degrades `38.1%`. That is a loop: lateral residual disturbs the gait, the
+disturbance raises the detector score, the higher score grants more authority,
+which disturbs more. One root cause reaches every gate the checkpoint failed,
+which is why the next arm changes authority rather than the band mixture.
+
+**This is a point-estimate pattern, not a significance claim.** Those strata are
+summarized per direction, and each interval is narrow only in the sense that the
+sign is consistent across four independent strata and roughly 250 episodes. Treat
+the direction of the effect as the finding and the magnitude as provisional.
+
+**Re-measure if:** the authority set, detector calibration, residual scale, or
+push direction distribution changes.
+
+**History:**
+- 2026-08-27 — added after direction-resolved qualification separated sagittal
+  improvement from lateral degradation in the same checkpoint.
+
 ## residual_joints
 
 **Current:** the legs only. Balancing is what this task rewards, and the upper

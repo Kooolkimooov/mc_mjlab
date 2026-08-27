@@ -566,15 +566,9 @@ def _paired_stratum_value(
   env_clusters = {
     key: sum(values) / len(values) for key, values in env_differences.items()
   }
-  seed_clusters: dict[int, list[float]] = {}
-  for (seed, _), difference in env_clusters.items():
-    seed_clusters.setdefault(seed, []).append(difference)
-  if len(seed_clusters) > 1:
-    clusters = [sum(values) / len(values) for values in seed_clusters.values()]
-    cluster_level = "seed"
-  else:
-    clusters = list(env_clusters.values())
-    cluster_level = "environment"
+  # Same unit as `summarize`: a second seed must add clusters, not collapse to 2.
+  clusters = list(env_clusters.values())
+  cluster_level = "seed-environment"
   paired = _cluster_stats(clusters)
   baseline = (
     sum(arm_values["baseline"]) / len(arm_values["baseline"])
