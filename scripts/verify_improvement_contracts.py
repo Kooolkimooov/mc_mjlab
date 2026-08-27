@@ -10,6 +10,14 @@ from pathlib import Path
 from typing import Any
 
 import torch
+
+# Sibling script, resolved by the interpreter's script directory at runtime.
+from qualify_checkpoints import (  # ty: ignore[unresolved-import]
+  _cluster_stats,
+  _t_critical,
+  clusters_for_confidence,
+  promotion,
+)
 from rsl_rl.models.mlp_model import MLPModel
 from rsl_rl.storage import RolloutStorage
 from tensordict import TensorDict
@@ -570,6 +578,58 @@ class _StratifiedEnv:
     self.episode_length_buf = torch.ones(4, dtype=torch.long)
 
 
+def _recovery_summary(mean: float, sem: float, clusters: float) -> dict:
+  """Build the one qualifier summary the recovery gate reads."""
+  return {
+    "finite_impulse": {
+      "recovery_dcm_error": {
+        "baseline": 0.131,
+        "relative": mean / 0.131,
+        "paired": {
+          "mean": mean,
+          "sem": sem,
+          "ci_high": mean + _t_critical(int(clusters)) * sem,
+          "clusters": clusters,
+        },
+      },
+      "hazard": {"baseline": 0.09375, "policy": 0.0625},
+      "worker_failure": {"baseline": 0.0, "policy": 0.0},
+      "max_effort_ratio": {"policy": 0.5},
+      "projection_fraction": {"policy": 0.0},
+      "near_bound_fraction": {"policy": 0.0},
+      "residual_rms": {"policy": 0.01},
+    }
+  }
+
+
+def verify_qualifier_power() -> None:
+  """Check the Student-t interval, the one-cluster hole, and power reporting."""
+  assert _t_critical(1) == math.inf
+  assert math.isclose(_t_critical(2), 12.7062)
+  assert math.isclose(_t_critical(16), 2.1314)
+  assert all(_t_critical(count) > _t_critical(count + 1) for count in range(2, 60))
+  assert _t_critical(400) > 1.959963985
+
+  single = _cluster_stats([-0.01])
+  assert single["sem"] == math.inf and single["ci_high"] == math.inf
+  assert single["clusters"] == 1.0
+  assert not single["ci_high"] < 0.0
+
+  # The 16-environment paired rejection of `standard/model_180`.
+  assert clusters_for_confidence(-0.01010, 0.005760, 16) == 23.0
+  assert math.isnan(clusters_for_confidence(0.01, 0.005, 16))
+  assert math.isnan(clusters_for_confidence(-0.01, 0.005, 1))
+
+  unresolved = promotion(_recovery_summary(-0.01010, 0.005760, 16.0))
+  assert not unresolved["eligible"]
+  assert any("unresolved by 16 clusters" in reason for reason in unresolved["reasons"])
+  assert any("23 would resolve it" in reason for reason in unresolved["reasons"])
+  small = promotion(_recovery_summary(-0.00131, 0.0002, 16.0))
+  assert any("below 5%" in reason for reason in small["reasons"])
+  resolved = promotion(_recovery_summary(-0.01010, 0.003, 32.0))
+  assert not any("recovery DCM" in reason for reason in resolved["reasons"])
+
+
 def verify_stratified_impulse() -> None:
   """Check qualifier coverage, band validation, standing exclusion, routing."""
   push = residual_balance_position_matched_impulse_env_cfg().events["push_robot"]
@@ -975,6 +1035,7 @@ def main() -> None:
   verify_rollout_schedule()
   verify_masked_policy_objective()
   verify_impulse_curricula()
+  verify_qualifier_power()
   verify_stratified_impulse()
   verify_achievement_curriculum()
   verify_achievement_report_contract()

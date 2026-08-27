@@ -266,6 +266,45 @@ old Gaussian checkpoints. Those remain valid only in a worktree containing their
 original actor, observation layout, and controller inputs; generating new
 validation checkpoints from the current tree is the clean migration path.
 
+## clusters_for_confidence
+
+**Current:** the paired interval is a Student-t interval over
+`(seed, environment)` clusters, and every summary carries its `clusters` count.
+When the recovery-DCM improvement clears its 5% magnitude bar but its interval
+still touches zero, `promotion()` names the cluster count that would resolve it
+instead of reporting an undifferentiated gate failure.
+
+**Two defects this replaced.** A single cluster produced `sem = NaN`, so
+`ci_high >= 0.0` evaluated False and the confidence half of the recovery gate
+silently passed; the standard error is now infinite, which fails closed. And the
+paired statistic collapsed to seed means whenever more than one seed ran, so the
+achievement mode's mandatory two seeds turned 32 environment clusters into 2 —
+where a 95% normal interval has roughly 24% coverage, because the correct
+critical value at one degree of freedom is `12.71`, not `1.96`.
+
+**It did not promote anything retroactively.** Re-scored with the t interval,
+all three checkpoints that the 2026-08-25 paired qualification rejected still
+fail, and by wider margins:
+
+| checkpoint | mean, m | relative | normal `ci_high` | t `ci_high` | clusters needed |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| standard 180 | -0.01010 | -7.70% | +0.00119 | +0.00218 | 23 |
+| ankle 187 | -0.00675 | -5.08% | +0.00380 | +0.00472 | 42 |
+| ankle 140 | -0.00639 | -4.79% | +0.00752 | +0.00874 | 79 |
+
+At one seed the change is strictly stricter: 16 clusters move from `1.96` to
+`t(15) = 2.13`, an 8.7% wider interval. Those runs used 16 environments, so the
+best of them was **seven clusters short** of resolving its own effect. That is a
+sampling verdict, not a policy verdict, and the old report could not tell them
+apart.
+
+**Re-measure if:** the recovery-DCM effect size, per-environment variance,
+episode pairing, or the 5% magnitude bar changes.
+
+**History:**
+- 2026-08-27 — replaced the normal interval and seed-mean collapse after the
+  branch review found three rejections whose reported cause was confidence.
+
 ## run_improvement_screens.py
 
 **Current:** the resumable launcher contains only the supported standard and

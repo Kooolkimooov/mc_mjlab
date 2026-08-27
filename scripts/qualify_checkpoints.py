@@ -387,18 +387,79 @@ def _episode_value(episode: Episode, name: str) -> float:
   return episode.metrics[name]
 
 
-def _normal_stats(values: list[float]) -> dict[str, float]:
-  """Mean, cluster standard error, interval, and two-sided normal p-value."""
+#: Two-sided 95% Student-t critical values for 1 to 30 degrees of freedom.
+_T_CRITICAL_95 = (
+  12.7062,
+  4.3027,
+  3.1824,
+  2.7764,
+  2.5706,
+  2.4469,
+  2.3646,
+  2.3060,
+  2.2622,
+  2.2281,
+  2.2010,
+  2.1788,
+  2.1604,
+  2.1448,
+  2.1314,
+  2.1199,
+  2.1098,
+  2.1009,
+  2.0930,
+  2.0860,
+  2.0796,
+  2.0739,
+  2.0687,
+  2.0639,
+  2.0595,
+  2.0555,
+  2.0518,
+  2.0484,
+  2.0452,
+  2.0423,
+)
+_NORMAL_CRITICAL_95 = 1.959963985
+
+
+def _t_critical(clusters: int) -> float:
+  """Two-sided 95% critical value for a cluster count, not the normal limit."""
+  df = clusters - 1
+  if df < 1:
+    return float("inf")
+  if df <= len(_T_CRITICAL_95):
+    return _T_CRITICAL_95[df - 1]
+  z = _NORMAL_CRITICAL_95
+  return z + (z**3 + z) / (4.0 * df)
+
+
+def clusters_for_confidence(
+  mean: float, sem: float, clusters: int, cap: int = 4096
+) -> float:
+  """Independent clusters at which the observed effect would exclude zero."""
+  if not (mean < 0.0 and math.isfinite(sem) and sem > 0.0 and clusters >= 2):
+    return float("nan")
+  for count in range(clusters, cap + 1):
+    if _t_critical(count) * sem * math.sqrt(clusters / count) < -mean:
+      return float(count)
+  return float("inf")
+
+
+def _cluster_stats(values: list[float]) -> dict[str, float]:
+  """Mean, cluster standard error, Student-t interval, and normal p-value."""
   values = [value for value in values if math.isfinite(value)]
   if not values:
-    return {key: float("nan") for key in ("mean", "sem", "ci_low", "ci_high", "p")}
+    keys = ("mean", "sem", "ci_low", "ci_high", "p", "clusters")
+    return {key: float("nan") for key in keys}
   mean = sum(values) / len(values)
   if len(values) == 1:
-    sem = float("nan")
+    # Infinite, not NaN: a NaN bound made every `>= 0` gate read False.
+    sem = float("inf")
   else:
     variance = sum((value - mean) ** 2 for value in values) / (len(values) - 1)
     sem = math.sqrt(variance / len(values))
-  radius = 1.959963985 * sem
+  radius = _t_critical(len(values)) * sem
   p = math.erfc(abs(mean / sem) / math.sqrt(2.0)) if sem > 0.0 else float("nan")
   return {
     "mean": mean,
@@ -406,6 +467,7 @@ def _normal_stats(values: list[float]) -> dict[str, float]:
     "ci_low": mean - radius,
     "ci_high": mean + radius,
     "p": p,
+    "clusters": float(len(values)),
   }
 
 
@@ -451,16 +513,11 @@ def summarize(episodes: list[Episode]) -> dict:
     env_clusters = {
       key: sum(values) / len(values) for key, values in env_differences.items()
     }
-    seed_clusters: dict[int, list[float]] = {}
-    for (seed, _), value in env_clusters.items():
-      seed_clusters.setdefault(seed, []).append(value)
-    if len(seed_clusters) > 1:
-      clusters = [sum(values) / len(values) for values in seed_clusters.values()]
-      cluster_level = "seed"
-    else:
-      clusters = list(env_clusters.values())
-      cluster_level = "environment"
-    paired = _normal_stats(clusters)
+    # A seed-mean collapse made a second seed shrink 32 clusters to 2, which is
+    # fewer than the interval needs. docs/evaluation.md#clusters_for_confidence
+    clusters = list(env_clusters.values())
+    cluster_level = "seed-environment"
+    paired = _cluster_stats(clusters)
     base_mean = (
       sum(arm_values["baseline"]) / len(arm_values["baseline"])
       if arm_values["baseline"]
@@ -518,7 +575,7 @@ def _paired_stratum_value(
   else:
     clusters = list(env_clusters.values())
     cluster_level = "environment"
-  paired = _normal_stats(clusters)
+  paired = _cluster_stats(clusters)
   baseline = (
     sum(arm_values["baseline"]) / len(arm_values["baseline"])
     if arm_values["baseline"]
@@ -642,8 +699,16 @@ def promotion(checkpoint_summaries: dict[str, dict]) -> dict:
   if recovery is not None:
     base = recovery["recovery_dcm_error"]["baseline"]
     paired = recovery["recovery_dcm_error"]["paired"]
-    if base and (-paired["mean"] / base < 0.05 or paired["ci_high"] >= 0.0):
-      reasons.append("finite impulse: recovery DCM improvement gate failed")
+    if base and -paired["mean"] / base < 0.05:
+      reasons.append("finite impulse: recovery DCM improvement is below 5%")
+    elif base and not paired["ci_high"] < 0.0:
+      needed = clusters_for_confidence(
+        paired["mean"], paired["sem"], int(paired["clusters"])
+      )
+      reasons.append(
+        "finite impulse: recovery DCM improvement is unresolved by "
+        f"{paired['clusters']:.0f} clusters; {needed:.0f} would resolve it"
+      )
   robust = checkpoint_summaries.get("robust")
   if robust is not None and robust["pre_disturbance_hazard"]["baseline"] > 0.05:
     reasons.append("robust: baseline pre-disturbance hazard exceeds 5%")
