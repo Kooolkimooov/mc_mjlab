@@ -798,6 +798,11 @@ def verify_source_hash_is_audit_only() -> None:
     validate_effective_training_manifest(legacy, active, full_resume=full)
   assert source_drift(saved, active) == ["terms.a.callable.source_sha256"]
   assert source_drift(saved, saved) == []
+  # Evaluator-side record differences are not source drift.
+  evaluator = json.loads(json.dumps(saved))
+  evaluator["record"]["terms"]["a"]["callable"]["name"] = "m:other"
+  evaluator["record"]["num_workers"] = 8
+  assert source_drift(saved, evaluator) == []
 
   # A genuine interface change still raises.
   renamed = json.loads(json.dumps(saved))

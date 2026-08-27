@@ -434,7 +434,13 @@ def _strip_source_hashes(value: Any) -> Any:
 
 def source_drift(saved: Mapping[str, Any], active: Mapping[str, Any]) -> list[str]:
   """Return the audit-record paths whose defining source file changed."""
-  return _differences(saved.get("record"), active.get("record"))
+  # Only the digests: the record also holds evaluator-side differences such as
+  # worker count and the qualifier's own disturbance term, which are expected.
+  return [
+    path
+    for path in _differences(saved.get("record"), active.get("record"))
+    if path.endswith("source_sha256")
+  ]
 
 
 def _differences(saved: Any, active: Any, prefix: str = "") -> list[str]:
