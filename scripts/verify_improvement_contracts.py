@@ -665,6 +665,7 @@ class _LadderEnv(_StratifiedEnv):
     super().__init__()
     self.max_episode_length = 4500
     self.episode_length_buf = torch.zeros(4, dtype=torch.long)
+    self.event_manager: Any = _TermManager()
 
 
 def _ladder(env: _LadderEnv, push: Any) -> Any:
@@ -681,7 +682,7 @@ def _ladder(env: _LadderEnv, push: Any) -> Any:
     },
   )
   env.event_manager = _TermManager({"push_robot": _TermCfg(func=push)})
-  return episode_length_impulse_curriculum(ladder_cfg, env)
+  return episode_length_impulse_curriculum(ladder_cfg, env)  # ty: ignore
 
 
 def verify_episode_length_ladder() -> None:
@@ -699,9 +700,9 @@ def verify_episode_length_ladder() -> None:
           "stages": ((0, (0.10, 0.60)),),
         },
       ),
-      env,
+      env,  # ty: ignore[invalid-argument-type]
     )
-    push._env = env
+    push._env = env  # ty: ignore[invalid-assignment]
     ladder = _ladder(env, push)
   finally:
     finite_impulse_curriculum.__init__ = original_init
