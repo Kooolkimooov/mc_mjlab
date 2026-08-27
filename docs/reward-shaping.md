@@ -799,9 +799,24 @@ as history.
 
 ## torque_margin
 
-**Current:** weight `-0.05` **provisional**, ramped x4 at iteration 500 and x10 at
-1000 by the `torque_margin_weight` curriculum. The soft ratio is `0.8`; the hard
-RobotModule limit is `1.0` in both the actuator and torque action.
+**Current:** weight `-0.05` **provisional**, ramped x4 and x10 by the
+`torque_margin_weight` curriculum at policy steps 48,000 and 96,000 — iterations
+188 and 375 at the present 256-step rollout, 500 and 1000 at the historical
+96-step one. The soft ratio is `0.8`; the hard RobotModule limit is `1.0` in both
+the actuator and torque action.
+
+**The term is inert at every effort this project has measured, so its weight and
+its curriculum currently scale zero.** The cost is
+`sum_j log1p(relu(peak_j / limit_j - 0.8))`, and over the 188-iteration
+matched-impulse seed `max_effort_ratio` ran `0.282` to `0.447`, leaving
+`Episode_Reward/torque_margin` at exactly `0.000000` on a 60-iteration mean
+against `+0.355` for `recovery_dcm`. Paired qualification of the 2026-08-25
+checkpoints peaked at `0.580`, still below the ratio. That is the design working:
+`soft_ratio` is sized to leave a 4x gap above the settled p99, so this is a guard
+rail meant to read zero, not a shaping term. Advancing its curriculum sooner
+would multiply zero by four. Making it a live constraint means lowering
+`soft_ratio` toward the measured `0.45` band, which is an objective change and
+needs its own isolated arm.
 
 **Why it exists: the measurement was already in the repo and nothing acted on it.**
 [residual-authority.md](residual-authority.md#residual_scale) records that
@@ -880,7 +895,24 @@ environment**. Multiplying the thresholds by `num_envs` delayed the old ramp by
 128x, so it never fired in practical runs. The thresholds are now invariant to
 both environment count and rollout length. With the current 256-step rollout they
 land near iterations 188 and 375; with the historical 96-step rollout they land
-at 500 and 1000.
+at 500 and 1000. `verify_curriculum_reachability` asserts every stage stays
+inside `POLICY_STEPS_PER_ENV`, so that failure mode cannot return silently.
+
+**Every screen has stopped exactly on the first boundary.** The configured budget
+is 500 iterations (`POLICY_STEPS_PER_ENV = 128_000`), which reaches both stages,
+but the 13-arm matrix and every arm since ran `--agent.max-iterations 188`, or
+48,128 policy steps against a 48,000-step threshold. The ramp therefore flips
+during the final iteration and never completes one; a logged `-0.145455` is the
+episode-average across that transition, not a stage value.
+
+**The two boundaries coincide, and nothing has separated them.** `48_000` is also
+the old `finite_impulse_curriculum` stage-1 step, so the 500-iteration run that
+degraded just after iteration 188 changed impulse difficulty and torque weight at
+the same step. `curriculum_diagnostics` isolated the impulse half by pinning the
+weight at `-0.05`; the torque half has never been isolated. The matched-impulse
+task removes the step-scheduled impulse curriculum entirely, so running it to the
+full 500-iteration budget would be the first clean read of this ramp — against a
+term that, per `torque_margin` above, has nothing to charge.
 
 The curriculum manager calls from `_reset_idx`, but the reward configuration is
 global. The first reset after a threshold changes the scalar for every env; this

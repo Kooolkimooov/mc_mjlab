@@ -72,7 +72,11 @@ from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   _make_env_cfg,
   residual_balance_position_achievement_curriculum_env_cfg,
   residual_balance_position_curriculum_env_cfg,
+  residual_balance_position_env_cfg,
   residual_balance_position_matched_impulse_env_cfg,
+)
+from mc_mjlab.tasks.residual_balance.residual_balance_ppo_cfg import (
+  POLICY_STEPS_PER_ENV,
 )
 from mc_mjlab.tasks.residual_balance.reward_audit import (
   RewardAuditRecorder,
@@ -653,6 +657,24 @@ def verify_paired_clustering() -> None:
   assert one["paired"]["clusters"] == 16.0
 
 
+def verify_curriculum_reachability() -> None:
+  """Check every reward-curriculum stage is reached inside the step budget."""
+  variants = {
+    "position": residual_balance_position_env_cfg(),
+    "matched": residual_balance_position_matched_impulse_env_cfg(),
+  }
+  seen = 0
+  for name, cfg in variants.items():
+    for term_name, term in cfg.curriculum.items():
+      stages = term.params.get("stages")
+      if not stages:
+        continue
+      seen += 1
+      last = max(int(stage["step"]) for stage in stages)
+      assert last <= POLICY_STEPS_PER_ENV, f"{name}.{term_name} stage {last}"
+  assert seen, "no staged reward curriculum was checked"
+
+
 def verify_qualifier_power() -> None:
   """Check the Student-t interval, the one-cluster hole, and power reporting."""
   assert _t_critical(1) == math.inf
@@ -704,7 +726,9 @@ def verify_stratified_impulse() -> None:
   hazard = QUALIFICATION_MATCHED_MIXTURES["hazard"]
   assert gait[0] > matched[0] > hazard[0]
   assert gait[-1] < matched[-1] < hazard[-1]
-  for name in QUALIFICATION_MATCHED_MIXTURES:
+  named = ("matched", "gait", "hazard")
+  assert set(named) == set(QUALIFICATION_MATCHED_MIXTURES)
+  for name in named:
     variant = residual_balance_position_matched_impulse_env_cfg(mixture=name)
     weights = variant.events["push_robot"].params["band_weights"]
     assert weights == QUALIFICATION_MATCHED_MIXTURES[name], name
@@ -1110,6 +1134,7 @@ def main() -> None:
   verify_rollout_schedule()
   verify_masked_policy_objective()
   verify_impulse_curricula()
+  verify_curriculum_reachability()
   verify_qualifier_power()
   verify_paired_clustering()
   verify_stratified_impulse()
