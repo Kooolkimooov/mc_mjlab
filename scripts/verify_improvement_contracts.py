@@ -337,6 +337,59 @@ def verify_zero_initialization() -> None:
   assert mean_head_magnitude(recurrent, observation) == 0.0
 
 
+class _RequestPricingEnv:
+  """Expose only the action-manager lookup the request-pricing rewards perform."""
+
+  def __init__(self, term: Any) -> None:
+    self.action_manager = _RequestPricingActions(term)
+
+
+class _RequestPricingActions:
+  """Return one residual term for every action name."""
+
+  def __init__(self, term: Any) -> None:
+    self.term = term
+
+  def get_term(self, name: str) -> Any:
+    """Return the single fake residual term."""
+    del name
+    return self.term
+
+
+def _request_pricing_env(
+  request: torch.Tensor,
+  previous_request: torch.Tensor,
+  gate: torch.Tensor,
+  previous_gate: torch.Tensor,
+) -> _RequestPricingEnv:
+  """Build the buffer surface the request-pricing rewards read."""
+  # Imported here: `mc_mjlab.actions.__init__` pulls the subclasses, so a
+  # module-level import of the base cycles through a partial package.
+  from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
+
+  # `_residual_term` isinstance-checks, so the double must be the real class.
+  term = object.__new__(McRtcResidualActionBase)
+  term._residual_raw_actions = request
+  term._previous_residual_raw_actions = previous_request
+  term._last_gate = gate
+  term._previous_gate = previous_gate
+  return _RequestPricingEnv(term)
+
+
+def verify_request_pricing() -> None:
+  """Check burst onset is not charged the magnitude cost a second time."""
+  request = torch.tensor([[0.3, -0.4], [0.3, -0.4], [0.3, -0.4], [0.3, -0.4]])
+  previous = torch.tensor([[0.0, 0.0], [0.1, -0.2], [0.3, -0.4], [0.1, -0.2]])
+  gate = torch.tensor([1.0, 1.0, 0.0, 0.4])
+  previous_gate = torch.tensor([0.0, 1.0, 1.0, 1.0])
+  env = _request_pricing_env(request, previous, gate, previous_gate)
+  magnitude = requested_action_l2(env)  # type: ignore[arg-type]
+  rate = requested_action_rate_l2(env)  # type: ignore[arg-type]
+  assert torch.allclose(magnitude, torch.tensor([0.25, 0.25, 0.0, 0.25]))
+  assert torch.allclose(rate, torch.tensor([0.0, 0.08, 0.0, 0.08]))
+  assert float(rate[0]) == 0.0 and float(magnitude[0]) > 0.0
+
+
 def verify_projection() -> None:
   """Check target bounds and exact executed-residual accounting."""
   nominal = torch.tensor([[0.9, 1.2, -1.2, 0.0]])
@@ -839,6 +892,7 @@ def main() -> None:
   """Run every local improvement-contract assertion."""
   verify_distribution()
   verify_zero_initialization()
+  verify_request_pricing()
   verify_projection()
   verify_recovery_detector()
   verify_rollout_schedule()

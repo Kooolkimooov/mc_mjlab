@@ -89,15 +89,13 @@ def requested_action_l2(
 def requested_action_rate_l2(
   env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
 ) -> torch.Tensor:
-  """Squared normalized request change while recovery authority is nonzero."""
+  """Squared normalized request change across consecutive authorized steps."""
   term = _residual_term(env, action_name)
-  previous = torch.where(
-    (term.previous_gate > 0.0).unsqueeze(-1),
-    term.previous_requested_normalized_action,
-    torch.zeros_like(term.previous_requested_normalized_action),
-  )
-  delta = term.requested_normalized_action - previous
-  return torch.sum(torch.square(delta), dim=1) * (term.last_gate > 0.0)
+  delta = term.requested_normalized_action - term.previous_requested_normalized_action
+  # Burst onset has no delivered predecessor; differencing against zero there
+  # charges the onset step the magnitude cost twice. docs/reward-shaping.md
+  paired = (term.last_gate > 0.0) & (term.previous_gate > 0.0)
+  return torch.sum(torch.square(delta), dim=1) * paired
 
 
 def _restrict(term: McRtcResidualActionBase, values: torch.Tensor) -> torch.Tensor:

@@ -705,18 +705,30 @@ this quantity; see `requested_action_l2`.
 
 **Current:** `residual_magnitude` and `residual_rate` retain weight `-0.1` but
 price the bounded normalized request on steps with nonzero recovery authority.
-The rate uses the previous request and is reset with each environment. Requested
-and executed costs are logged separately.
+Requested and executed costs are logged separately.
 
 This prevents a large request from becoming artificially cheap during a partial
 authority ramp. Inactive PPO advantages are zeroed by `RolloutAdaptivePPO`, so
 inactive requests cannot inject unrelated return noise into the surrogate; the
 all-step transformed entropy term keeps the zero-initialized mean regularized.
 
-**Re-measure if:** the authority duty cycle, actor distribution, or action scale
-changes.
+**`requested_action_rate_l2` needs two authorized steps, not one.** The rate is
+charged only where the current *and* previous steps both had nonzero authority.
+Differencing a burst's first request against zero instead charges that step
+`norm(a)^2` — numerically identical to the magnitude term at the same `-0.1`
+weight, so onset paid the same cost twice. Onset is not a rare case: authority
+arrives in bursts bounded by `max_active_s = 2.0 s` with `rearm_s = 0.5 s`, and
+the finite-impulse recovery window that decides promotion *begins* at onset. The
+double charge therefore taxed exactly the steps the qualifier's recovery-DCM gate
+measures. Zero on the unpaired step is the correct value: there is no delivered
+predecessor to have changed away from.
+
+**Re-measure if:** the authority duty cycle, actor distribution, action scale, or
+the detector's burst timing changes.
 
 **History:**
+- 2026-08-27 — stopped charging burst onset the magnitude cost a second time;
+  `verify_request_pricing` pins onset at zero and mid-burst at the true change.
 - 2026-08-27 — restored request pricing on causally active steps after the prior
   executed-only reward left 92.7% of requests unconstrained by the objective.
 
