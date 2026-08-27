@@ -20,6 +20,7 @@ are *deciding* something, not when you are reading the line that implements it.
 | [leo-mjlab-review.md](leo-mjlab-review.md) | exhaustive adoption matrix and implementation order from `leo_mjlab` commits `1fcdcee..bdce238` |
 | [improvement-roadmap.md](improvement-roadmap.md) | ordered critique remediation, acceptance gates, and experiment program |
 | [improvement-screens.md](improvement-screens.md) | critique screen measurements, rejected variants, and qualification shortlist |
+| [corrective-policy-review.md](corrective-policy-review.md) | branch-review disposition, deferred defects, and the active-only policy correction |
 | [difficulty.md](difficulty.md) | `push_velocity`, `push_angular_velocity`, `warmup_s`, `episode_length_s` |
 | [reward-shaping.md](reward-shaping.md) | reward weights and stds, live audit units and contracts, metrics, rejected ideas |
 | [residual-authority.md](residual-authority.md) | residual scales, feasibility, recovery detector, authority probes |

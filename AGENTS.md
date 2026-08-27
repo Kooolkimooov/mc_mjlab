@@ -65,16 +65,18 @@ uv run python scripts/compare_to_baseline.py --checkpoint <model.pt>
 uv run python scripts/probe_residual_authority.py --level 1.0
 # The DCM objective's own gate: standing must not outscore walking (~1 min/regime).
 uv run python scripts/validate_dcm_objective.py
+uv run python scripts/verify_improvement_contracts.py
 uv run ruff format && uv run ruff check --fix    # format + lint
 uv run ty check                                  # type check (56 pre-existing
                                                  # diagnostics: unresolvable
                                                  # mc_rtc bindings + mujoco stubs)
-python3 .Codex/hooks/check_prose.py src scripts # prose budget + docs/ links
+python3 .codex/hooks/check_prose.py src scripts # prose budget + docs/ links
 ```
 
-There is no test suite; the demo is the verification. A healthy run holds a
-steady root height (HRP5P z≈0.79, JVRC1 z≈0.83, RHPS1 z≈0.84) — a dropping z
-means the robot is falling.
+The deterministic improvement-contract suite does not replace a live controller
+check; the demo is the simulation verification. A healthy run holds a steady
+root height (HRP5P z≈0.79, JVRC1 z≈0.83, RHPS1 z≈0.84) — a dropping z means the
+robot is falling.
 
 For a *walking* controller (`LogisticController_ismpc`), height alone is not
 enough: a robot standing still holds a perfect z. Check that it is walking, by
@@ -92,7 +94,7 @@ episode length is what it is given an unbounded walk.
 
 # Comments, docstrings and notes
 
-Two hard rules, enforced by `.Codex/hooks/check_prose.py` (which also runs as a
+Two hard rules, enforced by `.codex/hooks/check_prose.py` (which also runs as a
 PostToolUse hook, so a violation comes back in the same turn):
 
 1. **Every docstring is one line.** What the thing does, never the evidence for

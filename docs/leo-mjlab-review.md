@@ -46,18 +46,19 @@ adds a larger curriculum.
 
 | Order | Tranche | Exit condition |
 | --- | --- | --- |
-| 1 (done) | Effective configuration and resume integrity | every new checkpoint contains a canonical audit record, a semantic resume contract, a policy-interface contract, and the active curriculum is reapplied after restoring the global counter |
-| 2 (done) | Reward audit and shape contracts | policy-zero and trained rollouts expose raw value, effective weight, weighted rate, active fraction, quantiles, and tensor shape for every reward |
-| 3 (done) | Stratified qualification metrics | reports separate startup/sustained behavior, nominal/disturbed regimes, direction/axis, termination cause, per-joint authority, grounded masks, and recovery windows |
-| 4 (done) | Unattended-run watchdog | a run can warn, preserve a checkpoint, or stop on sustained degradation without killing the inherited checkpoint or mistaking a stopped trainer for watchdog failure |
-| 5 (done) | Achievement-gated curriculum | difficulty advances only after repeated held-out qualification, retains rehearsal of earlier stages, and rolls back on regression |
+| 1 (implemented) | Effective configuration and resume integrity | every new checkpoint contains a canonical audit record, a semantic resume contract, a policy-interface contract, and the active curriculum is reapplied after restoring the global counter |
+| 2 (implemented) | Reward audit and shape contracts | policy-zero and trained rollouts expose raw value, effective weight, weighted rate, active fraction, quantiles, and tensor shape for every reward |
+| 3 (implemented) | Stratified qualification metrics | reports separate startup/sustained behavior, nominal/disturbed regimes, direction/axis, termination cause, per-joint authority, grounded masks, and recovery windows |
+| 4 (live checked) | Unattended-run watchdog | a run can warn, preserve a checkpoint, or stop on sustained degradation without killing the inherited checkpoint or mistaking a stopped trainer for watchdog failure |
+| 5 (rejected at stage 0) | Achievement-gated curriculum | difficulty advances only after repeated held-out qualification, retains rehearsal of earlier stages, and rolls back on regression |
 | 6 | Objective changes | one isolated hypothesis at a time, calibrated against raw magnitudes and accepted only by the baseline-relative qualifier |
 
-Tranches 1 and 2 are implemented because later measurements are not trustworthy
-if a run can silently use different defaults, resume at the wrong curriculum
-stage, or optimize an inert or incorrectly shaped reward. Tranches 3 and 4
-passed their live output contracts. Tranche 5 now supplies the main-capable
-curriculum gate; objective changes remain behind its qualification contract.
+These statuses describe code and evidence separately; they do not claim policy
+capability. Tranches 1 and 2 are implemented because later measurements are not
+trustworthy if a run can silently use different defaults, resume at the wrong
+curriculum stage, or optimize an inert or incorrectly shaped reward. Tranches 3
+and 4 passed their live output contracts. Tranche 5 has a code path, but the real
+run stayed at stage 0 and confirmed that qualification still needs a manual loop.
 
 ## Adopt now: experiment identity and resume integrity
 
@@ -70,7 +71,7 @@ curriculum gate; objective changes remain behind its qualification contract.
 | Diff training, play, and qualifier configs | keep an actor-interface contract strict while permitting evaluator-only corruption and runtime changes | adopt now; add a human diff CLI later |
 | Preserve curriculum position over resume | restore the counter and immediately recompute mutable curriculum targets | adopt now |
 | Detect a checkpoint inherited from a different experiment | reject semantic full-resume mismatches even when model tensor shapes happen to fit | adopt now |
-| Record source identity for hidden semantics | hash defining callable files and core manager/runner modules in addition to package versions | adopt now |
+| Record source identity for hidden semantics | record defining callable files and core manager/runner modules without making source bytes the semantic resume contract | audit only; exclude from `training_sha256` |
 | Keep operational changes from invalidating evaluation | exclude viewer, environment count, controller-worker count, console output, corruption, and observation latency from the actor-only interface | adopt now |
 | Keep old checkpoints evaluable | warn when a legacy checkpoint lacks the new manifest; retain the existing controller-provenance check | adopt now |
 
