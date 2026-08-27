@@ -1073,11 +1073,7 @@ class stratified_finite_impulse_curriculum(finite_impulse_curriculum):
   def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
     super().__init__(cfg, env)
     self.bands = tuple(tuple(band) for band in cfg.params["bands"])
-    weights = tuple(float(value) for value in cfg.params["band_weights"])
-    if len(weights) != len(self.bands) + 1:
-      raise ValueError("band weights need standing plus every impulse band")
-    if abs(sum(weights) - 1.0) > 1e-9 or any(value < 0.0 for value in weights):
-      raise ValueError("band weights must be nonnegative and sum to one")
+    weights = self.validated_weights(cfg.params["band_weights"])
     union = (min(low for low, _ in self.bands), max(high for _, high in self.bands))
     stages = cfg.params["stages"]
     # `stages` is inert here but reaches the manifest, so keep it honest.
@@ -1088,6 +1084,21 @@ class stratified_finite_impulse_curriculum(finite_impulse_curriculum):
     self.sampled_band = torch.full(
       (env.num_envs,), -1, dtype=torch.long, device=env.device
     )
+
+  def validated_weights(self, weights) -> tuple[float, ...]:
+    """Return one reset-time mixture, rejecting a malformed one."""
+    values = tuple(float(value) for value in weights)
+    if len(values) != len(self.bands) + 1:
+      raise ValueError("band weights need standing plus every impulse band")
+    if abs(sum(values) - 1.0) > 1e-9 or any(value < 0.0 for value in values):
+      raise ValueError("band weights must be nonnegative and sum to one")
+    return values
+
+  def set_band_weights(self, weights) -> None:
+    """Replace the mixture drawn by cohorts resetting from now on."""
+    values = self.validated_weights(weights)
+    self.band_weights = values
+    self._band_weights = torch.tensor(values, device=self._env.device)
 
   def reset(self, env_ids: torch.Tensor | None = None) -> None:
     """Schedule an impulse and draw the reset cohort's magnitude band."""
@@ -1213,6 +1224,68 @@ def _push_term(env: ManagerBasedRlEnv, term_name: str) -> recorded_disturbance:
       f"disturbance-gated reward to know when it fired, got {type(term).__name__}"
     )
   return term
+
+
+class episode_length_impulse_curriculum:
+  """Move a stratified impulse mixture on smoothed terminal episode length."""
+
+  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+    push = _push_term(env, cfg.params.get("term_name", "push_robot"))
+    if not isinstance(push, stratified_finite_impulse_curriculum):
+      raise TypeError("episode-length curriculum needs a stratified impulse term")
+    self._push: stratified_finite_impulse_curriculum = push
+    self._mixtures = tuple(
+      push.validated_weights(mixture) for mixture in cfg.params["mixtures"]
+    )
+    if len(self._mixtures) < 2:
+      raise ValueError("an episode-length ladder needs at least two mixtures")
+    self.stage = 0
+    self.smoothed = float("nan")
+    self._push.set_band_weights(self._mixtures[0])
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor | slice | None,
+    mixtures: tuple[tuple[float, ...], ...],
+    advance_fraction: float = 0.65,
+    regress_fraction: float = 0.45,
+    smoothing: float = 0.02,
+    term_name: str = "push_robot",
+  ) -> dict[str, float]:
+    """Smooth the terminating cohort's length and step the ladder across it."""
+    del mixtures, term_name
+    if advance_fraction <= regress_fraction:
+      raise ValueError("the advance fraction must leave a deadband above regress")
+    # `curriculum_manager.compute` runs first in `_reset_idx`, so these buffers
+    # still hold the terminal lengths of exactly the envs that just finished.
+    if env_ids is not None and not isinstance(env_ids, slice):
+      lengths = env.episode_length_buf[env_ids]
+      if lengths.numel():
+        sample = float(lengths.to(torch.float32).mean()) / env.max_episode_length
+        self.smoothed = (
+          sample
+          if math.isnan(self.smoothed)
+          else (1.0 - smoothing) * self.smoothed + smoothing * sample
+        )
+        self._step_ladder(advance_fraction, regress_fraction)
+    return {
+      "stage": float(self.stage),
+      "smoothed_length_fraction": self.smoothed,
+      "top_band_share": self._mixtures[self.stage][-1],
+    }
+
+  def _step_ladder(self, advance_fraction: float, regress_fraction: float) -> None:
+    """Take at most one ladder step, with a deadband against oscillation."""
+    if self.smoothed >= advance_fraction and self.stage + 1 < len(self._mixtures):
+      self.stage += 1
+    elif self.smoothed < regress_fraction and self.stage > 0:
+      self.stage -= 1
+    else:
+      return
+    self._push.set_band_weights(self._mixtures[self.stage])
+    # Re-smoothed from the new mixture: the old level is not evidence about it.
+    self.smoothed = float("nan")
 
 
 def achievement_curriculum_state(

@@ -33,6 +33,7 @@ from mc_mjlab.residual_safety import project_residual
 from mc_mjlab.tasks.mdp import (
   achievement_finite_impulse_curriculum,
   action_l2,
+  episode_length_impulse_curriculum,
   finite_impulse_curriculum,
   gradual_finite_impulse_curriculum,
   interpolated_impulse_range,
@@ -657,6 +658,94 @@ def verify_paired_clustering() -> None:
   assert one["paired"]["clusters"] == 16.0
 
 
+class _LadderEnv(_StratifiedEnv):
+  """Add the terminal-length buffer the episode-length ladder reads."""
+
+  def __init__(self) -> None:
+    super().__init__()
+    self.max_episode_length = 4500
+    self.episode_length_buf = torch.zeros(4, dtype=torch.long)
+
+
+def _ladder(env: _LadderEnv, push: Any) -> Any:
+  """Build the ladder term over an already-built stratified impulse term."""
+  ladder_cfg = _TermCfg(
+    func=None,
+    params={
+      "mixtures": [
+        QUALIFICATION_MATCHED_MIXTURES["gait"],
+        QUALIFICATION_MATCHED_MIXTURES["matched"],
+        QUALIFICATION_MATCHED_MIXTURES["hazard"],
+      ],
+      "term_name": "push_robot",
+    },
+  )
+  env.event_manager = _TermManager({"push_robot": _TermCfg(func=push)})
+  return episode_length_impulse_curriculum(ladder_cfg, env)
+
+
+def verify_episode_length_ladder() -> None:
+  """Check the ladder advances, holds inside the deadband, and steps back."""
+  env = _LadderEnv()
+  original_init = finite_impulse_curriculum.__init__
+  finite_impulse_curriculum.__init__ = lambda self, cfg, env: None
+  try:
+    push = stratified_finite_impulse_curriculum(
+      _TermCfg(
+        func=None,
+        params={
+          "bands": QUALIFICATION_MATCHED_BANDS,
+          "band_weights": QUALIFICATION_MATCHED_WEIGHTS,
+          "stages": ((0, (0.10, 0.60)),),
+        },
+      ),
+      env,
+    )
+    push._env = env
+    ladder = _ladder(env, push)
+  finally:
+    finite_impulse_curriculum.__init__ = original_init
+
+  # Construction pins the easiest mixture regardless of the built weights.
+  assert ladder.stage == 0
+  assert push.band_weights == QUALIFICATION_MATCHED_MIXTURES["gait"]
+
+  ids = torch.arange(4)
+  params = {"mixtures": (), "smoothing": 1.0}
+
+  # A cohort surviving 80% of the cap advances one rung, and only one.
+  env.episode_length_buf = torch.full((4,), 3600, dtype=torch.long)
+  state = ladder(env, ids, **params)
+  assert ladder.stage == 1 and state["stage"] == 1.0
+  assert push.band_weights == QUALIFICATION_MATCHED_MIXTURES["matched"]
+  # Smoothing restarts, so the same evidence cannot advance twice in a row.
+  assert math.isnan(ladder.smoothed)
+
+  # Inside the deadband nothing moves.
+  env.episode_length_buf = torch.full((4,), 2400, dtype=torch.long)
+  ladder(env, ids, **params)
+  assert ladder.stage == 1
+
+  # Below the regress fraction it steps back down, and never past the floor.
+  env.episode_length_buf = torch.full((4,), 900, dtype=torch.long)
+  ladder(env, ids, **params)
+  assert ladder.stage == 0
+  ladder(env, ids, **params)
+  assert ladder.stage == 0
+
+  # An empty or sliced reset cohort is not evidence.
+  before = ladder.smoothed
+  ladder(env, torch.zeros(0, dtype=torch.long), **params)
+  ladder(env, None, **params)
+  assert ladder.smoothed is before or math.isnan(ladder.smoothed)
+  try:
+    ladder(env, ids, mixtures=(), advance_fraction=0.4, regress_fraction=0.5)
+  except ValueError:
+    pass
+  else:
+    raise AssertionError("ladder accepted an inverted deadband")
+
+
 def verify_curriculum_reachability() -> None:
   """Check every reward-curriculum stage is reached inside the step budget."""
   variants = {
@@ -1134,6 +1223,7 @@ def main() -> None:
   verify_rollout_schedule()
   verify_masked_policy_objective()
   verify_impulse_curricula()
+  verify_episode_length_ladder()
   verify_curriculum_reachability()
   verify_qualifier_power()
   verify_paired_clustering()

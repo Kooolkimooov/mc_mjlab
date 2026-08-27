@@ -144,6 +144,69 @@ episode length, reset rate, or the baseline failure boundary changes.
 - 2026-08-27 — created after the stage-0 achievement run showed in-distribution
   improvement and out-of-distribution degradation on the same checkpoint.
 
+## episode_length_impulse_curriculum
+
+**Current:** an optional ladder that moves a `stratified_finite_impulse_curriculum`
+between mixtures on smoothed terminal episode length. It is wired into no
+registered task; it exists so difficulty can advance without a human in the loop.
+
+**Why episode length is the right variable**, measured on the 188-iteration
+matched-impulse seed against a 4,500-step cap (`episode_length_s = 90`):
+
+| | |
+| --- | ---: |
+| mean by sixths | 1807, 2970, 3073, 3049, 2806, 2849 |
+| last-60 mean | 2815, or `0.626` of the cap |
+| per-iteration standard deviation, last 60 | 147, `5.2%` relative |
+| hazard union over ~128 episodes | `0.542`, `8.1%` relative |
+
+The learning rise is `+1266` steps against a `147` noise floor, it never
+approaches the cap, and it is a *graded* signal where the fall rate is a
+Bernoulli one — 5.2% relative noise against 8.1%. Length carries more per
+iteration than survival does.
+
+**Mechanics.** `curriculum_manager.compute(env_ids=...)` is the first call in
+mjlab's `_reset_idx`, and `episode_length_buf` is zeroed at its end, so the term
+reads the true terminal lengths of exactly the envs that just finished. It
+smooths their mean as a fraction of `max_episode_length`, advances a rung at
+`0.65`, drops one below `0.45`, and restarts the smoothing after either — the
+old rung's survival is not evidence about the new one. The deadband is what
+stops a mixture change from immediately undoing itself.
+
+**The standing cohort makes the ladder self-tightening.** A no-push episode
+always reaches the cap, so the smoothed fraction is
+`standing_share + (1 - standing_share) * pushed_fraction`. A fixed `0.65`
+threshold therefore demands progressively more of the cohort that is actually
+pushed:
+
+| rung | standing share | pushed survival needed |
+| --- | ---: | ---: |
+| `gait` | 35% | 0.462 |
+| `matched` | 20% | 0.563 |
+| `hazard` | 10% | 0.611 |
+
+That is the useful direction, and it falls out of the mixture rather than being
+tuned in.
+
+**This advances difficulty; it does not promote a policy.** The signal is
+self-referential — the same rollouts that train the policy declare it ready — so
+it can never be evidence that the residual beat mc_rtc. Paired qualification
+remains the only thing that says that. The split is deliberate:
+[leo-mjlab-review.md](leo-mjlab-review.md) tranche 5 applied promotion-grade
+held-out evidence to what is really a training knob, and the cost was that the
+knob never moved — the real achievement run sat at stage 0 for 500 iterations,
+and its `model_180` finished after the trainer exited and was never consumed.
+Advancing difficulty is cheap, reversible and self-correcting; promoting a policy
+is an evidence claim. They should not share a gate.
+
+**Re-measure if:** `episode_length_s`, the band mixtures, the standing share, or
+the termination set changes — every threshold here is a fraction of the cap and a
+function of the standing share.
+
+**History:**
+- 2026-08-27 — added after the matched-impulse seed showed episode length rising
+  8.6x its own noise floor without approaching the cap.
+
 ## curriculum_diagnostics
 
 **Current:** Two additive ankle-authority tasks isolate the difficulty change
