@@ -40,6 +40,9 @@ from mc_mjlab.tasks.mdp import (
   requested_action_rate_l2,
   stratified_finite_impulse_curriculum,
 )
+from mc_mjlab.tasks.mdp import (
+  recovery_authority_coverage as mdp_recovery_authority_coverage,
+)
 from mc_mjlab.tasks.residual_balance.achievement_curriculum import (
   AchievementCurriculumBridge,
   AchievementState,
@@ -63,6 +66,7 @@ from mc_mjlab.tasks.residual_balance.effective_training_manifest import (
 from mc_mjlab.tasks.residual_balance.qualification_strata import classify_strata
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   QUALIFICATION_MATCHED_BANDS,
+  QUALIFICATION_MATCHED_MIXTURES,
   QUALIFICATION_MATCHED_WEIGHTS,
   TORQUE_MARGIN_WEIGHT,
   _make_env_cfg,
@@ -687,6 +691,30 @@ def verify_stratified_impulse() -> None:
   assert math.isclose(sum(QUALIFICATION_MATCHED_WEIGHTS), 1.0)
   for magnitude in (0.25, 0.40, 0.50, 0.60):
     assert any(low <= magnitude <= high for low, high in QUALIFICATION_MATCHED_BANDS)
+
+  # Every branch of the promotion verdict must already have a valid mixture.
+  assert QUALIFICATION_MATCHED_MIXTURES["matched"] == QUALIFICATION_MATCHED_WEIGHTS
+  for name, weights in QUALIFICATION_MATCHED_MIXTURES.items():
+    assert len(weights) == len(QUALIFICATION_MATCHED_BANDS) + 1, name
+    assert math.isclose(sum(weights), 1.0), name
+    assert all(value >= 0.0 for value in weights), name
+    assert weights[0] > 0.0, name
+  matched = QUALIFICATION_MATCHED_MIXTURES["matched"]
+  gait = QUALIFICATION_MATCHED_MIXTURES["gait"]
+  hazard = QUALIFICATION_MATCHED_MIXTURES["hazard"]
+  assert gait[0] > matched[0] > hazard[0]
+  assert gait[-1] < matched[-1] < hazard[-1]
+  for name in QUALIFICATION_MATCHED_MIXTURES:
+    variant = residual_balance_position_matched_impulse_env_cfg(mixture=name)
+    weights = variant.events["push_robot"].params["band_weights"]
+    assert weights == QUALIFICATION_MATCHED_MIXTURES[name], name
+
+  # The coverage metric is only readable as a ratio over the same window.
+  metrics = residual_balance_position_matched_impulse_env_cfg().metrics
+  coverage = metrics["recovery_authority_coverage"]
+  assert coverage.func is mdp_recovery_authority_coverage
+  for key in ("window_s", "min_normal_force", "push_term_name"):
+    assert coverage.params.get(key) == metrics["recovery_active"].params.get(key), key
 
   env = _StratifiedEnv()
   original_init = finite_impulse_curriculum.__init__

@@ -45,7 +45,13 @@ from mc_mjlab.tasks.residual_balance.curriculum_stages import ACHIEVEMENT_STAGES
 # 0.50-0.60 m/s), which the step curriculum never reaches inside a screen budget.
 # docs/difficulty.md#stratified_finite_impulse_curriculum
 QUALIFICATION_MATCHED_BANDS = ((0.10, 0.25), (0.25, 0.40), (0.40, 0.60))
-QUALIFICATION_MATCHED_WEIGHTS = (0.20, 0.25, 0.25, 0.30)
+# One mixture per way the promotion gate can reject `matched`; standing first.
+QUALIFICATION_MATCHED_MIXTURES = {
+  "matched": (0.20, 0.25, 0.25, 0.30),
+  "gait": (0.35, 0.30, 0.20, 0.15),
+  "hazard": (0.10, 0.15, 0.25, 0.50),
+}
+QUALIFICATION_MATCHED_WEIGHTS = QUALIFICATION_MATCHED_MIXTURES["matched"]
 DCM_STD = 0.10
 FALL_LIMIT_ANGLE = math.radians(45.0)
 TORQUE_MARGIN_WEIGHT = -0.05
@@ -545,6 +551,11 @@ def _make_env_cfg(
       func=mdp.recovery_dcm_error,
       params={**metric_params, "window_s": 2.0, "push_term_name": "push_robot"},
     ),
+    # Detector recall inside the scored window: read over `recovery_active`.
+    "recovery_authority_coverage": MetricsTermCfg(
+      func=mdp.recovery_authority_coverage,
+      params={**metric_params, "window_s": 2.0, "push_term_name": "push_robot"},
+    ),
     "recovery_active": MetricsTermCfg(
       func=mdp.recovery_active,
       params={
@@ -641,13 +652,14 @@ def residual_balance_position_env_cfg(
 
 def residual_balance_position_matched_impulse_env_cfg(
   play: bool = False,
+  mixture: Literal["matched", "gait", "hazard"] = "matched",
 ) -> ManagerBasedRlEnvCfg:
   """Build the ankle-authority task whose pushes span the qualifier's range."""
   cfg = residual_balance_position_env_cfg(play=play, authority_set="ankle")
   push = cfg.events["push_robot"]
   push.func = mdp.stratified_finite_impulse_curriculum
   push.params["bands"] = QUALIFICATION_MATCHED_BANDS
-  push.params["band_weights"] = QUALIFICATION_MATCHED_WEIGHTS
+  push.params["band_weights"] = QUALIFICATION_MATCHED_MIXTURES[mixture]
   union = (
     QUALIFICATION_MATCHED_BANDS[0][0],
     QUALIFICATION_MATCHED_BANDS[-1][1],

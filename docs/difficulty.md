@@ -72,6 +72,24 @@ rollout with the hardest band would starve the very `recovery_dcm_error` measure
 that the promotion gate ranks on. 45% of episodes stay at or below the
 historical distribution.
 
+**The alternates are pre-registered, not chosen after the fact.**
+`QUALIFICATION_MATCHED_MIXTURES` holds one mixture per way the promotion gate can
+reject `matched`, so the follow-up arm is a named argument rather than a fresh
+edit made while looking at a verdict:
+
+| mixture | standing | band 0 | band 1 | band 2 | run it when |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `matched` | 20% | 25% | 25% | 30% | default |
+| `gait` | 35% | 30% | 20% | 15% | the `nominal` gait or duty gates regress |
+| `hazard` | 10% | 15% | 25% | 50% | `nominal` holds but the hazard ratio does not |
+
+The rule is one-directional on purpose. A `nominal` regression means the top
+band is crowding out the no-push practice those gates measure, so standing mass
+goes up. A hazard-ratio failure with `nominal` intact means the opposite: the
+robust band still has too little weight to move a denominator it dominates.
+Writing both down before the verdict is what keeps the second arm a test rather
+than a knob turned until something passes.
+
 **Why stationary rather than a curriculum.** The 500-iteration budget run took
 its best 60-iteration ZMP and recovery windows at iterations 175 and 178,
 immediately before the stage boundary at 188, then degraded and produced NaNs at

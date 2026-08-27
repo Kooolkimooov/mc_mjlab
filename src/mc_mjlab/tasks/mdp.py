@@ -1342,6 +1342,33 @@ class recovery_dcm_error:
     return error * active * (normal_force >= min_normal_force)
 
 
+class recovery_authority_coverage:
+  """Recovery-window steps that carried authority; read over ``recovery_active``."""
+
+  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+    self._sensors = _zmp_sensors(
+      env, cfg.params["sensor_names"], cfg.params["asset_cfg"].name
+    )
+    self._push = _push_term(env, cfg.params.get("push_term_name", "push_robot"))
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    window_s: float,
+    sensor_names: tuple[str, ...],
+    asset_cfg: SceneEntityCfg,
+    push_term_name: str = "push_robot",
+    action_name: str = "mc_rtc_residual",
+    min_normal_force: float = 20.0,
+  ) -> torch.Tensor:
+    del sensor_names, asset_cfg, push_term_name
+    normal_force = self._sensors.normal_forces(env).sum(dim=1)
+    age = _age_since_push(env, self._push)
+    active = (age >= 1) & (age <= round(window_s / env.step_dt))
+    active = active & (normal_force >= min_normal_force)
+    return active & (_residual_term(env, action_name).last_gate > 0.0)
+
+
 class recovery_active:
   """Grounded indicator for the recorded post-disturbance recovery window."""
 

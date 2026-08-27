@@ -701,6 +701,36 @@ this quantity; see `requested_action_l2`.
 **History:**
 - 2026-08-24 — replaced raw clipped action accounting with action-term telemetry.
 
+## recovery_authority_coverage
+
+**Current:** a metric, no weight. It counts grounded post-push steps that also
+carried nonzero recovery authority, using the same `window_s`, `push_term_name`
+and `min_normal_force` as `recovery_active`. Read it as
+`recovery_authority_coverage / recovery_active`, exactly as `zmp_error` is read
+over `zmp_grounded`; the contract suite pins the two parameter sets equal so that
+ratio stays well defined.
+
+**Why it exists.** The matched-impulse seed ended with `recovery_active` at
+`0.188` and `gate_mean` at `0.066`. Those are not the same quantity — `gate_mean`
+averages a continuous ramp, not a duty — so the gap is suggestive and nothing
+more. Two very different situations produce it: the detector may have lost recall
+on `0.40-0.60 m/s` impulses it was never calibrated against, or recoveries may
+simply be short relative to the two-second scored window. The first is a defect
+that caps how much any policy can help, and it is repaired by recalibrating
+`etc/recovery_detector.json`; the second is the objective working as intended.
+No existing metric separates them.
+
+The shipped calibration's own provenance records `push_velocity 0.4` with the
+velocity kick, `nominal_duty 0.36%`, and `recovery_recall 98.99%`. None of those
+were measured on the stratified finite-impulse distribution.
+
+**Re-measure if:** the detector calibration, band mixture, or the recovery
+window changes.
+
+**History:**
+- 2026-08-27 — added so the next matched-impulse arm can distinguish lost
+  detector recall from a short recovery, instead of inferring it from `gate_mean`.
+
 ## requested_action_l2
 
 **Current:** `residual_magnitude` and `residual_rate` retain weight `-0.1` but
