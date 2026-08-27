@@ -164,7 +164,41 @@ Both the nominal and hazard gates failed together, which the pre-registered rule
 in `difficulty.md` says falsifies the mixture hypothesis rather than selecting
 between `gait` and `hazard`. No mixture change follows from this run.
 
+**Stage-0 re-qualification refuted the regime hypothesis.** `model_180` was
+re-qualified at `--achievement-stage 0` (`0.25` and `[0.30, 0.35] m/s`) on the
+argument that the default magnitudes saturate the baseline and hide a real
+effect. They do saturate it, and they did not hide anything.
+
+| | default | stage-0 |
+| --- | ---: | ---: |
+| hazard ratio | `0.989` fail | `0.667` pass, over 3 valid scenarios |
+| `finite_impulse` hazard | `1.000 -> 1.000` | `0.047 -> 0.031` |
+| recovery DCM | `+0.64%` | `-0.40%`, CI `[-0.0031, +0.0026]`, p `0.88` |
+
+The hazard gate passes only because its denominator is `0.047` over 64 paired
+episodes — about three falls against two, on a gate with no confidence
+requirement at all. Recovery DCM is indistinguishable from zero in both regimes,
+so reaching the `5%` bar needs a twelvefold larger effect than exists.
+
+**Why: the detector grants far less authority at gentler pushes.** Recovery-window
+gate duty is `0.10-0.16` at stage 0 against `0.45-0.61` at default, roughly `4x`
+less. Every directional effect collapses with it: the sagittal-good/lateral-bad
+split that motivated `ankle_pitch` is `-8.9%/-3.7%` against `+11.7%/+5.6%` at
+default, and `-0.2%` to `-1.0%` across all four directions at stage 0. Stage 0 is
+not a more measurable regime for this policy; it is a regime where the policy is
+close to inert, so `ankle_pitch` remains a default-magnitude hypothesis.
+
+**One defect survives both regimes.** In `sustained/none` — walking between
+pushes — gate duty rises `+31.8%` (default) and `+43.1%` (stage 0) while grounded
+DCM degrades `+38.1%` and `+25.5%`. The policy claims authority when nothing has
+happened and makes walking worse for it. That is magnitude-independent, it is the
+loop described in
+[residual-authority.md](residual-authority.md#ankle_pitch), and it points at the
+detector calibration rather than at any band mixture or authority set.
+
 **History:**
+- 2026-08-27 — stage-0 re-qualification refuted the saturated-baseline
+  hypothesis; the recovery effect is absent, not hidden.
 - 2026-08-27 — paired qualification rejected `model_140` and `model_180`; the
   run corrected the baseline-hazard premise the band shares were argued from.
 - 2026-08-27 — completed the qualification-matched seed; paired qualification of
