@@ -353,12 +353,12 @@ def _make_env_cfg(
       params={"soft_ratio": 0.8, "action_name": "mc_rtc_residual"},
     ),
     "residual_magnitude": RewardTermCfg(
-      func=mdp.action_l2,
+      func=mdp.requested_action_l2,
       weight=-0.1,
       params={"action_name": "mc_rtc_residual"},
     ),
     "residual_rate": RewardTermCfg(
-      func=mdp.action_rate_l2,
+      func=mdp.requested_action_rate_l2,
       weight=-0.1,
       params={"action_name": "mc_rtc_residual"},
     ),
@@ -522,6 +522,8 @@ def _make_env_cfg(
     "projection_fraction": MetricsTermCfg(func=mdp.projection_fraction),
     "near_bound_fraction": MetricsTermCfg(func=mdp.near_bound_fraction),
     "executed_residual_l2": MetricsTermCfg(func=mdp.action_l2),
+    "requested_residual_l2": MetricsTermCfg(func=mdp.requested_action_l2),
+    "requested_residual_rate_l2": MetricsTermCfg(func=mdp.requested_action_rate_l2),
     "max_effort_ratio": MetricsTermCfg(
       func=mdp.max_effort_ratio,
       params={"action_name": "mc_rtc_residual"},

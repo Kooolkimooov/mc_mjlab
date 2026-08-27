@@ -10,6 +10,7 @@ from pathlib import Path
 
 from mjlab.rl import MjlabOnPolicyRunner
 
+from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
 from mc_mjlab.tasks.residual_balance.achievement_curriculum import (
   AchievementCurriculumBridge,
 )
@@ -113,6 +114,7 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
 
   def __init__(self, env, train_cfg: dict, log_dir=None, device: str = "cpu") -> None:
     super().__init__(env, train_cfg, log_dir, device)
+    self._configure_actor_update_mask(env)
     self._controller_provenance = collect_controller_provenance(env)
     self._training_budget = training_budget(env.num_envs, train_cfg)
     self._effective_manifest = build_effective_training_manifest(env, train_cfg)
@@ -127,6 +129,16 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
       (Path(log_dir) / "training_budget.json").write_text(
         json.dumps(self._training_budget, indent=2) + "\n"
       )
+
+  def _configure_actor_update_mask(self, env) -> None:
+    """Connect PPO actor updates to the authority applied by the action term."""
+    configure = getattr(self.alg, "set_actor_update_mask_source", None)
+    if not callable(configure):
+      return
+    action = env.unwrapped.action_manager.get_term("mc_rtc_residual")
+    if not isinstance(action, McRtcResidualActionBase):
+      raise TypeError("residual runner requires an mc_rtc residual action")
+    configure(lambda: action.actor_update_gate)
 
   def _log_with_diagnostics(self, log):
     """Wrap the logger so every iteration also records the PPO diagnostics."""

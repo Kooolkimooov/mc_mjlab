@@ -77,6 +77,29 @@ def action_rate_l2(
   return torch.sum(torch.square(delta), dim=1)
 
 
+def requested_action_l2(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """Squared normalized residual request while recovery authority is nonzero."""
+  term = _residual_term(env, action_name)
+  cost = torch.sum(torch.square(term.requested_normalized_action), dim=1)
+  return cost * (term.last_gate > 0.0)
+
+
+def requested_action_rate_l2(
+  env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+) -> torch.Tensor:
+  """Squared normalized request change while recovery authority is nonzero."""
+  term = _residual_term(env, action_name)
+  previous = torch.where(
+    (term.previous_gate > 0.0).unsqueeze(-1),
+    term.previous_requested_normalized_action,
+    torch.zeros_like(term.previous_requested_normalized_action),
+  )
+  delta = term.requested_normalized_action - previous
+  return torch.sum(torch.square(delta), dim=1) * (term.last_gate > 0.0)
+
+
 def _restrict(term: McRtcResidualActionBase, values: torch.Tensor) -> torch.Tensor:
   """Keep only the columns carrying the residual (see ``residual_ids``)."""
   ids = term.residual_ids

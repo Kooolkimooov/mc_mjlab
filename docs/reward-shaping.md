@@ -689,19 +689,40 @@ which is what the task's terminations and `base_progress_tanh` read instead.
 
 ## action_l2
 
-**Current:** weight `-0.1`, on the normalized residual actually delivered after
-tanh squashing, physical scaling, authority gating, and feasibility projection.
-`residual_rate` differences the same executed quantity across policy steps.
+**Current:** `action_l2` is the executed-residual metric: normalized residual
+actually delivered after tanh squashing, physical scaling, authority gating,
+and feasibility projection. `action_rate_l2` differences that same executed
+quantity across policy steps.
 
-This makes the penalty invariant to per-joint physical scales and prevents both
-failure modes of reconstructing execution from raw action: paying for an action
-projection removed, and missing a large request because a later clip hid it.
+This makes execution telemetry invariant to per-joint physical scales and avoids
+reconstructing applied authority from raw requests. The reward no longer uses
+this quantity; see `requested_action_l2`.
 
 **History:**
 - 2026-08-24 — replaced raw clipped action accounting with action-term telemetry.
 
-The clamp is not cosmetic — it fixes a runaway that destroyed a run. The residual
-is hard-clipped, and because the env cfg sets `clip` equal to `scale`, the clip
+## requested_action_l2
+
+**Current:** `residual_magnitude` and `residual_rate` retain weight `-0.1` but
+price the bounded normalized request on steps with nonzero recovery authority.
+The rate uses the previous request and is reset with each environment. Requested
+and executed costs are logged separately.
+
+This prevents a large request from becoming artificially cheap during a partial
+authority ramp. Inactive PPO advantages are zeroed by `RolloutAdaptivePPO`, so
+inactive requests cannot inject unrelated return noise into the surrogate; the
+all-step transformed entropy term keeps the zero-initialized mean regularized.
+
+**Re-measure if:** the authority duty cycle, actor distribution, or action scale
+changes.
+
+**History:**
+- 2026-08-27 — restored request pricing on causally active steps after the prior
+  executed-only reward left 92.7% of requests unconstrained by the objective.
+
+**Historical raw-action failure.** The clamp was not cosmetic: it fixed a runaway
+that destroyed a run. The residual was hard-clipped, and because the env cfg set
+`clip` equal to `scale`, the clip
 binds at a raw action of exactly 1.0. Past that a larger raw action has **no
 physical effect whatsoever**, so an unclamped quadratic penalty keeps charging more
 for a difference the robot cannot feel.

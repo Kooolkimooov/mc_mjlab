@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 import torch
+from rsl_rl.models.mlp_model import MLPModel
+from rsl_rl.storage import RolloutStorage
 from tensordict import TensorDict
 
 from mc_mjlab.recovery_authority import (
@@ -20,8 +22,11 @@ from mc_mjlab.recovery_authority import (
 from mc_mjlab.residual_safety import project_residual
 from mc_mjlab.tasks.mdp import (
   achievement_finite_impulse_curriculum,
+  action_l2,
   gradual_finite_impulse_curriculum,
   interpolated_impulse_range,
+  requested_action_l2,
+  requested_action_rate_l2,
 )
 from mc_mjlab.tasks.residual_balance.achievement_curriculum import (
   AchievementCurriculumBridge,
@@ -62,7 +67,10 @@ from mc_mjlab.tasks.residual_balance.training_watchdog import (
   qualification_baseline,
   qualification_regressions,
 )
-from mc_mjlab.tasks.rollout_adaptive_ppo import RolloutAdaptivePPO
+from mc_mjlab.tasks.rollout_adaptive_ppo import (
+  RolloutAdaptivePPO,
+  normalize_masked_advantages,
+)
 from mc_mjlab.tasks.squashed_gaussian import SquashedGaussianDistribution
 from mc_mjlab.tasks.zero_init_actor import (
   ZeroInitMLPModel,
@@ -385,6 +393,80 @@ def verify_rollout_schedule() -> None:
   assert update(1.0e-3, 0.02, 0.02) == 1.0e-3
   assert update(1.0e-5, 0.05, 0.02) == 1.0e-5
   assert update(1.0e-2, 0.005, 0.02) == 1.0e-2
+
+
+def verify_masked_policy_objective() -> None:
+  """Check inactive samples have zero surrogate gradient without dilution."""
+  advantages = torch.tensor([1.0, 3.0, 100.0, 200.0]).reshape(2, 2, 1)
+  mask = torch.tensor([True, True, False, False]).reshape(2, 2, 1)
+  normalized = normalize_masked_advantages(advantages, mask)
+  assert torch.equal(normalized[~mask], torch.zeros(2))
+  assert torch.isclose(normalized[mask].mean(), torch.tensor(0.0), atol=1.0e-6)
+  ratio = torch.ones_like(normalized, requires_grad=True)
+  (normalized * ratio).mean().backward()
+  assert ratio.grad is not None
+  assert torch.equal(ratio.grad[~mask], torch.zeros(2))
+  expected = (advantages[mask] - advantages[mask].mean()) / advantages[mask].std()
+  assert torch.allclose(ratio.grad[mask], expected / mask.sum())
+  assert torch.equal(
+    normalize_masked_advantages(advantages, torch.zeros_like(mask)),
+    torch.zeros_like(advantages),
+  )
+
+  cfg = _make_env_cfg("position")
+  assert cfg.rewards["residual_magnitude"].func is requested_action_l2
+  assert cfg.rewards["residual_rate"].func is requested_action_rate_l2
+  assert cfg.metrics["executed_residual_l2"].func is action_l2
+  assert cfg.metrics["requested_residual_l2"].func is requested_action_l2
+
+  rollout_obs = TensorDict(
+    {"actor": torch.randn(4, 3), "critic": torch.randn(4, 3)}, batch_size=[4]
+  )
+  obs_groups = {"actor": ["actor"], "critic": ["critic"]}
+  distribution_cfg = {
+    "class_name": "mc_mjlab.tasks.squashed_gaussian:SquashedGaussianDistribution",
+    "init_std": 0.1,
+    "std_range": (0.05, 0.30),
+  }
+  actor = ZeroInitMLPModel(
+    rollout_obs,
+    obs_groups,
+    "actor",
+    2,
+    hidden_dims=(8,),
+    distribution_cfg=distribution_cfg,
+  )
+  critic = MLPModel(rollout_obs, obs_groups, "critic", 1, hidden_dims=(8,))
+  storage = RolloutStorage("rl", 4, 3, rollout_obs, [2])
+  algorithm = RolloutAdaptivePPO(
+    actor,
+    critic,
+    storage,
+    num_learning_epochs=1,
+    num_mini_batches=1,
+    schedule="fixed",
+  )
+  authority = torch.zeros(4)
+  algorithm.set_actor_update_mask_source(lambda: authority)
+  masks = torch.tensor(
+    [
+      [True, False, False, True],
+      [False, True, False, False],
+      [True, False, False, False],
+    ]
+  )
+  for mask_row in masks:
+    algorithm.act(rollout_obs)
+    authority.copy_(mask_row)
+    algorithm.process_env_step(
+      rollout_obs, torch.randn(4), torch.zeros(4, dtype=torch.bool), {}
+    )
+  algorithm.compute_returns(rollout_obs)
+  assert torch.equal(storage.advantages[~masks.unsqueeze(-1)], torch.zeros(8))
+  losses = algorithm.update()
+  assert all(math.isfinite(value) for value in losses.values())
+  assert storage.step == 0
+  assert math.isclose(algorithm.last_actor_update_fraction, 4 / 12, rel_tol=1.0e-6)
 
 
 def verify_impulse_curricula() -> None:
@@ -760,6 +842,7 @@ def main() -> None:
   verify_projection()
   verify_recovery_detector()
   verify_rollout_schedule()
+  verify_masked_policy_objective()
   verify_impulse_curricula()
   verify_achievement_curriculum()
   verify_achievement_report_contract()

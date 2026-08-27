@@ -186,6 +186,8 @@ class McRtcResidualActionBase(BaseAction):
     )
     if self._recovery_authority is not None:
       self._last_gate.zero_()
+      self._previous_gate.zero_()
+      self._actor_update_gate.zero_()
 
   # ---- Construction helpers. ----
 
@@ -223,6 +225,8 @@ class McRtcResidualActionBase(BaseAction):
     """Slice scale/offset/clip down to the residual actuator subset."""
     self._residual_ids: torch.Tensor | None = None
     self._last_gate = torch.ones(self.num_envs, device=self.device)
+    self._previous_gate = torch.ones_like(self._last_gate)
+    self._actor_update_gate = torch.ones_like(self._last_gate)
     self._torque_peak = torch.zeros(
       self.num_envs, self._num_targets, device=self.device
     )
@@ -259,6 +263,7 @@ class McRtcResidualActionBase(BaseAction):
     """Append an optional normalized Vector3 walking-reference action."""
     self._residual_action_dim = self._action_dim
     self._residual_raw_actions = self._raw_actions
+    self._previous_residual_raw_actions = torch.zeros_like(self._residual_raw_actions)
     self._datastore_vector_commands: tuple[tuple[str, str], ...] = ()
     self._walking_reference_scale = torch.empty(0, device=self.device)
     self._walking_reference_requested = torch.empty(
@@ -544,6 +549,11 @@ class McRtcResidualActionBase(BaseAction):
     return self._residual_raw_actions
 
   @property
+  def previous_requested_normalized_action(self) -> torch.Tensor:
+    """Normalized residual request from the preceding policy step."""
+    return self._previous_residual_raw_actions
+
+  @property
   def requested_physical_action(self) -> torch.Tensor:
     """Physical request after affine processing and clip."""
     return self._processed_actions
@@ -591,6 +601,16 @@ class McRtcResidualActionBase(BaseAction):
   def last_gate(self) -> torch.Tensor:
     """Most recent recovery authority in 0..1."""
     return self._last_gate
+
+  @property
+  def previous_gate(self) -> torch.Tensor:
+    """Recovery authority from the preceding policy step."""
+    return self._previous_gate
+
+  @property
+  def actor_update_gate(self) -> torch.Tensor:
+    """Authority of the last processed action, retained across an auto-reset."""
+    return self._actor_update_gate
 
   @property
   def detector_score(self) -> torch.Tensor:
@@ -651,7 +671,9 @@ class McRtcResidualActionBase(BaseAction):
 
   def process_actions(self, actions: torch.Tensor) -> None:
     self._previous_executed_physical.copy_(self._executed_physical)
+    self._previous_residual_raw_actions.copy_(self._residual_raw_actions)
     self._previous_walking_reference_executed.copy_(self._walking_reference_executed)
+    self._previous_gate.copy_(self._last_gate)
     self._raw_actions.copy_(actions)
     residual = actions[:, : self._residual_action_dim]
     self._residual_raw_actions.copy_(residual)
@@ -666,6 +688,7 @@ class McRtcResidualActionBase(BaseAction):
       )
     if self._recovery_authority is not None:
       self._last_gate.copy_(self._recovery_authority.update())
+    self._actor_update_gate.copy_(self._last_gate)
     if self._walking_reference_scale.numel():
       normalized = actions[:, self._residual_action_dim :].clamp(-1.0, 1.0)
       self._walking_reference_requested.copy_(
@@ -697,9 +720,12 @@ class McRtcResidualActionBase(BaseAction):
 
     self._torque_peak[env_ids] = 0.0
     self._last_gate[env_ids] = 0.0 if self._recovery_authority is not None else 1.0
+    self._previous_gate[env_ids] = self._last_gate[env_ids]
+    # PPO reads the transition gate after terminal environments auto-reset.
     self._executed_physical[env_ids] = 0.0
     self._previous_executed_physical[env_ids] = 0.0
     self._residual_raw_actions[env_ids] = 0.0
+    self._previous_residual_raw_actions[env_ids] = 0.0
     self._walking_reference_requested[env_ids] = 0.0
     self._walking_reference_executed[env_ids] = 0.0
     self._previous_walking_reference_executed[env_ids] = 0.0

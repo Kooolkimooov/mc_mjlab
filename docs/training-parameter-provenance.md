@@ -220,8 +220,8 @@ weights are local.
 | foot slip | `-1.0`, 20 N load threshold | Upstream-form / local-measured | Locomotion penalty form exists in mjlab; local implementation uses sole velocimeters. First proposed `-0.1` was inert and was raised 10× as a guard. |
 | torque margin | base `-0.05`, soft ratio `1.0`, warm-up 25 steps | leo_mjlab-exact form / local measurement | Peak/log1p form and initial weight descend from `leo_mjlab` commit `4412aa33`; threshold moved there from 0.7 to the hardware limit 1.0. Local warm-up suppresses a measured 22× reset transient. |
 | torque curriculum | `-0.05→-0.20→-0.50` at policy steps `0, 48k, 96k` | leo_mjlab-form / local-derived | Same gradual-safety rationale as leo_mjlab; current stages are local and expressed in common policy steps. |
-| residual magnitude | `-0.1`, squared raw action clamped to `±1` | Upstream-form / local fix | Weight came from the July reward rework; clamp added after an irrelevant raw action near 16 made the value loss diverge. |
-| residual rate | `-0.1`, squared change of raw actions clamped to `±1` | Upstream-exact weight / local fix | Exact weight matches mjlab locomotion `action_rate_l2`; local implementation clamps both endpoints to the physical action bound. |
+| residual magnitude | `-0.1`, squared tanh-bounded request on active-authority steps | Upstream-form / local fix | Weight came from the July reward rework; request pricing was restored after executed-only accounting left 92.7% of requests without a causal actor objective. |
+| residual rate | `-0.1`, squared change of tanh-bounded requests on active-authority steps | Upstream-exact weight / local fix | Exact weight matches mjlab locomotion `action_rate_l2`; inactive-to-active transitions compare against zero rather than an unexecuted noisy request. |
 
 No paper is claimed as the numeric root for any reward weight or exponential
 standard deviation. Detailed baseline shares and ablations are in

@@ -89,8 +89,9 @@ just `residual_joints`; the residual subset is sliced out afterwards in
 
 The action term exposes the bounded normalized request, scaled physical request,
 executed physical residual, authority gate, and feasibility mask separately.
-Rewards use the executed residual divided by this scale, so projection cannot
-hide a large request or charge an action that was never delivered.
+Rewards price the bounded request only while authority is nonzero, so a partial
+gate or later projection cannot hide a large active request. Metrics report the
+requested and executed quantities separately.
 
 ## residual_joints
 

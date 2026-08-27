@@ -94,10 +94,10 @@ blow-up.** `Run 2026-08-17_15-38-02_zeroinit-4ev` diverged at iteration ~2945 an
 never came back: `Loss/value` went 0.047 -> 15.9 between iterations 2940 and 2950,
 by which point the rate had reached the floor several iterations too late.
 
-That divergence had a second cause that mattered more, and it is fixed rather than
-traded off — see `action_l2` in
-[reward-shaping.md](reward-shaping.md#action_l2). Keep 2 x 2, but do not read the
-event count as a pure win.
+That divergence had a second cause that mattered more, and it is fixed rather
+than traded off — see `requested_action_l2` in
+[reward-shaping.md](reward-shaping.md#requested_action_l2). Keep 2 x 2, but do
+not read the event count as a pure win.
 
 **Re-measure `desired_kl` only after this**, not alongside it — with the event
 count down, 0.02 may already be enough.
@@ -105,14 +105,21 @@ count down, 0.02 may already be enough.
 ## RolloutAdaptivePPO
 
 **Current:** the default algorithm holds learning rate constant through every
-epoch and minibatch, computes latent-distribution KL over all valid rollout
-samples after optimization, then applies rsl_rl's existing
+epoch and minibatch. Before the upstream PPO update it zeroes advantages for
+steps whose recovery authority was zero, normalizes over the active samples,
+and rescales by total/active count so sparse authority does not dilute the
+surrogate. Critic targets and value loss still use every step. Entropy and
+latent-distribution KL also retain every valid rollout sample: transformed
+entropy regularizes inactive means toward zero, while the full-rollout KL limits
+shared-network drift. The algorithm then applies rsl_rl's existing
 `2 * desired_kl` and `desired_kl / 2` thresholds once. The rate changes by `1.5`
 for the following rollout and retains the `[1e-5, 1e-2]` bounds. Recurrent
 padding is excluded from the schedule statistic.
 
 `Diagnostics/schedule_kl` is the value that drove the rate decision;
 `Diagnostics/approx_kl` is recomputed independently by the diagnostics pass.
+`Diagnostics/actor_update_fraction` is the rollout fraction that contributed to
+the surrogate and should agree with recovery-authority duty.
 Fixed-rate screens use `1e-4`, `3e-4`, and `1e-3`. Both the legacy per-minibatch
 adaptive schedule and fixed schedule remain selectable without patching rsl_rl.
 
@@ -120,6 +127,8 @@ adaptive schedule and fixed schedule remain selectable without patching rsl_rl.
 contract, adaptive thresholds, or optimizer ownership.
 
 **History:**
+- 2026-08-27 — masked inactive surrogate samples after measured authority showed
+  only 7.338% of steps could causally respond to the policy.
 - 2026-08-24 — implemented after every earlier run exposed only an
   iteration-end diagnostic while the learning rate reacted four to twenty times
   to different minibatch KL values.
@@ -446,9 +455,9 @@ at `gamma = 0.99`, where intervening more went with dying sooner.
 
 **Then it diverged at iteration ~2945** and never recovered, ending at reward -291
 with a NaN at 2993. Two causes, one traded off and one fixed: the 4-event schedule
-could not throttle fast enough (`num_learning_epochs` above), and `action_l2` was
-charging unboundedly for raw actions past the clip
-([reward-shaping.md](reward-shaping.md#action_l2)).
+could not throttle fast enough (`num_learning_epochs` above), and the historical
+raw request penalty was charging unboundedly past the clip
+([reward-shaping.md](reward-shaping.md#requested_action_l2)).
 
 **Conclusion: cap this configuration near 1500 iterations.** Its useful work is
 done by ~1300, everything after is decay, and the last 50 iterations were actively

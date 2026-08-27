@@ -61,6 +61,7 @@ def ppo_diagnostics(alg: Any, saturation_level: float = 0.99) -> dict[str, float
       "policy_mean_rate_rms": _temporal_rms(policy_mean, storage.dones),
       "sampled_action_rate_rms": _temporal_rms(rollout_actions, storage.dones),
       "schedule_kl": float(getattr(alg, "last_schedule_kl", float("nan"))),
+      "actor_update_fraction": float(getattr(alg, "last_actor_update_fraction", 1.0)),
     }
 
 
