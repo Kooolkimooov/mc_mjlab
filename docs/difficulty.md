@@ -83,10 +83,28 @@ change.
 
 **How to read it.** The `impulse_speed` metric reports the equivalent delta
 velocity of each environment's last impulse. Against the ankle screen arm it must
-rise; if it does not, the mixture is not reaching the sampler. The hypothesis is
-falsified if robust-scenario hazard does not improve relative to the ankle
-control, and it is only supported by paired qualification, never by the training
-curves.
+rise; if it does not, the mixture is not reaching the sampler. Measured
+2026-08-27 over paired two-iteration smokes at 8 environments, 6 workers, and
+identical settings:
+
+| diagnostic | ankle control | matched impulse | change |
+| --- | ---: | ---: | ---: |
+| `impulse_speed` | 0.1025 | 0.3564 | 3.5x |
+| `gate_mean` | 0.0092 | 0.1632 | 17.7x |
+| mean episode length | 259.0 | 228.5 | -11.8% |
+
+The mixture reaches the sampler. The authority duty is the load-bearing number:
+the policy previously acted on `0.9%` of these steps, and inactive steps carry no
+action gradient at all, so the objective had almost nothing to optimize. Episode
+length falling only 11.8% says the `30%` top-band share is not collapsing
+episodes, which was the main risk in choosing it.
+
+Both `dcm_error` (0.0334 to 0.0776) and `recovery_dcm_error` (0.0175 to 0.0590)
+rise, as they must: harder pushes produce larger excursions. That is why nothing
+here is evidence of policy quality. The hypothesis is falsified if
+robust-scenario hazard does not improve relative to the ankle control, and it is
+only supported by paired qualification against the controller baseline, never by
+these curves.
 
 **Re-measure if:** `PairedDisturbances` magnitudes, the promotion hazard gate,
 episode length, reset rate, or the baseline failure boundary changes.
