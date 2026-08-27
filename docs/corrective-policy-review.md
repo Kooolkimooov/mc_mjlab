@@ -279,19 +279,24 @@ environment reset.
 
 ## Policy correction acceptance
 
-**Current:** no new policy is promoted by this code change. The static gate and
-live-smoke gate pass; a short learning seed and paired qualification remain.
+**Current:** no new policy is promoted by this code change. The static gate,
+live-smoke gate, and isolated learning seed pass their mechanical contracts;
+paired controller-relative triage remains.
 
 Before a training matrix:
 
 1. formatting, lint, the assertion suite, the 56-diagnostic type baseline,
    prose hook, and task discovery pass;
 2. two one-iteration live smokes logged finite losses and active actor fractions
-   of 9.77% and 9.28%; the terminal-safe reset smoke logged requested residual L2 0.003109,
-   requested rate L2 0.006423, executed residual L2 0.00000232, no fall,
-   collapse, controller failure, or worker failure, and KL 0.021937;
-3. one short seed checks that active surrogate learning is no longer diluted;
-4. only then may two independent seeds enter paired qualification.
+   of 9.77% and 9.28%; the terminal-safe reset smoke logged requested residual
+   L2 0.003109, requested rate L2 0.006423, executed residual L2 0.00000232, no
+   fall, collapse, controller failure, or worker failure, and KL 0.021937;
+3. one 188-iteration seed completed 6,160,384 transitions without infrastructure
+   failure; 12.553% of samples updated the surrogate, but executed residual L2
+   rose 65.5% and both stability errors were slightly worse than the old ankle
+   screen;
+4. paired evaluation of `model_100.pt` must beat the controller baseline before
+   spending a second independent training seed or attempting promotion.
 
 Manifest, baseline-parity, walking-reference, achievement automation, task
 cleanup, and documentation repairs remain explicit blockers for their respective
@@ -301,5 +306,7 @@ features, not silent additions to this policy-only tranche.
 regularization, or diagnostic reduction changes.
 
 **History:**
+- 2026-08-27 — completed the seed-42 ankle comparison in 67 minutes; the actor
+  objective is active, but training curves provide no improvement evidence.
 - 2026-08-27 — passed deterministic contracts and live collection, update, and
   reset paths with four environments and two controller workers.

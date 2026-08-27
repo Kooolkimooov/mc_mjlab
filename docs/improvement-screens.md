@@ -84,3 +84,48 @@ scales, observation contract, or training budget changes.
   experiment before the long-run stage.
 - 2026-08-25 — selected the standard and ankle checkpoints for deterministic
   paired qualification; no policy is promoted from training curves.
+
+## actor_update_fraction
+
+**Current:** the active-authority correction completed its isolated seed-42
+comparison in 67 minutes: 188 PPO iterations, 128 environments, 30 controller
+workers, 48,128 policy steps per environment, and 6,160,384 total transitions.
+It reached `model_187.pt` without an OOM, controller failure, or worker failure.
+The actor surrogate used 12.553% of rollout samples on average and 12.296% over
+the final 60 iterations, so active samples were no longer diluted by the roughly
+87.4% inactive cohort.
+
+The comparison below uses the original seed-42 ankle screen as its control.
+Best and late tracking values are 60-iteration means; residual is the final
+20-iteration mean. Hazard is the mutually exclusive `fell_over + collapsed`
+union, averaged over the final 60 training iterations.
+
+| diagnostic | old ankle | active-authority correction | change |
+| --- | ---: | ---: | ---: |
+| best ZMP error | 0.035626 at 138 | 0.035713 at 84 | +0.25% |
+| late ZMP error | 0.035714 | 0.035775 | +0.17% |
+| best recovery DCM error | 0.013121 at 89 | 0.013196 at 107 | +0.58% |
+| late recovery DCM error | 0.013260 | 0.013289 | +0.22% |
+| executed residual L2 | 0.000154 | 0.000254 | +65.5% |
+| late hazard | 0.003598 | 0.004167 | +15.8% |
+| late foot slip | 0.0001013 | 0.0000948 | -6.3% |
+| policy-mean RMS | 0.05473 | 0.05825 | +6.4% |
+| policy-mean rate RMS | 0.02044 | 0.03184 | +55.8% |
+| action standard deviation | 0.06566 | 0.08058 | +22.7% |
+
+The correction passed its mechanical acceptance test: the surrogate now learns
+from effective actions and the resulting policy differs materially. It did not
+produce favorable training evidence. It used more residual, changed faster, and
+was slightly worse on both stability errors and training hazard; only foot slip
+improved. These curves still cannot establish controller-relative performance.
+`model_100.pt` brackets the best smoothed ZMP and recovery readings at iterations
+84 and 107 and predates the observed collapse samples, so it is the single
+checkpoint worth a paired deterministic triage. Do not spend a second training
+seed unless that comparison beats the controller baseline.
+
+**Re-measure if:** actor masking, requested-action pricing, recovery authority,
+rollout length, or the ankle action set changes.
+
+**History:**
+- 2026-08-27 — completed the isolated active-authority seed; objective plumbing
+  passed, while training diagnostics did not support promotion.
