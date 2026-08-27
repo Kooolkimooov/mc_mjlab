@@ -266,6 +266,42 @@ old Gaussian checkpoints. Those remain valid only in a worktree containing their
 original actor, observation layout, and controller inputs; generating new
 validation checkpoints from the current tree is the clean migration path.
 
+## invalidated_scenarios
+
+**Current:** a scenario whose baseline or policy arm lost a controller worker is
+removed from every substantive gate, not just flagged. `promotion()` reports the
+invalidation, replaces the recovery-DCM verdict with
+`recovery DCM unreadable, scenario invalidated`, computes the hazard ratio over
+the surviving scenarios and says how many those were, and records the excluded
+names under `invalidated_scenarios`.
+
+This cannot promote anything: an invalidation already appends its own reason, so
+`eligible` is `False` before any of this runs. The change is entirely about what
+the report *claims*.
+
+**Why.** The 2026-08-27 `model_140` verdict read
+`finite_impulse: controller worker failure invalidated the run` and
+`finite impulse: recovery DCM improvement is below 5%` side by side. The second
+is computed from the first's discarded episodes. Read quickly it says the policy
+failed the recovery gate, when the truth is that the run has no recovery
+measurement at all — the same confusion between a measurement verdict and a
+policy verdict that `clusters_for_confidence` above exists to prevent.
+
+**The failures are wedges, not crashes.** All three in that run reported
+`exit code None`, which is the pool's timeout killing an unresponsive worker
+rather than a signal. That is the documented mc_rtc mode: a controller whose MPC
+has collapsed can hang permanently inside `reset()`. Harder impulse bands reach
+that state more often, so a qualification run over the matched distribution is
+more exposed to it than one over `[0.10, 0.25]`. Two of four scenarios were lost
+at 16 environments and 6 workers.
+
+**Re-measure if:** the pool timeout, worker count, or impulse distribution
+changes.
+
+**History:**
+- 2026-08-27 — separated invalidation from verdict after a worker wedge produced
+  a recovery-gate reason on a scenario that had no valid episodes.
+
 ## clusters_for_confidence
 
 **`--num-envs` defaults to 16, not 8.** The paired interval has

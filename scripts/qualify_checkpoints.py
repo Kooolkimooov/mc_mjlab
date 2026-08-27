@@ -668,9 +668,11 @@ def _holm_adjust(summary: dict[str, dict]) -> None:
 def promotion(checkpoint_summaries: dict[str, dict]) -> dict:
   """Apply safety/nominal gates before lexicographic recovery ranking."""
   reasons: list[str] = []
+  invalid: set[str] = set()
   for scenario, summary in checkpoint_summaries.items():
     if summary["worker_failure"]["baseline"] or summary["worker_failure"]["policy"]:
       reasons.append(f"{scenario}: controller worker failure invalidated the run")
+      invalid.add(scenario)
     if summary["max_effort_ratio"]["policy"] > 1.0001:
       reasons.append(f"{scenario}: hard effort ratio exceeds 1")
     if summary["projection_fraction"]["policy"] >= 0.001:
@@ -696,6 +698,10 @@ def promotion(checkpoint_summaries: dict[str, dict]) -> dict:
       if paired["ci_high"] / base >= limit:
         reasons.append(f"nominal: {name} upper-CI regression exceeds its gate")
   recovery = checkpoint_summaries.get("finite_impulse")
+  # A gate read off an invalidated scenario is not a verdict about the policy.
+  if "finite_impulse" in invalid:
+    recovery = None
+    reasons.append("finite impulse: recovery DCM unreadable, scenario invalidated")
   if recovery is not None:
     base = recovery["recovery_dcm_error"]["baseline"]
     paired = recovery["recovery_dcm_error"]["paired"]
@@ -712,15 +718,21 @@ def promotion(checkpoint_summaries: dict[str, dict]) -> dict:
   robust = checkpoint_summaries.get("robust")
   if robust is not None and robust["pre_disturbance_hazard"]["baseline"] > 0.05:
     reasons.append("robust: baseline pre-disturbance hazard exceeds 5%")
-  hazards = [summary["hazard"] for summary in checkpoint_summaries.values()]
+  scored = {
+    scenario: summary
+    for scenario, summary in checkpoint_summaries.items()
+    if scenario not in invalid
+  }
+  hazards = [summary["hazard"] for summary in scored.values()]
   total_base = sum(item["baseline"] for item in hazards)
   total_policy = sum(item["policy"] for item in hazards)
   hazard_ratio = (
     total_policy / total_base if total_base else (1.0 if not total_policy else math.inf)
   )
-  if hazard_ratio > 0.90:
-    reasons.append("overall hazard ratio exceeds 0.90")
-  for scenario, summary in checkpoint_summaries.items():
+  if scored and hazard_ratio > 0.90:
+    suffix = f" over {len(scored)}/{len(checkpoint_summaries)} valid scenarios"
+    reasons.append(f"overall hazard ratio exceeds 0.90{suffix if invalid else ''}")
+  for scenario, summary in scored.items():
     base = summary["hazard"]["baseline"]
     policy = summary["hazard"]["policy"]
     ratio = policy / base if base else (1.0 if not policy else math.inf)
@@ -737,6 +749,7 @@ def promotion(checkpoint_summaries: dict[str, dict]) -> dict:
     "reasons": reasons,
     "rank": [recovery_gain, -hazard_ratio, -residual],
     "hazard_ratio": hazard_ratio,
+    "invalidated_scenarios": sorted(invalid),
   }
 
 

@@ -783,7 +783,19 @@ def verify_qualifier_power() -> None:
   assert math.isnan(clusters_for_confidence(0.01, 0.005, 16))
   assert math.isnan(clusters_for_confidence(-0.01, 0.005, 1))
 
+  # An invalidated scenario must not also produce a substantive policy verdict.
+  broken = _recovery_summary(-0.00131, 0.0002, 16.0)
+  broken["finite_impulse"]["worker_failure"] = {"baseline": 0.0, "policy": 1.0}
+  verdict = promotion(broken)
+  assert not verdict["eligible"]
+  assert verdict["invalidated_scenarios"] == ["finite_impulse"]
+  assert any("invalidated the run" in reason for reason in verdict["reasons"])
+  assert any("unreadable" in reason for reason in verdict["reasons"])
+  assert not any("below 5%" in reason for reason in verdict["reasons"])
+  assert not any("hazard ratio" in reason for reason in verdict["reasons"])
+
   unresolved = promotion(_recovery_summary(-0.01010, 0.005760, 16.0))
+  assert unresolved["invalidated_scenarios"] == []
   assert not unresolved["eligible"]
   assert any("unresolved by 16 clusters" in reason for reason in unresolved["reasons"])
   assert any("23 would resolve it" in reason for reason in unresolved["reasons"])
