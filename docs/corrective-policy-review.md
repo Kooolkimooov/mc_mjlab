@@ -282,6 +282,52 @@ environment reset.
 
 **Decision:** deferred; cache one tensor per stage when the event term is built.
 
+## MATCHED_TASK_ID
+
+**Current:** `Position-Ankle-Matched-Impulse` is the first configuration built to
+be *measurable*, not just plausible. It changes one thing against the ankle
+screen arm: the disturbance distribution now covers the magnitudes the qualifier
+scores. Everything else — authority set, observations, reward weights, the
+torque-margin ramp, PPO settings — is the ankle control's.
+
+Two supporting corrections landed with it, both against the same measurement:
+burst onset no longer pays the residual magnitude cost twice
+(`requested_action_rate_l2`), and the paired interval no longer hides a sampling
+verdict behind a policy verdict (`clusters_for_confidence`).
+
+**Why this is expected to move the gates.** The three 2026-08-25 rejections all
+produced a real recovery-DCM improvement of `-4.79%` to `-7.70%` and failed on
+confidence, not on sign. The best of them needed 23 clusters and had 16. Matching
+the training distribution should raise the effect; clustering by
+`seed x environment` at 16 environments and two seeds supplies 32. Separately,
+the stage-0 achievement run showed the hazard gate is reachable only if the
+robust band is trained: finite-impulse hazard fell to `6.25%` while robust rose
+to `90.625%` on the same checkpoint.
+
+**Acceptance, in order.** Nothing here promotes a policy on training curves.
+
+1. Static gates: format, lint, the assertion suite, the 56-diagnostic type
+   baseline, prose hook, and `list-envs` discovery. Done.
+2. One short live smoke: confirm the task builds, controller workers start, and
+   `Episode_Metrics/impulse_speed` rises against the ankle arm. If it does not
+   rise, the mixture is not reaching the sampler and nothing after this matters.
+3. One seed to the ankle screen's 188-iteration budget, read against the
+   archived ankle arm on the same diagnostics.
+4. Paired qualification of its best and late checkpoints at 16 environments and
+   two seeds, which is 32 clusters.
+
+**What falsifies it.** Robust-scenario hazard not improving against the ankle
+control, or `nominal` gait gates regressing — the mixture spends 20% of episodes
+standing precisely to protect those, and losing them would mean the robust share
+is too large rather than that the hypothesis is wrong.
+
+**Re-measure if:** the qualifier's push magnitudes, the promotion hazard gate, or
+the authority set changes.
+
+**History:**
+- 2026-08-27 — built after the branch review traced the 13 indistinguishable
+  arms to a training support that never reached the scored magnitudes.
+
 ## Policy correction acceptance
 
 **Current:** no new policy is promoted by this code change. The static gate,

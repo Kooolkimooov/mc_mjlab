@@ -855,7 +855,9 @@ def main() -> None:
   parser.add_argument("checkpoints", nargs="+", help="checkpoint paths, dirs, or globs")
   parser.add_argument("--scenario", action="append", choices=SCENARIOS)
   parser.add_argument("--episodes-per-env", type=int, default=2)
-  parser.add_argument("--num-envs", type=int, default=8)
+  # Clusters are seeds x environments; 8 could not resolve the effect the
+  # 2026-08-25 screen measured. docs/evaluation.md#clusters_for_confidence
+  parser.add_argument("--num-envs", type=int, default=16)
   parser.add_argument("--num-workers", type=int, default=6)
   parser.add_argument("--episode-length-s", type=float, default=90.0)
   parser.add_argument("--seed", type=int, action="append")

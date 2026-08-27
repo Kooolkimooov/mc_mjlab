@@ -268,6 +268,12 @@ validation checkpoints from the current tree is the clean migration path.
 
 ## clusters_for_confidence
 
+**`--num-envs` defaults to 16, not 8.** The paired interval has
+`seeds x environments` clusters, so the old 8-environment single-seed default
+gave 8 — a third of the 23 that the best measured recovery effect needs. Sixteen
+is also the documented ceiling for running beside a training job.
+
+
 **Current:** the paired interval is a Student-t interval over
 `(seed, environment)` clusters, and every summary carries its `clusters` count.
 When the recovery-DCM improvement clears its 5% magnitude bar but its interval
