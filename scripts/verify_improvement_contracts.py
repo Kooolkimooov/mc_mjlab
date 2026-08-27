@@ -13,10 +13,12 @@ import torch
 
 # Sibling script, resolved by the interpreter's script directory at runtime.
 from qualify_checkpoints import (  # ty: ignore[unresolved-import]
+  Episode,
   _cluster_stats,
   _t_critical,
   clusters_for_confidence,
   promotion,
+  summarize,
 )
 from rsl_rl.models.mlp_model import MLPModel
 from rsl_rl.storage import RolloutStorage
@@ -602,6 +604,51 @@ def _recovery_summary(mean: float, sem: float, clusters: float) -> dict:
   }
 
 
+def _paired_episode(seed: int, env_id: int, arm: str, recovery: float) -> Episode:
+  """Build one qualifier episode carrying only the summarized metrics."""
+  return Episode(
+    checkpoint="model.pt",
+    scenario="finite_impulse",
+    seed=seed,
+    env_id=env_id,
+    pair=0,
+    arm=arm,
+    length=100,
+    terminations={"controller_worker_failed": 0},
+    rewards={},
+    metrics={
+      "recovery_dcm_error": recovery,
+      "recovery_active": 1.0,
+      "hazard": 0.0,
+      "dcm_error": recovery,
+      "com_velocity_error": 0.1,
+      "zmp_error": 0.03,
+      "foot_slip": 0.0,
+      "projection_fraction": 0.0,
+      "near_bound_fraction": 0.0,
+      "max_effort_ratio": 0.5,
+      "gate_mean": 0.02,
+      "executed_residual_l2": 1.0e-4,
+    },
+  )
+
+
+def verify_paired_clustering() -> None:
+  """Check a second seed adds clusters instead of collapsing them to two."""
+  episodes = []
+  for seed in (42, 43):
+    for env_id in range(16):
+      baseline = 0.13 + 0.002 * env_id
+      episodes.append(_paired_episode(seed, env_id, "baseline", baseline))
+      episodes.append(_paired_episode(seed, env_id, "policy", baseline - 0.010))
+  both = summarize(episodes)["recovery_dcm_error"]
+  assert both["cluster_level"] == "seed-environment"
+  assert both["paired"]["clusters"] == 32.0
+  assert both["paired"]["ci_high"] < 0.0
+  one = summarize([e for e in episodes if e.seed == 42])["recovery_dcm_error"]
+  assert one["paired"]["clusters"] == 16.0
+
+
 def verify_qualifier_power() -> None:
   """Check the Student-t interval, the one-cluster hole, and power reporting."""
   assert _t_critical(1) == math.inf
@@ -1036,6 +1083,7 @@ def main() -> None:
   verify_masked_policy_objective()
   verify_impulse_curricula()
   verify_qualifier_power()
+  verify_paired_clustering()
   verify_stratified_impulse()
   verify_achievement_curriculum()
   verify_achievement_report_contract()
