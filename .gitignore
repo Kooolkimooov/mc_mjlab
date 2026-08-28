@@ -15,6 +15,9 @@ src/mc_mjlab/robots/*/meshes
 src/mc_mjlab/robots/*/xmls/
 src/mc_mjlab/robots/*/pdgains
 
+docs/architecture/
+.obsidian/
+
 **/mc_plugins/*
 # Depends on the per-machine mjlab source choice (see README).
 uv.lock

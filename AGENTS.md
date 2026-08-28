@@ -155,11 +155,14 @@ through a history rewrite too: strip the session line rather than preserve it.
 
 # Architecture
 
-`docs/architecture/` holds six views of this system, **generated from the
-source** — import graph, class hierarchy, the shared-memory layout, the
-control step's real ordering. Never edit those files; edit
+`docs/architecture/` is **generated from the source** and carries no
+hand-written sentences: import graph, class hierarchy, the shared-memory
+column map, the control step's real ordering, and one `task-*` page per
+sub-package of `tasks/` with its manager terms, weights and guards. A new
+task package grows its own page with no wiring. Never edit those files; edit
 `scripts/generate_architecture_docs.py` and rerun it. `--check` fails when
-they no longer match the code.
+they no longer match the code. Explanation belongs in the notes below and in
+`docs/`, which the generated pages link to from the source's own comments.
 
 From mjlab down to mc_rtc:
 

@@ -7,68 +7,142 @@ import difflib
 import re
 import sys
 import tempfile
-import textwrap
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
-# Sibling scripts, resolved by the interpreter's script directory at runtime.
+# Sibling script, resolved by the interpreter's script directory at runtime.
 import architecture_extract as ex  # ty: ignore[unresolved-import]
-import architecture_model as md  # ty: ignore[unresolved-import]
 
 OUT = ex.ROOT / "docs" / "architecture"
+CSS = Path(__file__).with_name("architecture_page.css")
 ACTIONS = ex.SRC / "mc_mjlab" / "actions"
+ROBOTS = ex.SRC / "mc_mjlab" / "robots"
 TASKS = ex.SRC / "mc_mjlab" / "tasks"
 HOST = ACTIONS / "mc_rtc_controller_host.py"
 POOL = ACTIONS / "mc_rtc_controller_pool.py"
+BINDING = ACTIONS / "mc_rtc_controller_io_binding.py"
 ACTION = ACTIONS / "mc_rtc_residual_action.py"
 POSITION = ACTIONS / "mc_rtc_residual_joint_position_actions.py"
 TORQUE = ACTIONS / "mc_rtc_residual_joint_torque_actions.py"
-REGISTRY = ex.SRC / "mc_mjlab" / "robots" / "robots_registry.py"
+REGISTRY = ROBOTS / "robots_registry.py"
 RB = TASKS / "residual_balance"
 ZR = TASKS / "zero_residual"
+RB_CFG = RB / "residual_balance_env_cfg.py"
+ZR_CFG = ZR / "zero_residual_env_cfg.py"
+PPO_CFG = RB / "residual_balance_ppo_cfg.py"
 
-# Which side of the process boundary each class lives on. Not a program
-# property, so it is asserted here and every name is checked against the model.
-MAIN_SIDE = (
-  "McRtcResidualActionBase",
-  "ControllerIoBinding",
-  "ControllerPool",
-  "RecoveryAuthority",
+BANNER = (
+  "<!-- Generated from the source. Do not edit. -->\n"
+  "<!-- Rebuild: uv run python scripts/generate_architecture_docs.py -->"
 )
-WORKER_SIDE = ("ControllerHost",)
-EXTERNAL_PATHS = (
-  ("MC_RTC_YAML_PATH", "controller and robot selection"),
-  ("robots.mc_mujoco_assets.MC_MUJOCO_SHARE_DIR", "meshes, MJCF and PD gains"),
-  (
-    "tasks.residual_balance.residual_balance_env_cfg.RECOVERY_DETECTOR_PATH",
-    "the calibrated recovery gate",
+PATH_MODULES = (
+  "robots.mc_mujoco_assets",
+  "tasks.residual_balance.residual_balance_env_cfg",
+)
+
+
+@dataclass(frozen=True)
+class Section:
+  """One generated block: its builder, the tool behind it, the files it reads."""
+
+  name: str
+  tool: str
+  sources: tuple[Path, ...]
+  args: tuple = ()
+
+
+@dataclass(frozen=True)
+class Page:
+  """One generated document."""
+
+  slug: str
+  sections: tuple[Section, ...]
+
+
+def block(name: str, tool: str, *sources: Path, args: tuple = ()) -> Section:
+  """Declare a section, the files it reads, and what to build it for."""
+  return Section(name=name, tool=tool, sources=sources, args=args)
+
+
+def env_cfg_of(package: Path) -> Path | None:
+  """The env cfg module of one task package."""
+  return next(iter(sorted(package.glob("*_env_cfg.py"))), None)
+
+
+def module_of(path: Path) -> str:
+  """The griffe path of a source file, relative to the package root."""
+  parts = path.relative_to(ex.SRC / ex.PKG).with_suffix("").parts
+  return ".".join(parts)
+
+
+def task_page(package: Path) -> Page:
+  """One page per task sub-package, since each wires its own managers."""
+  sources = tuple(sorted(package.rglob("*.py")))
+  cfg = env_cfg_of(package)
+  sections = [
+    block("task_ids", "ast, mc_mjlab.utils", *sources, args=(package,)),
+    block("registration_table", "ast", *sources, args=(package,)),
+  ]
+  if cfg is not None:
+    sections += [
+      block("observation_terms", "ast, griffe", cfg, args=(package,)),
+      block("reward_terms", "ast, griffe", cfg, args=(package,)),
+      block("termination_terms", "ast", cfg, args=(package,)),
+      block("event_terms", "ast", cfg, args=(package,)),
+      block("curriculum_terms", "ast", cfg, args=(package,)),
+      block("metric_terms", "ast", cfg, args=(package,)),
+      block("group_composition", "ast", cfg, args=(package,)),
+    ]
+  sections.append(block("injected_classes", "ast", *sources, args=(package,)))
+  return Page(f"task-{package.name.replace('_', '-')}", tuple(sections))
+
+
+PAGES: tuple[Page, ...] = (
+  Page(
+    "code-map",
+    (
+      block("module_census", "grimp, griffe"),
+      block("package_graph", "grimp"),
+      block("class_diagram", "pyreverse", *sorted(ACTIONS.glob("*.py"))),
+      block("binding_imports", "grimp, ast"),
+    ),
   ),
-)
-
-
-def wrap(text: str) -> str:
-  """Reflow prose paragraphs at 80 columns, leaving fences, tables and lists alone."""
-  out: list[str] = []
-  buffer: list[str] = []
-  fenced = False
-
-  def flush() -> None:
-    if buffer:
-      out.extend(textwrap.wrap(" ".join(buffer), width=80, break_long_words=False))
-      buffer.clear()
-
-  for line in text.splitlines():
-    if line.startswith("```"):
-      flush()
-      fenced = not fenced
-      out.append(line)
-    elif fenced or not line or line[0] in "|-#<" or line.startswith("  "):
-      flush()
-      out.append(line)
-    else:
-      buffer.append(line.strip())
-  flush()
-  return "\n".join(out)
+  Page(
+    "system-context",
+    (
+      block("entry_points", "tomllib", ex.ROOT / "pyproject.toml"),
+      block("external_inputs", "griffe"),
+      block("context_diagram", "grimp, griffe, tomllib"),
+    ),
+  ),
+  Page(
+    "process-topology",
+    (
+      block("collaboration_diagram", "ast", ACTION, POOL, HOST),
+      block("pipe_protocol", "ast", HOST, POOL),
+      block("io_layout", "ast", HOST, POSITION, TORQUE),
+      block("layout_inputs", "ast", HOST),
+      block("status_column", "griffe, ast", HOST, POOL, BINDING, ACTION),
+    ),
+  ),
+  Page(
+    "control-step",
+    (
+      block("step_sequence", "ast", ACTION),
+      block("rate_stack", "ast", RB_CFG),
+      block("reset_sequence", "ast", ACTION),
+    ),
+  ),
+  Page(
+    "robot-assets",
+    (
+      block("robot_registry", "griffe", REGISTRY),
+      block("asset_call_graph", "ast", *sorted(ROBOTS.glob("*.py"))),
+      block("gain_paths", "griffe", REGISTRY),
+    ),
+  ),
+) + tuple(task_page(package) for package in ex.task_packages())
 
 
 def fence(kind: str, body: str) -> str:
@@ -82,47 +156,44 @@ def table(header: Sequence[str], rows: Sequence[Sequence[str]]) -> str:
     "| " + " | ".join(header) + " |",
     "| " + " | ".join("---" for _ in header) + " |",
   ]
-  lines += ["| " + " | ".join(str(c) for c in row) + " |" for row in rows]
+  lines += ["| " + " | ".join(str(cell) for cell in row) + " |" for row in rows]
   return "\n".join(lines)
 
 
 def node_id(name: str) -> str:
-  """A mermaid-safe identifier for an arbitrary dotted name."""
+  """A mermaid-safe identifier."""
   return re.sub(r"[^A-Za-z0-9]", "_", name)
 
 
-def require(names: tuple[str, ...]) -> None:
-  """Fail generation if an asserted class name no longer exists."""
-  known = {path.rsplit(".", 1)[-1] for path in ex.classes()}
-  missing = sorted(set(names) - known)
-  if missing:
-    raise SystemExit(f"asserted classes no longer exist: {', '.join(missing)}")
+def tick(items) -> str:
+  """A comma-separated backticked list."""
+  return ", ".join(f"`{item}`" for item in items)
 
 
 # --- builders ---------------------------------------------------------------
 
 
 def module_census() -> str:
-  """Count modules and classes per package."""
+  """Modules per package, with the class and edge totals."""
   counts: dict[str, int] = {}
   for module in ex.internal_modules():
     counts[ex.bucket(module)] = counts.get(ex.bucket(module), 0) + 1
   rows = [(f"`{name}`", str(count)) for name, count in sorted(counts.items())]
-  rows.append(("**total**", f"**{len(ex.internal_modules())}**"))
-  return (
-    f"{len(ex.internal_modules())} modules and {len(ex.classes())} classes, "
-    f"{ex.raw_edge_count()} internal import edges before collapsing.\n\n"
-    + table(("Package", "Modules"), rows)
+  rows.append(
+    (
+      f"**{len(ex.internal_modules())} modules**",
+      f"**{len(ex.classes())} classes, {ex.raw_edge_count()} import edges**",
+    )
   )
+  return table(("Package", "Modules"), rows)
 
 
 def package_graph() -> str:
-  """Draw the collapsed import graph."""
+  """Internal imports, collapsed from module to package."""
   edges = ex.package_edges()
   names = sorted(set(edges) | {t for targets in edges.values() for t in targets})
   lines = ["flowchart LR"]
-  for name in names:
-    lines.append(f'  {node_id(name)}["{name}"]')
+  lines += [f'  {node_id(name)}["{name}"]' for name in names]
   for source in sorted(edges):
     for sink in sorted(edges[source]):
       lines.append(f"  {node_id(source)} --> {node_id(sink)}")
@@ -130,471 +201,502 @@ def package_graph() -> str:
 
 
 def class_diagram() -> str:
-  """Emit pyreverse's own mermaid for the coupling package."""
+  """pyreverse's own mermaid for the coupling package."""
   with tempfile.TemporaryDirectory() as tmp:
     return fence("mermaid", ex.class_diagram("actions", Path(tmp)))
 
 
 def binding_imports() -> str:
-  """Which modules reach mc_rtc, and how the import is written."""
+  """Modules reaching the mc_rtc bindings, and how each import is written."""
   rows = []
   for module, names in sorted(ex.binding_importers().items()):
     path = ex.SRC / Path(*module.split(".")).with_suffix(".py")
-    style = ex.import_style(path, names[0])
-    rows.append((f"`{module}`", ", ".join(f"`{n}`" for n in names), style))
+    rows.append((f"`{module}`", tick(names), ex.import_style(path, names[0])))
   return table(("Module", "Imports", "Written as"), rows)
 
 
 def entry_points() -> str:
-  """The declared entry points and the pinned interpreter."""
-  rows = [(f"`{k}`", f"`{v}`") for k, v in sorted(ex.entry_points().items())]
-  return table(("Entry point", "Target"), rows) + (
-    f"\n\nThe bindings are interpreter-specific, so `requires-python` pins "
-    f"`{ex.requires_python()}` and moves with whatever the workspace builds for."
-  )
-
-
-def context_diagram() -> str:
-  """Draw the repo against mjlab and the workspace outside it."""
-  lines = [
-    "flowchart TB",
-    '  subgraph cli["command line"]',
-    '    T["train"]',
-    '    P["play"]',
-    '    L["list-envs"]',
-    "  end",
-    '  subgraph mjlab["mjlab and rsl_rl"]',
-    '    IMP["entry-point loader"]',
-    '    REG["mjlab.tasks.registry"]',
-    "  end",
-    '  subgraph repo["this repo"]',
+  """Declared entry points and the pinned interpreter."""
+  rows = [
+    (f"`{key}`", f"`{value}`") for key, value in sorted(ex.entry_points().items())
   ]
-  for target in sorted(ex.entry_points().values()):
-    lines.append(f'    EP["{target}"]')
-  for package in ("actions", "robots", "tasks"):
-    lines.append(f'    {package.upper()}["{package}/"]')
-  for dotted, _ in EXTERNAL_PATHS:
-    short = dotted.rsplit(".", 1)[-1]
-    lines.append(f'    {node_id(short)}[("{short}")]')
-  lines += ["  end", '  subgraph outside["outside the repo"]']
-  for names in sorted(ex.binding_importers().values()):
-    for name in names:
-      lines.append(f'    {node_id(name)}["{name}"]')
-  lines += [
-    '    WS["sourced ROS workspace"]',
-    "  end",
-    "  T --> IMP",
-    "  P --> IMP",
-    "  L --> IMP",
-    '  IMP -.->|"exceptions become a warning line"| EP',
-    "  EP --> TASKS",
-    "  TASKS --> REG",
-    "  TASKS --> ACTIONS",
-    "  TASKS --> ROBOTS",
-  ]
-  for name in sorted({n for names in ex.binding_importers().values() for n in names}):
-    lines.append(f"  WS --> {node_id(name)}")
-  for module, names in sorted(ex.binding_importers().items()):
-    target = "ACTIONS" if ".actions." in module else "ROBOTS"
-    for name in names:
-      lines.append(f"  {node_id(name)} ==> {target}")
-  for dotted, _ in EXTERNAL_PATHS:
-    lines.append(f"  {node_id(dotted.rsplit('.', 1)[-1])} --> TASKS")
-  return fence("mermaid", "\n".join(lines))
+  rows.append(("`requires-python`", f"`{ex.requires_python()}`"))
+  return table(("Declares", "Value"), rows)
 
 
 def external_inputs() -> str:
-  """Paths outside the repo, as the source writes them."""
+  """Module constants whose value is built from a filesystem path."""
   rows = [
-    (f"`{dotted.rsplit('.', 1)[-1]}`", f"`{ex.attribute(dotted)}`", purpose)
-    for dotted, purpose in EXTERNAL_PATHS
+    (f"`{name}`", f"`{module}`", f"`{value}`")
+    for name, module, value in ex.path_constants(PATH_MODULES)
   ]
-  return table(("Constant", "Value as written", "Supplies"), rows)
+  return table(("Constant", "Module", "Value as written"), rows)
 
 
-def topology_diagram() -> str:
-  """Draw the two sides and everything that crosses between them."""
-  require(MAIN_SIDE + WORKER_SIDE)
-  protocol = ex.pipe_protocol(HOST, POOL)
-  channels = ", ".join(
-    ex.dict_keys("actions.mc_rtc_controller_host.MBC_ATTR_BY_CHANNEL")
+def context_diagram() -> str:
+  """Entry point, packages, path constants and bindings, as declared."""
+  lines = ["flowchart LR", '  subgraph outside["outside the repo"]']
+  bindings = sorted({n for names in ex.binding_importers().values() for n in names})
+  lines += [f'    {node_id(name)}["{name}"]' for name in bindings]
+  for name, _, _ in ex.path_constants(PATH_MODULES):
+    lines.append(f'    {node_id(name)}[("{name}")]')
+  lines += ["  end", '  subgraph mjlab["mjlab"]']
+  for group in sorted(ex.entry_points()):
+    lines.append(f'    {node_id(group)}["{group}"]')
+  lines += ["  end", '  subgraph repo["mc_mjlab"]']
+  packages = sorted({ex.bucket(module) for module in ex.internal_modules()})
+  lines += [f'    {node_id(name)}["{name}"]' for name in packages]
+  lines.append("  end")
+  for group, target in sorted(ex.entry_points().items()):
+    lines.append(f"  {node_id(group)} --> {node_id(target)}")
+  for module, names in sorted(ex.binding_importers().items()):
+    for name in names:
+      lines.append(f"  {node_id(name)} ==> {node_id(ex.bucket(module))}")
+  for name, module, _ in ex.path_constants(PATH_MODULES):
+    owner = ex.bucket(f"{ex.PKG}.{module}")
+    lines.append(f"  {node_id(name)} --> {node_id(owner)}")
+  return fence("mermaid", "\n".join(lines))
+
+
+def collaboration_diagram() -> str:
+  """Methods each class calls on the collaborators it constructs."""
+  owners = (
+    (ACTION, "McRtcResidualActionBase"),
+    (POOL, "ControllerPool"),
+    (HOST, "ControllerHost"),
   )
-  vectors = ", ".join(ex.dict_keys("actions.mc_rtc_controller_host.VECTOR_OUTPUTS"))
-  lines = ["flowchart LR", '  subgraph main["main process"]']
-  lines += [f'    {node_id(n)}["{n}"]' for n in MAIN_SIDE]
-  lines += [
-    "  end",
-    '  IN[("in_np")]',
-    '  OUT[("out_np")]',
-    '  subgraph workers["worker processes"]',
-    '    WM["worker_main"]',
-  ]
-  lines += [f'    {node_id(n)}["{n}"]' for n in WORKER_SIDE]
-  lines += [
-    '    MC["MCGlobalController, one per env"]',
-    "  end",
-    "  McRtcResidualActionBase --> ControllerIoBinding",
-    "  McRtcResidualActionBase --> ControllerPool",
-    "  McRtcResidualActionBase --> RecoveryAuthority",
-    '  ControllerIoBinding ==>|"encoders, root, IMU, wrenches"| IN',
-    "  IN ==> ControllerHost",
-    f'  ControllerPool -.->|"pipe: {", ".join(protocol["sent"])}"| WM',
-    f'  WM -.->|"pipe: {", ".join(protocol["replies"])}"| ControllerPool',
-    "  WM --> ControllerHost",
-    "  ControllerHost --> MC",
-    "  MC --> ControllerHost",
-    f'  ControllerHost ==>|"{channels} + status + {vectors}"| OUT',
-    "  OUT ==> ControllerIoBinding",
-  ]
+  worker_side = {
+    name.rsplit(".", 1)[-1]
+    for name in ex.classes()
+    if name.rsplit(".", 1)[0] in ex.binding_importers()
+  }
+  grouped: dict[tuple[str, str], list[str]] = {}
+  for path, owner in owners:
+    for callee, method in ex.collaborations(path, owner):
+      grouped.setdefault((owner, callee), []).append(method)
+  drawn = {name for pair in grouped for name in pair}
+  lines = ["flowchart LR"]
+  for name in sorted(drawn):
+    side = "worker process" if name in worker_side else "main process"
+    lines.append(f'  {node_id(name)}["{name}<br/>{side}"]')
+  for (owner, callee), methods in sorted(grouped.items()):
+    label = "<br/>".join(sorted(methods))
+    lines.append(f'  {node_id(owner)} -->|"{label}"| {node_id(callee)}')
   return fence("mermaid", "\n".join(lines))
 
 
 def pipe_protocol() -> str:
-  """Both ends of the worker command vocabulary, cross-checked."""
+  """The worker command vocabulary, read from both ends and cross-checked."""
   protocol = ex.pipe_protocol(HOST, POOL)
   if protocol["handled"] != protocol["sent"]:
     raise SystemExit(
       f"pipe protocol disagrees: worker handles {protocol['handled']}, "
       f"pool sends {protocol['sent']}"
     )
-  rows = [(f"`{c}`", "worker handles it, pool sends it") for c in protocol["handled"]]
-  rows += [(f"`{r}`", "reply tag") for r in protocol["replies"]]
-  return table(("Word", "Role"), rows)
+  rows = [(f"`{word}`", "command", "handled and sent") for word in protocol["handled"]]
+  rows += [
+    (f"`{word}`", "reply tag", "sent by the worker") for word in protocol["replies"]
+  ]
+  return table(("Word", "Kind", "Ends"), rows)
 
 
 def io_layout() -> str:
-  """The symbolic column map, resolved in dependency order."""
+  """The offset properties, resolved against each other in dependency order."""
   columns = ex.io_layout_columns(HOST)
   out_side = {"status_off", "vector_off", "scalar_command_output_off", "out_width"}
+  ordered = sorted(columns, key=lambda c: (c.name in out_side, columns.index(c)))
   rows = [
     (f"`{c.name}`", "output" if c.name in out_side else "input", f"`{c.expr}`")
-    for c in sorted(columns, key=lambda c: (c.name in out_side, columns.index(c)))
+    for c in ordered
   ]
-  modes = []
-  for path, label in ((POSITION, "position"), (TORQUE, "torque")):
-    channels = ex.class_channels(path)
-    modes.append((label, f"`{channels}`"))
+  modes = [
+    ("position", f"`{ex.class_channels(POSITION)}`"),
+    ("torque", f"`{ex.class_channels(TORQUE)}`"),
+  ]
   return (
     table(("Offset", "Block", "Expression"), rows)
     + "\n\n"
-    + table(("Control mode", "output_channels"), modes)
-    + "\n\n"
-    + md.SYMBOLIC
+    + table(("Control mode", "`output_channels`"), modes)
   )
 
 
-def status_column() -> str:
-  """The three values of the status column, and who writes each."""
-  names = ex.module_constants("actions.mc_rtc_controller_host", "STATUS_")
+def layout_inputs() -> str:
+  """The fields those expressions depend on, with annotation and default."""
   rows = [
-    (f"`{name}`", f"`{ex.attribute(f'actions.mc_rtc_controller_host.{name}')}`")
-    for name in names
+    (f"`{name}`", f"`{annotation}`", f"`{default}`" if default else "none")
+    for name, annotation, default in ex.layout_inputs(HOST)
   ]
-  return table(("Constant", "Value"), rows)
+  return table(("Field", "Annotation", "Default"), rows)
 
 
-def failure_diagram() -> str:
-  """Draw the two failure paths that must not be scored alike."""
-  lines = [
-    "flowchart LR",
-    '  QP["run() returned false"] --> SQP["STATUS_QP_FAILED"]',
-    '  SQP --> LQP["controller_failed"]',
-    '  LQP --> TQP["a normal fall: pays termination_penalty"]',
-    '  DEAD["worker died or timed out"] --> REV["_revive_worker"]',
-    '  REV --> MARK["_mark_failed"]',
-    '  MARK --> SWF["STATUS_WORKER_FAILED"]',
-    '  SWF --> LWF["controller_worker_failed"]',
-    '  LWF --> TWF["time_out, so the value bootstraps"]',
-  ]
-  return fence("mermaid", "\n".join(lines))
+def status_column() -> str:
+  """The status constants, and every function that names one."""
+  names = ex.module_constants("actions.mc_rtc_controller_host", "STATUS_")
+  values = table(
+    ("Constant", "Value"),
+    [
+      (f"`{name}`", f"`{ex.attribute(f'actions.mc_rtc_controller_host.{name}')}`")
+      for name in names
+    ],
+  )
+  writers = table(
+    ("Function", "Constant"),
+    [
+      (f"`{where}`", f"`{name}`")
+      for where, name in ex.status_writers([HOST, POOL, BINDING, ACTION])
+    ],
+  )
+  return values + "\n\n" + writers
 
 
 def step_sequence() -> str:
-  """Draw the control step in the order the source runs it."""
-  beats = ex.call_sequence(ACTION, "apply_actions", ("_io", "_pool"))
-  lines = [
-    "sequenceDiagram",
-    "  participant A as apply_actions",
-    "  participant B as ControllerIoBinding",
-    "  participant M as in_np and out_np",
-    "  participant P as ControllerPool",
-    "  participant S as MuJoCo actuators",
-    "  Note over A: first substep of the period",
-  ]
-  wrote = False
-  for beat in beats:
-    if beat.startswith("_io."):
-      lines.append(f"  A->>B: {beat.split('.', 1)[1]}")
-      if not wrote:
-        lines.append("  B->>M: fills this env's input row")
-        wrote = True
-    elif beat.startswith("_pool."):
-      lines.append(f"  A->>P: {beat.split('.', 1)[1]}")
-    elif beat == "_collect_controller_output":
-      lines.append(f"  A->>P: {beat}")
-      lines.append("  P-->>A: the step dispatched one period ago")
-    elif beat == "_apply_control":
-      lines.append(f"  A->>S: {beat}")
+  """apply_actions, in the order the source runs it."""
+  return call_diagram("apply_actions")
+
+
+def reset_sequence() -> str:
+  """reset, in the order the source runs it."""
+  return call_diagram("reset")
+
+
+def call_diagram(method: str) -> str:
+  """One method's calls on its collaborators, as a sequence, in source order."""
+  owned = ex.attribute_types(ACTION, "McRtcResidualActionBase")
+  aliases = {
+    name: node_id(name)[:1].upper() + str(i)
+    for i, name in enumerate(sorted(set(owned.values())))
+  }
+  lines = ["sequenceDiagram", f"  participant A as {method}"]
+  lines += [f"  participant {alias} as {name}" for name, alias in aliases.items()]
+  for beat in ex.call_sequence(ACTION, method, tuple(owned)):
+    attr, _, called = beat.partition(".")
+    if called and attr in owned:
+      lines.append(f"  A->>{aliases[owned[attr]]}: {called}")
     else:
       lines.append(f"  A->>A: {beat}")
-  return fence("mermaid", "\n".join(lines)) + (
-    "\n\nRead top to bottom, that is the source order of "
-    f"`{ACTION.relative_to(ex.ROOT)}`'s `apply_actions`: collecting the previous "
-    "period's solve happens before anything refills the input block."
+  return fence("mermaid", "\n".join(lines))
+
+
+def rates() -> tuple[float, int, int]:
+  """Timestep, frameskip and decimation, as written in the env cfg."""
+  env = ex.literal_kwargs(RB_CFG, "ManagerBasedRlEnvCfg", ("decimation",))
+  sim = ex.literal_kwargs(RB_CFG, "MujocoCfg", ("timestep",))
+  return (
+    float(sim["timestep"]),
+    int(ex.kwarg_literal(RB_CFG, "frameskip") or "1"),
+    int(env["decimation"]),
   )
 
 
 def rate_stack() -> str:
   """The three rates, from the literals in the env cfg."""
-  cfg = RB / "residual_balance_env_cfg.py"
-  env = ex.literal_kwargs(cfg, "ManagerBasedRlEnvCfg", ("decimation",))
-  sim = ex.literal_kwargs(cfg, "MujocoCfg", ("timestep",))
-  frameskip_value = ex.kwarg_literal(cfg, "frameskip")
-  defaults = ex.param_defaults(cfg, "_make_env_cfg")
-  decimation = int(env["decimation"])
-  frameskip = int(frameskip_value or "1")
-  timestep = float(sim["timestep"])
+  timestep, frameskip, decimation = rates()
   rows = [
-    ("sim", f"`timestep={sim['timestep']}`", f"{1 / timestep:.0f} Hz"),
+    ("sim", f"`timestep={timestep}`", f"{1 / timestep:.0f} Hz", "1"),
     (
       "controller",
-      f"`frameskip={frameskip_value}`",
+      f"`frameskip={frameskip}`",
       f"{1 / (timestep * frameskip):.0f} Hz",
+      str(frameskip),
     ),
     (
       "policy",
-      f"`decimation={env['decimation']}`",
+      f"`decimation={decimation}`",
       f"{1 / (timestep * decimation):.0f} Hz",
+      str(decimation),
     ),
   ]
-  return table(("Rate", "Set by", "Runs at"), rows) + (
-    f"\n\nSo one policy step spans {decimation // frameskip} controller periods, "
-    f"and the episode runs `episode_length_s="
-    f"{defaults.get('episode_length_s', '?')}` by default."
-  )
+  return table(("Rate", "Set by", "Runs at", "Sim steps per period"), rows)
 
 
-def reset_sequence() -> str:
-  """The reset path, in source order."""
-  beats = ex.call_sequence(ACTION, "reset", ("_io", "_pool"))
-  rows = [(str(index + 1), f"`{beat}`") for index, beat in enumerate(beats)]
-  return table(("Step", "Call"), rows)
-
-
-def wiring_diagram() -> str:
-  """Draw yaml to ids to cfgs to managers to the runner."""
-  registrations = ex.registrations(RB / "__init__.py")
-  zero = ex.registrations(ZR / "__init__.py")
-  runners = sorted({r.runner_cls for r in registrations if r.runner_cls})
-  lines = [
-    "flowchart LR",
-    '  YAML[("etc/mc_rtc.yaml")] --> CFG["utils/mc_rtc_config"]',
-    '  CFG --> NAME["get_task_name"]',
-    f'  NAME --> RB["residual_balance: {len(registrations)} ids"]',
-    f'  NAME --> ZR["zero_residual: {len(zero)} ids, play only"]',
-    '  RB --> REG["register_mjlab_task"]',
-    "  ZR --> REG",
-    '  RB --> MAKE["_make_env_cfg"]',
-    '  MAKE --> MGR["manager terms from tasks/mdp.py"]',
-  ]
-  for runner in runners:
-    lines.append(f'  RB --> {node_id(runner)}["{runner}"]')
-  for dotted in ex.dotted_class_paths(RB / "residual_balance_ppo_cfg.py"):
-    name = dotted.rsplit(":", 1)[-1]
-    lines.append(f'  RB -.->|"by dotted string"| {node_id(name)}["{name}"]')
-  return fence("mermaid", "\n".join(lines))
-
-
-def task_ids() -> str:
-  """The ids as the repo's own naming helper builds them."""
-  from mc_mjlab.utils.mc_rtc_config import get_controller_name, get_main_robot_name
+def task_ids(package: Path) -> str:
+  """Every id this package builds, resolved through the repo's naming helper."""
   from mc_mjlab.utils.task_naming import get_task_name
 
-  yaml = ex.ROOT / "etc" / "mc_rtc.yaml"
-  ids = []
-  for directory, path in (("residual_balance", RB), ("zero_residual", ZR)):
-    for suffix in sorted(suffixes(path)):
-      ids.append((f"`{get_task_name(directory, suffix)}`", directory))
-  head = (
-    f"Built from `MainRobot: {get_main_robot_name(yaml)}` and "
-    f"`Enabled: {get_controller_name(yaml)}`.\n\n"
-  )
-  return head + table(("Task id", "Package"), ids)
-
-
-def suffixes(package: Path) -> set[str]:
-  """Task-id suffixes a package registers, from its get_task_name calls."""
-  found: set[str] = set()
-  for node in ast.walk(ex.tree(package / "__init__.py")):
-    if isinstance(node, ast.Call) and ast.unparse(node.func) == "get_task_name":
-      if len(node.args) > 1 and isinstance(node.args[1], ast.Constant):
-        value = node.args[1].value
-        if isinstance(value, str):
-          found.add(value)
-  return found
-
-
-def registration_table() -> str:
-  """Every register_mjlab_task call, as written."""
+  gates = ex.conditional_imports(package / "__init__.py")
   rows = []
-  for package, path in (("residual_balance", RB), ("zero_residual", ZR)):
-    for reg in ex.registrations(path / "__init__.py"):
+  for path in sorted(package.rglob("*.py")):
+    for suffix, literal in ex.task_name_calls(path):
+      resolved = get_task_name(package.name, suffix) if literal else suffix
       rows.append(
         (
-          package,
-          f"`{reg.task_id}`",
-          f"`{reg.env_cfg}`",
-          f"`{reg.runner_cls}`" if reg.runner_cls else "mjlab default",
+          f"`{resolved}`",
+          f"`{path.name}`",
+          f"`{gates.get(path.stem, '')}`" if gates.get(path.stem) else "always",
         )
       )
-  return table(("Package", "Id constant", "Env cfg", "Runner"), rows)
+  return table(("Task id", "Built in", "Registered when"), rows) if rows else ""
+
+
+def registration_table(package: Path) -> str:
+  """Every register_mjlab_task call in this package, as written."""
+  rows = []
+  for path in sorted(package.rglob("*.py")):
+    for registration in ex.registrations(path):
+      rows.append(
+        (
+          f"`{registration.task_id}`",
+          f"`{registration.env_cfg}`",
+          f"`{registration.runner_cls}`" if registration.runner_cls else "not given",
+          f"`{path.name}`",
+        )
+      )
+  return table(("Id", "Env cfg", "runner_cls", "Called in"), rows) if rows else ""
 
 
 def term_census() -> str:
-  """Manager terms by constructor, plus the ones bound under two managers."""
+  """Manager terms by the constructor used to build them."""
   rows = []
-  for package, path in (
-    ("residual_balance", RB / "residual_balance_env_cfg.py"),
-    ("zero_residual", ZR / "zero_residual_env_cfg.py"),
-  ):
+  for package, path in (("residual_balance", RB_CFG), ("zero_residual", ZR_CFG)):
     counts: dict[str, int] = {}
     for binding in ex.term_bindings(path):
       counts[binding.kind] = counts.get(binding.kind, 0) + 1
     for kind in ex.TERM_KINDS:
       if counts.get(kind):
-        rows.append((package, f"`{kind}`", str(counts[kind])))
-  dual = ex.dual_role_terms(RB / "residual_balance_env_cfg.py")
-  tail = ""
-  if dual:
-    listed = ", ".join(f"`{name}`" for name in sorted(dual))
-    tail = (
-      f"\n\nBound under more than one manager, and therefore drawn twice: {listed}."
-    )
-  return table(("Package", "Constructor", "Constructions"), rows) + tail
+        rows.append((f"`{package}`", f"`{kind}`", str(counts[kind])))
+  duals = table(
+    ("Term", "Constructors"),
+    [
+      (f"`{name}`", tick(kinds))
+      for name, kinds in sorted(ex.dual_role_terms(RB_CFG).items())
+    ],
+  )
+  return table(("Package", "Constructor", "Call sites"), rows) + "\n\n" + duals
 
 
-def injected_classes() -> str:
-  """Classes rsl_rl receives as strings, which no import edge records."""
+def manager_table(
+  package: Path, kind: str, groups: dict[str, str] | None = None
+) -> str:
+  """Every term of one manager, with the arguments written at its call site."""
+  cfg = env_cfg_of(package)
+  if cfg is None:
+    return ""
+  scalars = ex.module_scalars(module_of(cfg))
+  terms = [term for term in ex.manager_terms(cfg) if term.kind == kind]
+  if not terms:
+    return ""
+  keys = {key for term in terms for key in term.params}
+  columns = sorted(keys - {"params"}) + (["params"] if "params" in keys else [])
+  header = (["Group"] if groups else []) + ["Term", "func"] + columns + ["When"]
+  labels: dict[str, list[str]] = {}
+  for name, source in (groups or {}).items():
+    labels.setdefault(source, []).append(name)
+  rows = []
+  for term in terms:
+    named = ", ".join(labels.get(term.group, [term.group]))
+    row = [f"`{named}`"] if groups else []
+    row += [f"`{term.key}`", f"`{term.func}`"]
+    row += [
+      f"`{ex.resolved(term.params[key], scalars)}`" if key in term.params else ""
+      for key in columns
+    ]
+    row.append(f"`{term.condition}`" if term.condition else "always")
+    rows.append(row)
+  return table(header, rows)
+
+
+def observation_terms(package: Path) -> str:
+  """Observation terms, by the group each is bound into."""
+  cfg = env_cfg_of(package)
+  groups = ex.group_exposure(cfg) if cfg else {}
+  return manager_table(package, "ObservationTermCfg", groups or None)
+
+
+def reward_terms(package: Path) -> str:
+  """Reward terms and their written weights."""
+  return manager_table(package, "RewardTermCfg")
+
+
+def termination_terms(package: Path) -> str:
+  """Termination terms, including which one truncates."""
+  return manager_table(package, "TerminationTermCfg")
+
+
+def event_terms(package: Path) -> str:
+  """Event terms and the mode each runs in."""
+  return manager_table(package, "EventTermCfg")
+
+
+def curriculum_terms(package: Path) -> str:
+  """Curriculum terms."""
+  return manager_table(package, "CurriculumTermCfg")
+
+
+def metric_terms(package: Path) -> str:
+  """Metrics terms and how each reduces."""
+  return manager_table(package, "MetricsTermCfg")
+
+
+def group_composition(package: Path) -> str:
+  """How each term dict is built beyond its literal entries."""
+  cfg = env_cfg_of(package)
+  if cfg is None:
+    return ""
+  owners = {term.group for term in ex.manager_terms(cfg)}
   rows = [
-    (f"`{dotted}`", "no import edge exists")
-    for dotted in ex.dotted_class_paths(RB / "residual_balance_ppo_cfg.py")
+    (f"`{group}`", operation, f"`{source}`")
+    for group, operation, source in ex.group_composition(cfg)
+    if group in owners
   ]
-  return table(("Dotted path", "Visibility"), rows)
+  return table(("Dict", "Operation", "Source"), rows) if rows else ""
+
+
+def injected_classes(package: Path) -> str:
+  """Classes rsl_rl receives as strings, which no import edge records."""
+  rows = []
+  for path in sorted(package.rglob("*.py")):
+    for dotted in ex.dotted_class_paths(path):
+      rows.append(
+        (f"`{dotted.split(':')[0]}`", f"`{dotted.split(':')[1]}`", f"`{path.name}`")
+      )
+  return table(("Module", "Class", "Named in"), rows) if rows else ""
 
 
 def robot_registry() -> str:
-  """The registry keys and the fields each spec carries."""
-  keys = ex.dict_keys("robots.robots_registry.ROBOTS")
-  fields = ex.class_attributes("robots.robots_registry.RobotSpec")
+  """The registry keys, and whether each names a directory of the same name."""
   rows = [
-    (f"`{key}`", "yes" if (ex.SRC / "mc_mjlab" / "robots" / key).is_dir() else "no")
-    for key in keys
+    (f"`{key}`", "yes" if (ROBOTS / key).is_dir() else "no")
+    for key in ex.dict_keys("robots.robots_registry.ROBOTS")
   ]
-  return (
-    table(("MainRobot key", "Directory of the same name"), rows)
-    + "\n\n`RobotSpec` carries "
-    + ", ".join(f"`{name}`" for name in fields)
-    + "."
+  fields = table(
+    ("`RobotSpec` field",),
+    [
+      (f"`{name}`",) for name in ex.class_attributes("robots.robots_registry.RobotSpec")
+    ],
   )
+  return table(("`MainRobot`", "Directory of that name"), rows) + "\n\n" + fields
 
 
-def asset_diagram() -> str:
-  """Draw MainRobot to a loaded spec with assets, gains and sensors."""
-  keys = ex.dict_keys("robots.robots_registry.ROBOTS")
-  lines = [
-    "flowchart TB",
-    '  YAML[("etc/mc_rtc.yaml — MainRobot")] --> GET["get_main_robot_spec"]',
-    f'  GET --> ROBOTS["ROBOTS: {", ".join(keys)}"]',
-    '  ROBOTS --> SPEC["RobotSpec"]',
-    '  SPEC --> CFGFN["get_robot_cfg"]',
-    '  CFGFN --> GS["get_spec"]',
-    '  GS --> ENS["ensure_assets"]',
-    '  ENS --> SYM["ensure_asset_symlink"]',
-    '  SYM --> SRC[("share/mc_mujoco/ROBOT")]',
-    '  GS --> COL["collision_configuration"]',
-    '  GS --> SENS["add_locomotion_sensors"]',
-    '  GS --> PDA["get_pd_actuator_cfgs"]',
-    '  CFGFN --> PREP["prepare_cfg_for_mc_rtc"]',
-    '  SRC --> GAINS[("PDgains_sim.dat")]',
-    '  META["await_ready returns ref_joint_order"] ==> APPLY["apply_reference_pd_gains"]',
-    "  GAINS ==> APPLY",
-    '  PDA -.->|"overwritten at action-term init"| APPLY',
-  ]
+def asset_call_graph() -> str:
+  """Which of the robot-side functions call which, by source-level name."""
+  roots = {}
+  paths = sorted(ROBOTS.glob("*.py")) + sorted(ROBOTS.glob("*/*_constants.py"))
+  for path in paths:
+    for node in ast.walk(ex.tree(path)):
+      if isinstance(node, ast.FunctionDef) and not node.name.startswith("_"):
+        roots.setdefault(node.name, path)
+  edges = ex.internal_call_graph(roots)
+  lines = ["flowchart LR"]
+  drawn = {name for edge in edges for name in edge}
+  lines += [f'  {node_id(name)}["{name}"]' for name in sorted(drawn)]
+  lines += [f"  {node_id(a)} --> {node_id(b)}" for a, b in edges]
   return fence("mermaid", "\n".join(lines))
 
 
-def gain_ordering() -> str:
-  """Where the gains file lives for each robot."""
+def gain_paths() -> str:
+  """The pd_gains_path each registry entry names."""
   rows = [
-    (f"`{key}`", f"`{kwargs.get('pd_gains_path', '—')}`")
+    (f"`{key}`", f"`{kwargs.get('pd_gains_path', '')}`")
     for key, kwargs in ex.dict_call_kwargs("robots.robots_registry.ROBOTS").items()
   ]
-  return table(("Robot", "pd_gains_path, as written"), rows)
+  return table(("Robot", "`pd_gains_path`"), rows)
 
 
 BUILDERS = {
   name: value
   for name, value in list(globals().items())
-  if callable(value) and name in md.SECTION_TITLES
+  if callable(value) and name in {b.name for page in PAGES for b in page.sections}
 }
 
 
 # --- rendering --------------------------------------------------------------
 
 
-def render(layer: md.Layer) -> str:
+def provenance(section: Section) -> str:
+  """One line naming the tool and the files a section was read from."""
+  paths = list(section.sources)
+  if len(paths) > 3:
+    parents = {path.parent for path in paths}
+    shown = (
+      f"`{ex.rel(parents.pop())}/*.py`"
+      if len(parents) == 1
+      else f"`{ex.rel(paths[0])}` and {len(paths) - 1} more"
+    )
+  else:
+    shown = ", ".join(f"`{ex.rel(path)}`" for path in paths)
+  return f"*{section.tool}*" + (f" &middot; {shown}" if shown else "")
+
+
+def see_also(page: Page) -> str:
+  """docs/ links the source files of this page already carry in their comments."""
+  paths = sorted({p for section in page.sections for p in section.sources})
+  links = ex.doc_links([path for path in paths if path.suffix == ".py"])
+  if not links:
+    return ""
+  rows = [(f"[{target}](../{target})", f"`{where}`") for target, where in links]
+  return "\n".join(["## see_also", "", table(("Note", "Linked from"), rows), ""])
+
+
+def render(page: Page) -> str:
   """One generated document."""
-  parts = [md.BANNER, "", f"# {layer.title}", "", layer.claim, ""]
-  if layer.intro:
-    parts += [layer.intro, ""]
-  for section in layer.sections:
-    parts += [f"## {md.SECTION_TITLES[section]}", ""]
-    prose = md.BUILDER_PROSE.get(section, "")
-    if prose:
-      parts += [prose, ""]
-    parts += [BUILDERS[section](), ""]
-  if layer.notes:
-    parts += ["## Notes", ""]
-    for head, body in layer.notes:
-      parts += [f"**{head}.** {body}", ""]
-  if layer.hazard:
-    parts += ["## What bites", "", layer.hazard, ""]
-  if layer.links:
-    parts += ["## Where the numbers live", ""]
-    for text, target in layer.links:
-      parts.append(f"- [{text}]({target})")
-    parts.append("")
-  return wrap("\n".join(parts)).rstrip() + "\n"
+  parts = [BANNER, "", f"# {page.slug}", ""]
+  for section in page.sections:
+    body = BUILDERS[section.name](*section.args)
+    if not body:
+      continue
+    parts += [f"## {section.name}", "", provenance(section), "", body, ""]
+  tail = see_also(page)
+  if tail:
+    parts.append(tail)
+  return "\n".join(parts).rstrip() + "\n"
 
 
 def render_index() -> str:
-  """The directory README."""
-  rows = [(f"[{layer.title}]({layer.slug}.md)", layer.summary) for layer in md.LAYERS]
-  body = "\n".join(
+  """The directory index: what each page holds and what produced it."""
+  pages = table(
+    ("Page", "Sections"),
     [
-      md.BANNER,
-      "",
-      "# How the system fits together",
-      "",
-      md.INDEX_INTRO,
-      table(("View", "Answers"), rows),
-      "",
-      md.INDEX_HOW,
-      "## What is not here",
-      "",
-      md.NOT_IN_SOURCE,
-    ]
+      (f"[{page.slug}]({page.slug}.md)", tick(s.name for s in page.sections))
+      for page in PAGES
+    ],
   )
-  return wrap(body).rstrip() + "\n"
+  tools = table(
+    ("Section", "Extracted with"),
+    [(f"`{s.name}`", s.tool) for page in PAGES for s in page.sections],
+  )
+  rebuild = fence(
+    "sh",
+    "uv run python scripts/generate_architecture_docs.py\n"
+    "uv run python scripts/generate_architecture_docs.py --check\n"
+    "uv run python scripts/generate_architecture_docs.py --live",
+  )
+  parts = [
+    BANNER,
+    "",
+    "# architecture",
+    "",
+    "## pages",
+    "",
+    pages,
+    "",
+    "## provenance",
+    "",
+    tools,
+    "",
+    "## rebuild",
+    "",
+    rebuild,
+  ]
+  return "\n".join(parts).rstrip() + "\n"
 
 
 def build() -> dict[Path, str]:
   """Every generated file, in memory."""
   files = {OUT / "README.md": render_index()}
-  for layer in md.LAYERS:
-    files[OUT / f"{layer.slug}.md"] = render(layer)
+  for page in PAGES:
+    files[OUT / f"{page.slug}.md"] = render(page)
   check_links(files)
   return files
+
+
+def heading_anchors(text: str) -> set[str]:
+  """The anchors a document defines, slugged as GitHub does."""
+  found = set()
+  for line in text.splitlines():
+    if line.startswith("#"):
+      head = line.lstrip("#").strip()
+      found.add(re.sub(r"[^\w\- ]", "", head).strip().lower().replace(" ", "-"))
+  return found
 
 
 def check_links(files: dict[Path, str]) -> None:
@@ -613,78 +715,48 @@ def check_links(files: dict[Path, str]) -> None:
         raise SystemExit(f"{path.name}: dead anchor {target}#{anchor}")
 
 
-def heading_anchors(text: str) -> set[str]:
-  """The anchors a generated document defines, slugged as GitHub does."""
-  found = set()
-  for line in text.splitlines():
-    if line.startswith("#"):
-      head = line.lstrip("#").strip()
-      found.add(re.sub(r"[^\w\- ]", "", head).strip().lower().replace(" ", "-"))
-  return found
-
-
-def listed(names) -> str:
-  """A comma-separated backticked list."""
-  return ", ".join(f"`{name}`" for name in sorted(names))
-
-
 def live_inventory() -> str:
   """What only a running mjlab can report, for the machine it ran on."""
   from mjlab.tasks.registry import list_tasks, load_env_cfg
 
   ours = sorted(task for task in list_tasks() if task.startswith("Mc-Mjlab-"))
   parts = [
-    md.BANNER,
+    BANNER,
     "",
-    "# Live inventory",
+    "# live-inventory",
     "",
-    md.LIVE_INTRO,
-    f"## Registered task ids ({len(ours)})",
+    "*mjlab.tasks.registry, on a sourced workspace; excluded from --check*",
+    "",
+    "## registered_tasks",
     "",
     table(("Task id",), [(f"`{task}`",) for task in ours]),
     "",
   ]
   if ours:
-    task = ours[0]
-    cfg = load_env_cfg(task)
-    parts += [f"## Resolved manager terms of `{task}`", "", md.LIVE_TERMS]
+    cfg = load_env_cfg(ours[0])
     rows = []
     for manager in ("observations", "rewards", "terminations", "events", "metrics"):
       group = getattr(cfg, manager, None) or {}
       for name, value in sorted(group.items()):
         terms = getattr(value, "terms", None)
         if isinstance(terms, dict):
-          rows.append((f"{manager}/{name}", str(len(terms)), listed(terms)))
+          rows.append((f"`{manager}/{name}`", str(len(terms)), tick(sorted(terms))))
         else:
-          rows.append((manager, "", f"`{name}`"))
-    merged: dict[str, list[str]] = {}
-    for label, count, text in rows:
-      merged.setdefault(f"{label}\u0000{count}", []).append(text)
+          rows.append((f"`{manager}`", "", f"`{name}`"))
     parts += [
-      table(
-        ("Manager", "Count", "Terms"),
-        [
-          (
-            key.split("\u0000")[0],
-            key.split("\u0000")[1] or str(len(values)),
-            ", ".join(values),
-          )
-          for key, values in merged.items()
-        ],
-      ),
+      "## resolved_terms",
+      "",
+      f"*{ours[0]}*",
+      "",
+      table(("Manager", "Count", "Terms"), rows),
       "",
     ]
-  return wrap("\n".join(parts)).rstrip() + "\n"
+  return "\n".join(parts).rstrip() + "\n"
 
 
 def rate_strip() -> str:
-  """A to-scale tick strip of the three rates, drawn from the extracted values."""
-  cfg = RB / "residual_balance_env_cfg.py"
-  decimation = int(
-    ex.literal_kwargs(cfg, "ManagerBasedRlEnvCfg", ("decimation",))["decimation"]
-  )
-  frameskip = int(ex.kwarg_literal(cfg, "frameskip") or "1")
-  timestep = float(ex.literal_kwargs(cfg, "MujocoCfg", ("timestep",))["timestep"])
+  """A to-scale tick strip of the three rates, from the extracted values."""
+  timestep, frameskip, decimation = rates()
   x0, x1 = 112.0, 640.0
   span = x1 - x0
   rows = (
@@ -710,9 +782,9 @@ def rate_strip() -> str:
   parts.append(f'<line x1="{x0}" y1="4" x2="{x0}" y2="100" class="sv-b"/>')
   parts.append(f'<line x1="{x1}" y1="4" x2="{x1}" y2="100" class="sv-b"/>')
   parts.append(
-    f'<text x="{x1}" y="116" class="sv-s" text-anchor="end">one policy step '
-    f"&#183; {decimation} sim steps &#183; {decimation // frameskip} controller "
-    f"periods</text>"
+    f'<text x="{x1}" y="116" class="sv-s" text-anchor="end">'
+    f"{decimation} sim steps &#183; {decimation // frameskip} controller periods "
+    f"&#183; 1 policy step</text>"
   )
   return "\n        ".join(parts)
 
@@ -723,12 +795,14 @@ def page_html(files: dict[Path, str]) -> str:
 
   converter = markdown_lib.Markdown(extensions=["tables", "fenced_code"])
   rail, body = [], []
-  for index, layer in enumerate(md.LAYERS):
+  for page in PAGES:
     converter.reset()
-    text = files[OUT / f"{layer.slug}.md"]
-    kept = [row for row in text.splitlines() if not row.startswith("<!--")]
-    text = "\n".join(kept)
-    html = converter.convert(text)
+    kept = [
+      row
+      for row in files[OUT / f"{page.slug}.md"].splitlines()
+      if not row.startswith("<!--")
+    ]
+    html = converter.convert("\n".join(kept))
     html = re.sub(
       r'<pre><code class="language-mermaid">(.*?)</code></pre>',
       r'<pre class="mermaid">\1</pre>',
@@ -740,14 +814,8 @@ def page_html(files: dict[Path, str]) -> str:
       html = html.replace(f"</h{level}>", f"</h{level + 1}>")
     html = html.replace("<table>", '<div class="tablewrap"><table>')
     html = html.replace("</table>", "</table></div>")
-    rail.append(
-      f'<li><a href="#{layer.slug}"><span>L{index}</span>'
-      f"<span>{layer.title}</span></a></li>"
-    )
-    body.append(
-      f'<section class="layer" id="{layer.slug}">'
-      f'<p class="tag">L{index}</p>{html}</section>'
-    )
+    rail.append(f'<li><a href="#{page.slug}">{page.slug}</a></li>')
+    body.append(f'<section class="layer" id="{page.slug}">{html}</section>')
   return "\n".join(
     [
       "<title>mc_mjlab Architecture</title>",
@@ -757,37 +825,28 @@ def page_html(files: dict[Path, str]) -> str:
       '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?'
       "family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&"
       'family=IBM+Plex+Sans:wght@400;500;600&display=swap">',
-      f"<style>{md.PAGE_CSS}</style>",
+      f"<style>{CSS.read_text()}</style>",
       '<header class="masthead"><div class="wrap"><div>',
       '<p class="eyebrow">generated from the source</p>',
       "<h1>mc_mjlab Architecture</h1>",
-      f'<p class="lede">{md.LAYERS[0].claim}</p>',
+      f'<p class="lede">{ex.project_description()}</p>',
       "</div>",
       '<figure class="strip">',
-      '<svg viewBox="0 -6 660 126" role="img" aria-label="Three nested rates over '
-      "one policy step: the sim ticks many times, the controller fewer, the policy "
-      'once.">',
+      '<svg viewBox="0 -6 660 126" role="img" aria-label="The sim, controller and '
+      'policy rates over one policy step.">',
       f"        {rate_strip()}",
       "</svg>",
-      "<figcaption>The rate stack, to scale, from the literals in the env "
-      "cfg.</figcaption></figure>",
+      "<figcaption>timestep, frameskip and decimation, to scale</figcaption></figure>",
       "</div></header>",
       '<div class="wrap shell">',
-      '<nav class="rail" aria-label="Views"><h2>Views</h2><ol>',
+      '<nav class="rail" aria-label="Pages"><h2>pages</h2><ul>',
       "".join(rail),
-      "</ol>",
-      '<p class="source">Source of truth: <span class="mono">'
-      "scripts/generate_architecture_docs.py</span>. This page and "
-      '<span class="mono">docs/architecture/</span> are both its output.</p>',
+      "</ul>",
+      '<p class="source"><span class="mono">'
+      "scripts/generate_architecture_docs.py</span></p>",
       "</nav><main>",
       "".join(body),
       "</main></div>",
-      '<footer><div class="wrap"><p>Every fact here is read out of the source at '
-      'generation time by griffe, grimp, pyreverse and <span class="mono">ast'
-      '</span>. Running the generator with <span class="mono">--check</span> '
-      "turns any drift between these pages and the code into a build failure.</p>"
-      "<p>Measurements deliberately live elsewhere. A diagram states structure; it "
-      "never restates a number.</p></div></footer>",
     ]
   )
 
@@ -811,7 +870,7 @@ def main() -> int:
         diff = difflib.unified_diff(
           current.splitlines(), text.splitlines(), "on disk", "generated", lineterm=""
         )
-        problems.append(f"{path.relative_to(ex.ROOT)}\n" + "\n".join(list(diff)[:40]))
+        problems.append(f"{ex.rel(path)}\n" + "\n".join(list(diff)[:40]))
     if problems:
       print("\n\n".join(problems))
       print("\narchitecture docs are stale -- rerun without --check")
@@ -827,9 +886,7 @@ def main() -> int:
   if args.html:
     args.html.write_text(page_html(files))
     print(f"rendered {args.html}")
-  print(
-    f"wrote {len(files) + (1 if args.live else 0)} files to {OUT.relative_to(ex.ROOT)}"
-  )
+  print(f"wrote {len(files)} files to {OUT.relative_to(ex.ROOT)}")
   return 0
 
 
