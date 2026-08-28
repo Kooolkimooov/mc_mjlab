@@ -18,8 +18,10 @@ from mc_mjlab.tasks.residual_mpc.residual_mpc_env_cfg import residual_mpc_env_cf
 
 #: Paper Fig. 10 calls a command "achieved" below this planar tracking error.
 ACHIEVED_ERROR = 0.25
-#: Discarded before scoring, so a command is judged on held steady state.
-SETTLE_S = 3.0
+#: Discarded before scoring. The ISMPC realises a new reference over many gait
+#: cycles -- it was still accelerating 8 s after a 0.6 m/s command -- so a short
+#: settle measures the transient and reads as "cannot track".
+SETTLE_S = 15.0
 SWEEP_DIR = Path("logs/envelopes")
 
 
@@ -66,7 +68,7 @@ def evaluate(twist, arm: str, policy, args) -> list[Sample]:
   env = ManagerBasedRlEnv(cfg, device=args.device)
   try:
     wrapped = RslRlVecEnvWrapper(env)
-    settle = round(SETTLE_S / env.step_dt)
+    settle = round(args.settle_s / env.step_dt)
     steps = round(args.episode_length_s / env.step_dt)
     asset = env.scene["robot"]
     zeros = torch.zeros(
@@ -131,7 +133,8 @@ def main() -> None:
   p.add_argument("--wz", default="0.0:0.0:1", help="lo:hi:count")
   p.add_argument("--num-envs", type=int, default=8)
   p.add_argument("--num-workers", type=int, default=6)
-  p.add_argument("--episode-length-s", type=float, default=12.0)
+  p.add_argument("--episode-length-s", type=float, default=30.0)
+  p.add_argument("--settle-s", type=float, default=SETTLE_S)
   p.add_argument("--seed", type=int, default=42)
   p.add_argument("--no-pushes", action="store_true")
   p.add_argument("--device", default="cuda:0")

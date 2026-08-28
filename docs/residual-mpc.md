@@ -130,3 +130,41 @@ episode length change — all four set where the baseline sits against the ceili
 **History:**
 - 2026-08-28 — first seed-42 baseline comparison; no measurable gain over the
   zero-action arm, and the objective is `97.9-99.99%` satisfied without a policy.
+
+## SETTLE_S
+
+**Current:** `15 s` discarded before scoring, against a `30 s` default episode.
+The first sweep used `3 s` inside a `12 s` episode and was wrong.
+
+**The ISMPC realises a reference over many gait cycles, not immediately.** Reading
+`ismpc_walking::get_ref_vel` back through the `walking_ref_vel` vector output,
+with `+0.600 m/s` commanded:
+
+| t | `get_ref_vel` | measured `vx` |
+| ---: | ---: | ---: |
+| 2.0 s | `+0.600` | `-0.003` |
+| 4.0 s | `+0.600` | `-0.002` |
+| 6.0 s | `+0.600` | `+0.076` |
+| 8.0 s | `+0.600` | `+0.107` |
+
+Still accelerating at eight seconds. A short settle therefore measures the
+transient and reports the prior as unable to track anything, which is what the
+first sweep concluded: its errors fit `|command - 0.055|` across the whole grid
+with zero terminations.
+
+**`set_ref_vel` is not the problem, and neither is the FSM yaml.** The readback
+shows the commanded value arriving intact and surviving, so
+`Walking::WalkCmdVelImpl`'s `targetCmdVel: [0.1, 0, 0]` in the installed
+`LogisticController_ismpc.yaml` does *not* clobber it. That was the working
+hypothesis before the datastore was inspected, and acting on it would have meant
+editing shared workspace configuration to fix a bug that does not exist.
+
+Whatever bounds the achievable speed is downstream of the reference — footstep
+geometry and the step timing behind `set_ts` / `get_ts_target` — which is exactly
+the kind of limit the paper's residual is supposed to extend.
+
+**Re-measure if:** the gait period, step length, or controller changes.
+
+**History:**
+- 2026-08-28 — raised from `3 s` after the readback showed the reference is
+  accepted immediately and the velocity follows over tens of seconds.
