@@ -44,7 +44,7 @@ COMMAND_NAME = "twist"
 #: Commanded (vx, vy, wz) box. The paper's claim is about commands the MPC prior
 #: cannot track, so this must straddle its failure boundary, not sit inside it.
 #: docs/residual-mpc.md#COMMAND_RANGES
-COMMAND_RANGES = ((0.0, 0.25), (0.0, 0.0), (0.0, 0.0))
+COMMAND_RANGES = ((0.0, 0.60), (0.0, 0.0), (0.0, 0.0))
 
 
 def residual_mpc_env_cfg(
@@ -99,6 +99,8 @@ def residual_mpc_env_cfg(
         mdp.SUPPORT_FOOT_CALLBACK,
       ),
       walking_velocity_command_name=COMMAND_NAME,
+      # Read back so a run shows the reference the controller actually holds.
+      controller_vectors=("walking_ref_vel",),
       console_output="single" if play else console_output,
       print_residual_every=10 if play else 0,
     )

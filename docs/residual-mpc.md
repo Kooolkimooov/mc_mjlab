@@ -168,3 +168,43 @@ the kind of limit the paper's residual is supposed to extend.
 **History:**
 - 2026-08-28 — raised from `3 s` after the readback showed the reference is
   accepted immediately and the velocity follows over tens of seconds.
+
+## COMMAND_RANGES
+
+**Current:** `vx` in `(0.0, 0.60)`, `vy` and `wz` held at zero. Chosen to straddle
+the prior's measured boundary rather than sit inside it.
+
+**Measured envelope of the ISMPC prior**, eight environments per command, 40 s
+episodes with the first 20 s discarded, no policy:
+
+| commanded `vx` | 0.00 | 0.20 | 0.40 | 0.60 | 0.80 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| tracking error | 0.071 | 0.136 | 0.319 | 0.515 | 0.713 |
+| implied measured `vx` | ~0.07 | ~0.064 | ~0.081 | ~0.085 | ~0.087 |
+| achieved | 100% | 100% | 0% | 0% | 0% |
+
+Zero terminations anywhere: the prior never falls, it simply never speeds up.
+Measured velocity saturates near `0.085 m/s` across a fourfold command range, so
+the `achieved` boundary at roughly `vx = 0.30` is earned by the command being
+close to a fixed gait speed, not by tracking it.
+
+**This is a weaker prior than the paper's, and the difference matters.** In
+[Jeon 2025](https://arxiv.org/abs/2510.12717) the residual extends an already
+capable MPC by `78%` in `vx`; the prior does the bulk of the work and the residual
+corrects it. Here the prior delivers `0.085 m/s` against a `0.60` command, so a
+policy that reached even the old `0.25` box would be contributing several times
+the prior's own output. That is closer to end-to-end control with an MPC-shaped
+bias than to the paper's residual regime, and any reproduction claim has to say
+so.
+
+**`vy` and `wz` stay at zero until measured.** Nothing yet shows the ISMPC moves
+laterally or turns on command, and enabling a command the controller ignores
+would only add reward the policy cannot earn.
+
+**Re-measure if:** the gait period, step length, controller, or `SETTLE_S`
+changes.
+
+**History:**
+- 2026-08-28 — widened from `(0.0, 0.25)` after the prior's boundary was measured
+  at about `0.30`; the old box sat entirely inside it, which is why the baseline
+  scored `97.9-99.99%` of ceiling and left nothing to learn.
