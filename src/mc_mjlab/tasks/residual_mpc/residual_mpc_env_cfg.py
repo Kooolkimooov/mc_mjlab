@@ -41,6 +41,10 @@ POLICY_DT = 0.01
 BLEND_FACTOR = 0.1
 SELF_COLLISION_SENSOR = "self_collision"
 COMMAND_NAME = "twist"
+#: Commanded (vx, vy, wz) box. The paper's claim is about commands the MPC prior
+#: cannot track, so this must straddle its failure boundary, not sit inside it.
+#: docs/residual-mpc.md#COMMAND_RANGES
+COMMAND_RANGES = ((0.0, 0.25), (0.0, 0.0), (0.0, 0.0))
 
 
 def residual_mpc_env_cfg(
@@ -49,7 +53,10 @@ def residual_mpc_env_cfg(
   num_workers: int | None = None,
   randomization: bool = True,
   pushes: bool = True,
-  fixed_velocity: float | None = None,
+  fixed_twist: tuple[float, float, float] | None = None,
+  command_ranges: tuple[
+    tuple[float, float], tuple[float, float], tuple[float, float]
+  ] = COMMAND_RANGES,
   console_output: Literal["none", "single", "all"] = "none",
   mc_rtc_yaml: Path = MC_RTC_YAML_PATH,
 ) -> ManagerBasedRlEnvCfg:
@@ -97,21 +104,21 @@ def residual_mpc_env_cfg(
     )
   }
 
-  vx_range = (
-    (fixed_velocity, fixed_velocity) if fixed_velocity is not None else (0.0, 0.25)
+  # A held twist is how the envelope sweep asks for one command per episode; the
+  # box is otherwise resampled. docs/residual-mpc.md#COMMAND_RANGES
+  vx, vy, wz = (
+    command_ranges
+    if fixed_twist is None
+    else tuple((value, value) for value in fixed_twist)
   )
   commands: dict[str, CommandTermCfg] = {
     COMMAND_NAME: UniformVelocityCommandCfg(
       entity_name="robot",
       resampling_time_range=(3.0, 8.0),
-      rel_standing_envs=0.0 if fixed_velocity is not None else 0.1,
+      rel_standing_envs=0.0 if fixed_twist is not None else 0.1,
       heading_command=False,
       debug_vis=play,
-      ranges=UniformVelocityCommandCfg.Ranges(
-        lin_vel_x=vx_range,
-        lin_vel_y=(0.0, 0.0),
-        ang_vel_z=(0.0, 0.0),
-      ),
+      ranges=UniformVelocityCommandCfg.Ranges(lin_vel_x=vx, lin_vel_y=vy, ang_vel_z=wz),
     )
   }
 

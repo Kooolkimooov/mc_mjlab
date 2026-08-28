@@ -29,7 +29,7 @@ def main() -> None:
     num_workers=args.num_workers,
     randomization=False,
     pushes=False,
-    fixed_velocity=0.1,
+    fixed_twist=(0.1, 0.0, 0.0),
   )
   cfg.auto_reset = False
   env = ManagerBasedRlEnv(cfg, device=args.device)
