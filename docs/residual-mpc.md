@@ -83,3 +83,50 @@ whole-body MPC replaces ISMPC.
 **History:**
 
 - 2026-08-28 — explicitly bounded the interpretation of the reproduction.
+
+## residual_mpc_ppo_cfg
+
+**Current:** `max_iterations = 1000`, `num_steps_per_env = 24`. The seed-42
+baseline says both are larger than the task can use.
+
+**The base controller already saturates the objective.** Rewards are per-second
+weights scaled by `step_dt = 0.01` over a 3,000-step episode, so each term has a
+hard ceiling. Scored against its own zero-action arm over 56 paired episodes:
+
+| term | ceiling | zero-action baseline | headroom |
+| --- | ---: | ---: | ---: |
+| `linear_tracking` | 300.0 | 293.565 | **2.1%** |
+| `angular_tracking` | 150.0 | 149.980 | 0.01% |
+| `orientation` | 30.0 | 29.990 | 0.03% |
+| `height` | 30.0 | 29.968 | 0.11% |
+
+The baseline also survives `100%` of episodes to the cap. Total available gain is
+about `6.4` points on `380.5`, or `1.7%`, and `model_975` captured `+0.383`
+(`p = 0.51`) — indistinguishable from doing nothing. The measurement is not the
+limit here: the paired standard error is about `0.58`, so the full headroom would
+have read as roughly eleven sigma.
+
+**Training-time falls are exploration, not behaviour.** The run ended with `86%`
+of episodes terminating on `height`, yet neither arm falls once under evaluation.
+Training samples from a Gaussian with `std ~0.24` across twelve torque channels
+while `get_inference_policy` returns the deterministic mean. Read the training
+termination curves as a measure of exploration noise, not of the policy.
+
+**The budget is mis-sized.** On the two length-independent measures the run
+peaked early and then decayed: reward per step was highest at iteration `0`
+(`0.1473`, ending `0.1161`) and smoothed episode length peaked at iteration `143`
+(`1096.8`, ending `921.4`, a `16%` regression). About `85%` of a 1,000-iteration
+budget was spent past the peak.
+
+**This is the residual-balance calibration failure mirrored.** There the
+qualifier's baseline fell in `96.9-100%` of disturbed episodes, so no policy
+could show a hazard gain; here it succeeds almost perfectly, so no policy can
+show a tracking gain. A residual task is only measurable when its base controller
+sits somewhere a residual can move it.
+
+**Re-measure if:** the velocity command range, push band, reward weights, or
+episode length change — all four set where the baseline sits against the ceiling.
+
+**History:**
+- 2026-08-28 — first seed-42 baseline comparison; no measurable gain over the
+  zero-action arm, and the objective is `97.9-99.99%` satisfied without a policy.
