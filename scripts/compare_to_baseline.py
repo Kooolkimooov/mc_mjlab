@@ -14,7 +14,8 @@ from pathlib import Path
 
 import torch
 from mjlab.envs import ManagerBasedRlEnv
-from mjlab.rl import RslRlVecEnvWrapper
+from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
+from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   WALKING_REFERENCE_SCALE,
@@ -26,6 +27,17 @@ from mc_mjlab.tasks.residual_balance.residual_balance_ppo_cfg import (
 from mc_mjlab.tasks.residual_balance.residual_balance_runner import (
   ResidualBalanceOnPolicyRunner,
 )
+
+
+def _apply_scale(cfg, num_envs: int, num_workers: int) -> None:
+  """Point a registered cfg at this comparison's environment and worker counts."""
+  cfg.scene.num_envs = num_envs
+  for action in cfg.actions.values():
+    if hasattr(action, "num_workers"):
+      action.num_workers = num_workers
+    if hasattr(action, "console_output"):
+      action.console_output = "none"
+
 
 #: Where every comparison's CSV and printed report land, beside the training logs
 #: they score. Kept out of a scratch dir: these are the record's raw data.
@@ -370,6 +382,11 @@ def main() -> None:
     default="uniform",
     help="residual joint/scaling screen the checkpoint was trained with",
   )
+  p.add_argument(
+    "--task",
+    help="registered task id; resolves the env, PPO and runner from the "
+    "registry instead of the residual-balance builders",
+  )
   p.add_argument("--controller-history", type=int, choices=(1, 5, 10, 20), default=20)
   p.add_argument("--proprio-history", type=int, choices=(1, 5), default=5)
   p.add_argument("--recurrent", action="store_true")
@@ -412,19 +429,31 @@ def main() -> None:
   # through fd 1 regardless, and this keeps the report and its header together.
   sys.stdout = _Tee(sys.stdout, out_dir / f"{stem}.log")
 
-  cfg = _make_env_cfg(
-    control=args.control,
-    num_envs=args.num_envs,
-    num_workers=args.num_workers,
-    console_output="none",
-    authority_set=args.authority_set,
-    controller_history=args.controller_history,
-    proprio_history=args.proprio_history,
-    walking_reference_velocity_scale=(
-      WALKING_REFERENCE_SCALE if args.walking_reference else None
-    ),
-  )
+  if args.task:
+    # Any registered task, scored the same way: the report reads its reward and
+    # termination terms from the live managers. docs/evaluation.md#--task
+    cfg = load_env_cfg(args.task)
+    _apply_scale(cfg, args.num_envs, args.num_workers)
+    agent_cfg = asdict(load_rl_cfg(args.task))
+    runner_cls = load_runner_cls(args.task) or MjlabOnPolicyRunner
+  else:
+    cfg = _make_env_cfg(
+      control=args.control,
+      num_envs=args.num_envs,
+      num_workers=args.num_workers,
+      console_output="none",
+      authority_set=args.authority_set,
+      controller_history=args.controller_history,
+      proprio_history=args.proprio_history,
+      walking_reference_velocity_scale=(
+        WALKING_REFERENCE_SCALE if args.walking_reference else None
+      ),
+    )
+    agent_cfg = asdict(residual_balance_ppo_cfg(recurrent=args.recurrent))
+    runner_cls = ResidualBalanceOnPolicyRunner
   if args.recovery_dcm_std is not None:
+    if "recovery_dcm" not in cfg.rewards:
+      p.error("--recovery-dcm-std needs a task with a recovery_dcm reward")
     cfg.rewards["recovery_dcm"].params["std"] = args.recovery_dcm_std
   # A checkpoint is only loadable against the observation space it was trained
   # on: the actor's first layer and its `obs_normalizer` are both sized by the
@@ -448,11 +477,7 @@ def main() -> None:
   # `terminated` and `time_outs` into one `dones` and this needs them apart to
   # tell a fall from a survival.
   wrapped = RslRlVecEnvWrapper(env)
-  runner = ResidualBalanceOnPolicyRunner(
-    wrapped,
-    asdict(residual_balance_ppo_cfg(recurrent=args.recurrent)),
-    device=args.device,
-  )
+  runner = runner_cls(wrapped, agent_cfg, device=args.device)
   runner.load(
     args.checkpoint, load_cfg={"actor": True}, strict=True, map_location=args.device
   )

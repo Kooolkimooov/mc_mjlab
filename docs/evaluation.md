@@ -34,6 +34,32 @@ unit and zero-weight-call semantics in
 
 ## compare_to_baseline.py
 
+**`--task <id>` scores any registered task.** Without it the script builds a
+residual-balance cfg from its own flags, which is how every measurement before
+2026-08-28 was taken and is still the flexible path for that task. With it, the
+environment, PPO config and runner come from the task registry, so a checkpoint
+from any registered task can be scored against its own zero-action arm. A task
+that registers no `runner_cls` falls back to `MjlabOnPolicyRunner`.
+
+```sh
+uv run python scripts/compare_to_baseline.py --checkpoint <model.pt> \
+  --task Mc-Mjlab-Residual-Mpc-Logisticcontroller-Ismpc-Hrp5P-Joint-Torque
+```
+
+The report needed no per-task work: it reads reward and termination terms from
+the live managers rather than a fixed list, so it names whatever the task
+defines. `--recovery-dcm-std` is the one residual-balance-specific flag left, and
+it now errors rather than raising `KeyError` on a task without that reward.
+
+**What it does not give you** is a promotion verdict. `qualify_checkpoints.py` is
+still residual-balance only, and its gates — recovery DCM, ZMP, the hazard ratio
+— are that task's objective. Deciding what promotion means for a
+velocity-tracking task is a separate question from being able to measure it.
+
+### Original
+
+
+
 Both arms run in the same env, with the same pushes, terminations and reward
 terms, and the policy is evaluated deterministically (`MLPModel.forward` returns
 the distribution mean), so a deficit is the learned mean being worse rather than
