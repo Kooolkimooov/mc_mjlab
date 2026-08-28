@@ -298,3 +298,47 @@ changes — all three move where the kernel should sit.
 **History:**
 - 2026-08-28 — tightened from `0.5` after the bare prior was measured at `81-100%`
   of the tracking ceiling across the whole command range.
+
+## RESIDUAL_CANNOT_MOVE_A_PLANNER_LIMIT
+
+**Current:** with the objective calibrated so the prior leaves a fifth of the
+tracking term unearned, the residual still captures none of it and costs torque.
+Paired against its own zero-action arm, 88 episodes per arm, `model_100` of the
+recalibrated seed:
+
+| term | prior | policy | delta | p |
+| --- | ---: | ---: | ---: | ---: |
+| `linear_tracking` | 242.631 | 242.013 | `-0.618` | `0.79` |
+| `torque_l2` | -117.894 | -124.449 | `-6.555` | `8.4e-05` |
+| **total** | **334.457** | **327.265** | **`-7.192`** | **`7.9e-03`** |
+
+The measurement is now capable: the prior scores `80.9%` of the
+`linear_tracking` ceiling rather than the `97.9%` it scored at `sigma = 0.5`, so
+roughly `57` points were available. The policy took none of them and lost `7.2`
+overall, significantly.
+
+**Why, and it is structural.** The ISMPC's speed is bounded by
+`deltaTransLimit / ts` — where the footstep planner puts the feet, and how long
+it takes to get there. A torque residual can change how the robot executes a
+planned footstep; it cannot make the planner take a longer one. The limitation
+and the residual live in different spaces.
+
+In [Jeon 2025](https://arxiv.org/abs/2510.12717) they live in the same space: the
+prior is a kinodynamic whole-body MPC emitting torques at 100 Hz, so a torque
+residual can push against exactly what limits it. Ours is a kinematic planner
+followed by tracking, and the binding constraint sits upstream of anything the
+residual touches. That is why the architecture reproduces faithfully — blending,
+weights, network, initialisation all match — while the *result* does not.
+
+**What follows.** Raising `footsteps_planner.mean_speed` and
+`FootManager.deltaTransLimit` in the installed controller yaml would move the
+limit into a region where a residual has something to push against. Nothing on
+the RL side reaches it: not the command box, not `sigma`, not the budget, and
+not more seeds.
+
+**Re-measure if:** the prior becomes torque-emitting, or the footstep limits
+move.
+
+**History:**
+- 2026-08-29 — recalibrated objective, 300-iteration seed, paired comparison;
+  the residual is significantly worse than the prior it is meant to improve.
