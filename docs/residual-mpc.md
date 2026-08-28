@@ -299,7 +299,7 @@ changes — all three move where the kernel should sit.
 - 2026-08-28 — tightened from `0.5` after the bare prior was measured at `81-100%`
   of the tracking ceiling across the whole command range.
 
-## RESIDUAL_CANNOT_MOVE_A_PLANNER_LIMIT
+## deltaTransLimit
 
 **Current:** with the objective calibrated so the prior leaves a fifth of the
 tracking term unearned, the residual still captures none of it and costs torque.
