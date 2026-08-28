@@ -179,6 +179,23 @@ ratio and advantage masking turned the resulting `inf` into `NaN`. See
 [ppo.md](ppo.md#LOG_PROB_FLOOR); the fix let the second attempt pass 13 KL spikes
 above `0.05`, peaking at `0.151`, without dying.
 
+**Paired qualification: the nominal gate flipped, the recovery gate did not.**
+`model_750` was scored with all four scenarios valid over 32 clusters:
+
+| gate | four-joint `ankle` | `ankle_pitch` |
+| --- | --- | --- |
+| `nominal` foot slip | `0.000047 -> 0.000048`, failed twice | `0.000047 -> 0.000046`, **passes** |
+| `nominal` ZMP | not reported clean | `0.03212 -> 0.03212` |
+| recovery DCM | `+0.64%` | `+1.40%`, CI `[-0.0043, +0.0077]` |
+| hazard ratio | `0.989` | `1.016` |
+
+Dropping roll did what the direction-resolved read predicted for the gait: foot
+slip now *improves* and ZMP is unchanged to five decimals, so the lateral
+actuator was the source of the nominal damage. Nothing else improved. The
+prediction recorded above — lateral strata moving to about baseline for a
+four-direction mean near `-3.2%` — was wrong: recovery DCM went the wrong way at
+`+1.40%`, so the sagittal gains did not survive the ablation either.
+
 **Re-measure if:** the authority set, detector calibration, residual scale, or
 push direction distribution changes.
 
