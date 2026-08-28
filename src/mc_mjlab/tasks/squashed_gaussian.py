@@ -9,6 +9,9 @@ from rsl_rl.modules.distribution import Distribution
 from torch import nn
 from torch.distributions import Normal
 
+#: Bounds the log-ratio so `exp` cannot overflow. docs/ppo.md#LOG_PROB_FLOOR
+LOG_PROB_FLOOR = -40.0
+
 
 class _TanhDeterministicOutput(nn.Module):
   """Export-friendly deterministic tanh transform."""
@@ -92,9 +95,14 @@ class SquashedGaussianDistribution(Distribution):
     eps = torch.finfo(outputs.dtype).eps
     bounded = outputs.clamp(min=-1.0 + eps, max=1.0 - eps)
     latent = torch.atanh(bounded)
-    return (self._distribution.log_prob(latent) - self._log_tanh_jacobian(latent)).sum(
-      dim=-1
-    )
+    density = (
+      self._distribution.log_prob(latent) - self._log_tanh_jacobian(latent)
+    ).sum(dim=-1)
+    # A saturated action is a ~40-sigma deviate here, so a large policy move can
+    # push `exp(new - old)` past float32 in rsl_rl's ratio. Masked advantages are
+    # exactly zero, and `0 * inf` is NaN, so one such sample kills the update.
+    # docs/ppo.md#LOG_PROB_FLOOR
+    return density.clamp(min=LOG_PROB_FLOOR)
 
   def kl_divergence(
     self,

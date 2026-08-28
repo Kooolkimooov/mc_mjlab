@@ -62,6 +62,8 @@ uv run python scripts/probe_residual_authority.py --level 1.0
 # The DCM objective's own gate: standing must not outscore walking (~1 min/regime).
 uv run python scripts/validate_dcm_objective.py
 uv run python scripts/verify_improvement_contracts.py
+# Regenerate docs/architecture/ from the source; --check fails on drift.
+uv run python scripts/generate_architecture_docs.py
 uv run ruff format && uv run ruff check --fix    # format + lint
 uv run ty check                                  # type check (56 pre-existing
                                                  # diagnostics: unresolvable
@@ -148,6 +150,12 @@ and stay in `git log` forever. `Co-Authored-By: Claude Opus 5
 through a history rewrite too: strip the session line rather than preserve it.
 
 # Architecture
+
+`docs/architecture/` holds six views of this system, **generated from the
+source** — import graph, class hierarchy, the shared-memory layout, the
+control step's real ordering. Never edit those files; edit
+`scripts/generate_architecture_docs.py` and rerun it. `--check` fails when
+they no longer match the code.
 
 From mjlab down to mc_rtc:
 

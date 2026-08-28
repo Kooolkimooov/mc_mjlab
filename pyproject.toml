@@ -22,7 +22,16 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["ruff>=0.14.14", "ty>=0.0.14"]
+dev = [
+    "ruff>=0.14.14",
+    "ty>=0.0.14",
+    # Static extraction for scripts/generate_architecture_docs.py; none import
+    # the package, so the docs build needs no mc_rtc workspace.
+    "pylint>=4.0.7",
+    "griffe>=2.2.0",
+    "grimp>=3.15",
+    "markdown>=3.10",
+]
 
 [tool.uv]
 # This package is developed on a single Linux/CUDA box; resolve for it only.

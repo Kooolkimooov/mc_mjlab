@@ -18,3 +18,6 @@ src/mc_mjlab/robots/*/pdgains
 **/mc_plugins/*
 # Depends on the per-machine mjlab source choice (see README).
 uv.lock
+
+# Written by generate_architecture_docs.py --live; one machine, one moment.
+docs/architecture/live-inventory.md

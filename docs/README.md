@@ -17,7 +17,7 @@ are *deciding* something, not when you are reading the line that implements it.
 
 | File | Covers |
 | --- | --- |
-| [architecture/](architecture/README.md) | how the system fits together: processes, one control step, task and asset wiring |
+| [architecture/](architecture/README.md) | how the system fits together, **generated from the source** by `scripts/generate_architecture_docs.py` |
 | [leo-mjlab-review.md](leo-mjlab-review.md) | exhaustive adoption matrix and implementation order from `leo_mjlab` commits `1fcdcee..bdce238` |
 | [improvement-roadmap.md](improvement-roadmap.md) | ordered critique remediation, acceptance gates, and experiment program |
 | [improvement-screens.md](improvement-screens.md) | critique screen measurements, rejected variants, and qualification shortlist |

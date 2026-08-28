@@ -102,6 +102,50 @@ not read the event count as a pure win.
 **Re-measure `desired_kl` only after this**, not alongside it — with the event
 count down, 0.02 may already be enough.
 
+## LOG_PROB_FLOOR
+
+**Current:** `-40.0`, a floor on the summed tanh-Gaussian log-density in
+`SquashedGaussianDistribution.log_prob`. It exists because without it one
+saturated action can end a run.
+
+**How the 2026-08-27 overnight run died**, at iteration 262 of 1500 after
+1 h 38 m: `ValueError: The observation group 'actor' ... contains NaN`. That is
+the symptom, not the cause. `Mean value loss` was a finite `1.2136` in the same
+update while `surrogate`, `entropy` and `schedule_kl` were all `nan`, so returns,
+values and advantages were sound and only the log-ratio path was broken. Every
+policy diagnostic was healthy to the last step: `policy_mean_rms` `0.28`,
+`action_saturation` `0.0002`, `explained_variance` `0.85`, `exploration_rms`
+`0.19`. `clip_fraction` reading exactly `0.0` after `0.32` is the tell, since
+every comparison against NaN is false.
+
+The chain: `log_prob` recovers the latent with `atanh` of the action clamped to
+`1 - eps`, and at float32 `eps` that is a latent of `8.32`. Against a mean near
+`0.28` at `std 0.19` that is a **44-sigma deviate**, so its log-density is
+enormous and moves enormously when the policy does. `schedule_kl` spiked to
+`0.05355` at iteration 261 — `2.7x` the `0.02` target, which halved the rate one
+update too late. On the next update some sample's `new - old` exceeded `88`,
+`torch.exp` overflowed to `inf` in float32, and rsl_rl computes
+`surrogate = -advantages * ratio`.
+
+**Advantage masking is what makes that fatal.** `RolloutAdaptivePPO` zeroes the
+advantages of inactive samples, so roughly `86%` of them are *exactly* `0.0`, and
+`0.0 * inf` is `NaN`, which `.mean()` spreads across the whole update. Ordinary
+PPO never meets this: its advantages are never exactly zero, so an overflowing
+ratio yields `inf` — bad and obvious — rather than a silent NaN. The masking and
+the squashed distribution are each sound alone.
+
+Flooring the summed log-density bounds `new - old` to about `48`, so `exp` stays
+finite. Maximum density is about `+8.3` at `std 0.05`, so the floor binds only
+where the density is already absurd, and clamping there is gradient clipping for
+samples the policy cannot usefully learn from.
+
+**Re-measure if:** `std_range`, the action dimension, or the advantage-masking
+scheme changes — all three set the reachable log-ratio.
+
+**History:**
+- 2026-08-28 — added after the overnight ankle-pitch run died at iteration 262;
+  `verify_log_ratio_cannot_overflow` pins the worst realistic ratio finite.
+
 ## RolloutAdaptivePPO
 
 **Current:** the default algorithm holds learning rate constant through every

@@ -96,7 +96,10 @@ from mc_mjlab.tasks.rollout_adaptive_ppo import (
   RolloutAdaptivePPO,
   normalize_masked_advantages,
 )
-from mc_mjlab.tasks.squashed_gaussian import SquashedGaussianDistribution
+from mc_mjlab.tasks.squashed_gaussian import (
+  LOG_PROB_FLOOR,
+  SquashedGaussianDistribution,
+)
 from mc_mjlab.tasks.zero_init_actor import (
   ZeroInitMLPModel,
   ZeroInitRNNModel,
@@ -766,6 +769,32 @@ def verify_curriculum_reachability() -> None:
   assert seen, "no staged reward curriculum was checked"
 
 
+def verify_log_ratio_cannot_overflow() -> None:
+  """Check a saturated action cannot make `exp(new - old)` non-finite."""
+  dist = SquashedGaussianDistribution(4, init_std=0.05, std_range=(0.05, 0.30))
+  saturated = torch.full((3, 4), 1.0 - torch.finfo(torch.float32).eps)
+  saturated[1] *= -1.0
+
+  # Old policy centred, new policy moved far: the worst realistic ratio.
+  dist.update(torch.zeros(3, 4))
+  old = dist.log_prob(saturated)
+  dist.update(torch.full((3, 4), 3.0))
+  new = dist.log_prob(saturated)
+  assert torch.isfinite(old).all() and torch.isfinite(new).all()
+  assert torch.isfinite(torch.exp(new - old)).all(), torch.exp(new - old)
+  assert float((new - old).abs().max()) < 88.0
+
+  # The floor binds only where the density is already absurd.
+  dist.update(torch.zeros(2, 4))
+  ordinary = dist.log_prob(torch.zeros(2, 4))
+  assert torch.isfinite(ordinary).all()
+  assert float(ordinary.min()) > LOG_PROB_FLOOR
+
+  # Exactly the arithmetic that killed the 2026-08-27 run.
+  masked_advantage = torch.zeros(1)
+  assert torch.isnan(masked_advantage * torch.tensor([float("inf")])).all()
+
+
 def verify_source_hash_is_audit_only() -> None:
   """Check an unrelated source edit cannot strand a checkpoint."""
   saved = {
@@ -1313,6 +1342,7 @@ def main() -> None:
   verify_impulse_curricula()
   verify_episode_length_ladder()
   verify_curriculum_reachability()
+  verify_log_ratio_cannot_overflow()
   verify_source_hash_is_audit_only()
   verify_qualifier_power()
   verify_paired_clustering()
