@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 from typing import TYPE_CHECKING
 from weakref import WeakKeyDictionary
 
@@ -894,6 +895,11 @@ class finite_impulse_curriculum(recorded_disturbance):
     self.asset = env.scene[cfg.params.get("asset_cfg", SceneEntityCfg("robot")).name]
     self.interval_range_s = cfg.params["interval_range_s"]
     self.warmup_s = cfg.params["warmup_s"]
+    # `play` takes no `--env.*` overrides, and a finite wrench draws nothing, so
+    # this is the only way to see a push. docs/difficulty.md#MC_MJLAB_PUSH_DEBUG
+    self._debug_scale = float(os.environ.get("MC_MJLAB_PUSH_DEBUG", "0.0") or 0.0)
+    if self._debug_scale > 0.0:
+      self.warmup_s = min(self.warmup_s, 1.0)
     self.force = torch.zeros(env.num_envs, 1, 3, device=env.device)
     self.torque = torch.zeros_like(self.force)
     self.remaining = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
@@ -982,6 +988,14 @@ class finite_impulse_curriculum(recorded_disturbance):
     speed = velocity_range[0] + (velocity_range[1] - velocity_range[0]) * torch.rand(
       count, device=env.device
     )
+    if self._debug_scale > 0.0:
+      speed = speed * self._debug_scale
+      for row, env_id in enumerate(env_ids.tolist()):
+        print(
+          f"[push] env {env_id} {float(speed[row]):.3f} m/s at "
+          f"{math.degrees(float(angle[row])):.0f} deg",
+          flush=True,
+        )
     delta_b = torch.zeros(count, 3, device=env.device)
     delta_b[:, 0] = speed * torch.cos(angle)
     delta_b[:, 1] = speed * torch.sin(angle)

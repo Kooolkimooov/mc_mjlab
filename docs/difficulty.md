@@ -218,6 +218,37 @@ function of the standing share.
 - 2026-08-27 — added after the matched-impulse seed showed episode length rising
   8.6x its own noise floor without approaching the cap.
 
+## MC_MJLAB_PUSH_DEBUG
+
+**Current:** unset. Set it to a positive float during `play` to make impulses
+visible: it scales the sampled equivalent delta velocity by that factor, caps the
+warm-up at `1 s`, and prints one `[push]` line per triggered environment with the
+magnitude and heading.
+
+```sh
+MC_MJLAB_PUSH_DEBUG=3 uv run play <task> --checkpoint <model.pt>
+```
+
+**Why it has to be an environment variable.** `play` exposes no `--env.*`
+overrides, only `train` does, so the push parameters are unreachable from the
+command line. And a finite impulse enters through
+`write_external_wrench_to_sim`, which draws nothing — the viewer's `debug_vis`
+arrow is the *velocity command*, not the push. Without this the only evidence a
+push happened is the robot's own stagger, which at the default
+`[0.10, 0.25] m/s` band over `0.08-0.20 s` is easy to miss entirely, and which
+never occurs in the first `10 s` of an episode.
+
+**It is a viewing aid, never a measurement.** Scaling the band changes the
+disturbance distribution, so nothing observed under it is comparable to a
+training curve or a qualification. Leave it unset for anything that produces a
+number.
+
+**Re-measure if:** the impulse implementation stops going through the external
+wrench, or the viewer gains a force visualization.
+
+**History:**
+- 2026-08-28 — added after the shipped `play` gave no way to see a perturbation.
+
 ## curriculum_diagnostics
 
 **Current:** Two additive ankle-authority tasks isolate the difficulty change
