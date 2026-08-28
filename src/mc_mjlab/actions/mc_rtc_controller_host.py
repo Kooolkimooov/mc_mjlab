@@ -131,6 +131,26 @@ VECTOR_OUTPUTS: dict[str, Callable[[Any, Any], Any]] = {
   "walking_ref_vel": lambda ctl, _: ctl.datastore().call("ismpc_walking::get_ref_vel"),
 }
 
+SUPPORT_FOOT_CALLBACK = "ismpc_walking::support_foot_name"
+
+
+def _read_scalar_output(datastore: Any, callback: str) -> float:
+  """Read a configured scalar callback, including the support-foot adapter."""
+  value = datastore.call(callback)
+  if callback == SUPPORT_FOOT_CALLBACK:
+    name = value.decode() if isinstance(value, bytes) else str(value)
+    if "Right" in name:
+      return 0.0
+    if "Left" in name:
+      return 1.0
+    raise ValueError(f"unsupported ISMPC support foot {name!r}")
+  if isinstance(value, bool):
+    raise TypeError(f"datastore getter {callback!r} returned bool, expected scalar")
+  scalar = float(value)
+  if not math.isfinite(scalar):
+    raise ValueError(f"datastore getter {callback!r} returned {scalar}")
+  return scalar
+
 
 @dataclass(frozen=True)
 class HostMetadata:
@@ -259,8 +279,12 @@ class IoLayout:
   # of VECTOR_OUTPUTS; unlike the channels above these are not per-joint and
   # are not interpolated across substeps.
   output_vectors: tuple[str, ...] = ()
+  # Read-only datastore callbacks written as scalar output columns.
+  output_scalars: tuple[str, ...] = ()
   # (getter, setter) datastore callbacks for gated Vector3 delta commands.
   datastore_vector_commands: tuple[tuple[str, str], ...] = ()
+  # True selects an absolute setter target; false preserves baseline-relative delta.
+  datastore_vector_command_is_absolute: tuple[bool, ...] = ()
   # (getter, setter) datastore callbacks for gated scalar delta commands.
   datastore_scalar_commands: tuple[tuple[str, str], ...] = ()
 
@@ -301,8 +325,12 @@ class IoLayout:
     return self.scalar_command_output_off + 2 * len(self.datastore_scalar_commands)
 
   @property
-  def scalar_command_output_off(self) -> int:
+  def scalar_output_off(self) -> int:
     return self.vector_off + 3 * len(self.output_vectors)
+
+  @property
+  def scalar_command_output_off(self) -> int:
+    return self.scalar_output_off + len(self.output_scalars)
 
 
 @dataclass
@@ -466,6 +494,13 @@ class ControllerHost:
     self._layout = layout
     self._output_attrs = [MBC_ATTR_BY_CHANNEL[c] for c in layout.output_channels]
     self._vector_readers = [VECTOR_OUTPUTS[v] for v in layout.output_vectors]
+    if layout.datastore_vector_command_is_absolute and len(
+      layout.datastore_vector_command_is_absolute
+    ) != len(layout.datastore_vector_commands):
+      raise ValueError("vector command modes must match vector command callbacks")
+    self._vector_command_is_absolute = layout.datastore_vector_command_is_absolute or (
+      False,
+    ) * len(layout.datastore_vector_commands)
     self._imu_keys = [name.encode() for name, _, _ in layout.imu]
     self._wrench_keys = [name.encode() for name in layout.wrenches]
     self._command_baselines = [
@@ -478,18 +513,21 @@ class ControllerHost:
       [None] * len(layout.datastore_scalar_commands) for _ in self._controllers
     ]
     command_pairs = layout.datastore_vector_commands + layout.datastore_scalar_commands
-    if command_pairs:
+    callbacks = tuple(layout.output_scalars) + tuple(
+      key for pair in command_pairs for key in pair
+    )
+    if callbacks:
       datastore = self._controllers[0].controller().datastore()
       if not hasattr(datastore, "call"):
         raise RuntimeError(
           "the mc_rtc Python binding lacks DataStore.call(); rebuild the local "
           "binding with generic datastore accessor support"
         )
-      missing = [
-        key for pair in command_pairs for key in pair if not datastore.has(key)
-      ]
+      missing = [key for key in callbacks if not datastore.has(key)]
       if missing:
         raise ValueError(f"controller datastore is missing callbacks {missing}")
+      for getter in layout.output_scalars:
+        _read_scalar_output(datastore, getter)
       for getter, setter in layout.datastore_vector_commands:
         current = datastore.call(getter)
         datastore.call(setter, current)
@@ -594,6 +632,16 @@ class ControllerHost:
       off = layout.command_off + 4 * index
       active = row[off] > 0.0
       baseline = self._command_baselines[local][index]
+      if self._vector_command_is_absolute[index]:
+        if active:
+          current = datastore.call(getter)
+          datastore.call(
+            setter,
+            type(current)(
+              float(row[off + 1]), float(row[off + 2]), float(row[off + 3])
+            ),
+          )
+        continue
       if active:
         if baseline is None:
           baseline = datastore.call(getter)
@@ -747,7 +795,9 @@ class ControllerHost:
         # unset) reads 0.0; consumers treat that as "no command".
         out_row[base + k] = values[j][0] if j != -1 and len(values[j]) > 0 else 0.0
 
-    if self._vector_readers or layout.datastore_scalar_commands:
+    if (
+      self._vector_readers or layout.output_scalars or layout.datastore_scalar_commands
+    ):
       # Re-resolved every step, never cached: a reset rebuilds the controller and
       # a stale handle segfaults a reset later. docs/coupling.md#vector_outputs
       control = controller.controller()
@@ -759,8 +809,12 @@ class ControllerHost:
         out_row[base + 1] = v.y()
         out_row[base + 2] = v.z()
         base += 3
-      base = layout.scalar_command_output_off
       datastore = control.datastore()
+      base = layout.scalar_output_off
+      for getter in layout.output_scalars:
+        out_row[base] = _read_scalar_output(datastore, getter)
+        base += 1
+      base = layout.scalar_command_output_off
       for index, (getter, _) in enumerate(layout.datastore_scalar_commands):
         value = float(datastore.call(getter))
         baseline = self._scalar_command_last_baselines[local][index]

@@ -69,6 +69,9 @@ class McRtcResidualActionCfg(BaseActionCfg):
   joint channels these are not per-joint and are not interpolated across
   substeps; mdp terms read the latest value through ``controller_vector``."""
 
+  controller_scalars: tuple[str, ...] = ()
+  """Read-only datastore callbacks collected after each controller step."""
+
   use_controller_reset: bool = True
   """Reset via ``MCGlobalController.reset()`` (mc_mujoco parity). Requires the
   locally patched mc_rtc (stock fsm::Controller segfaults on destruction, see
@@ -100,6 +103,12 @@ class McRtcResidualActionCfg(BaseActionCfg):
   walking_reference_velocity_scale: tuple[float, float, float] | None = None
   """Maximum recovery-gated ``(vx, vy, yaw_rate)`` delta sent through the
   walking controller's datastore; ``None`` preserves the existing action space."""
+
+  walking_velocity_command_name: str | None = None
+  """Command-manager term sent as an absolute ISMPC ``set_ref_vel`` target.
+
+  This adds no policy dimensions and is mutually exclusive with the recovery-delta
+  ``walking_reference_velocity_scale`` mode."""
 
   walking_reference_velocity_slew_rate: tuple[float, float, float] = (
     2.0,
@@ -164,7 +173,9 @@ class McRtcResidualActionBase(BaseAction):
       cfg.use_controller_reset,
       self.output_channels,
       cfg.controller_vectors,
+      cfg.controller_scalars,
       self._datastore_vector_commands,
+      self._datastore_vector_command_is_absolute,
       self._datastore_scalar_commands,
     )
     # refJointOrder is only known now, so the gain override is applied here.
@@ -265,6 +276,8 @@ class McRtcResidualActionBase(BaseAction):
     self._residual_raw_actions = self._raw_actions
     self._previous_residual_raw_actions = torch.zeros_like(self._residual_raw_actions)
     self._datastore_vector_commands: tuple[tuple[str, str], ...] = ()
+    self._datastore_vector_command_is_absolute: tuple[bool, ...] = ()
+    self._walking_velocity_command_name = cfg.walking_velocity_command_name
     self._walking_reference_scale = torch.empty(0, device=self.device)
     self._walking_reference_requested = torch.empty(
       self.num_envs, 0, device=self.device
@@ -279,6 +292,25 @@ class McRtcResidualActionBase(BaseAction):
       self.num_envs, dtype=torch.bool, device=self.device
     )
     scale = cfg.walking_reference_velocity_scale
+    if scale is not None and self._walking_velocity_command_name is not None:
+      raise ValueError(
+        "walking velocity command and recovery-delta action cannot both be configured"
+      )
+    if self._walking_velocity_command_name is not None:
+      command = self._env.command_manager.get_command(
+        self._walking_velocity_command_name
+      )
+      if command is None or tuple(command.shape) != (self.num_envs, 3):
+        raise ValueError(
+          f"walking command {self._walking_velocity_command_name!r} must have "
+          f"shape ({self.num_envs}, 3)"
+        )
+      self._datastore_vector_commands = (WALKING_REFERENCE_CALLBACKS,)
+      self._datastore_vector_command_is_absolute = (True,)
+      self._walking_reference_requested = torch.zeros_like(command)
+      self._walking_reference_executed = torch.zeros_like(command)
+      self._previous_walking_reference_executed = torch.zeros_like(command)
+      return
     if scale is None:
       return
     if len(scale) != 3 or any(value <= 0.0 for value in scale):
@@ -289,6 +321,7 @@ class McRtcResidualActionBase(BaseAction):
     if len(slew) != 3 or any(value <= 0.0 for value in slew):
       raise ValueError("walking reference slew rates must be three positive values")
     self._datastore_vector_commands = (WALKING_REFERENCE_CALLBACKS,)
+    self._datastore_vector_command_is_absolute = (False,)
     self._walking_reference_scale = torch.tensor(scale, device=self.device).unsqueeze(0)
     self._walking_reference_slew = (
       torch.tensor(slew, device=self.device).unsqueeze(0) * self._env.step_dt
@@ -427,7 +460,10 @@ class McRtcResidualActionBase(BaseAction):
     }
     self._controller_scalars = {
       getter: torch.zeros(self.num_envs, device=self.device)
-      for getter, _ in self._datastore_scalar_commands
+      for getter in (
+        *self.cfg.controller_scalars,
+        *(pair[0] for pair in self._datastore_scalar_commands),
+      )
     }
     self._controller_scalar_baselines = {
       getter: torch.zeros(self.num_envs, device=self.device)
@@ -460,6 +496,9 @@ class McRtcResidualActionBase(BaseAction):
       for v, values in new_vectors.items():
         self._controller_vectors[v][env_indices_t] = values
     if self._controller_scalars:
+      new_readonly_scalars = self._io.read_controller_scalars(self._out_np, env_indices)
+      for name, values in new_readonly_scalars.items():
+        self._controller_scalars[name][env_indices_t] = values
       new_scalars = self._io.read_datastore_scalar_commands(self._out_np, env_indices)
       for name, values in new_scalars.items():
         self._controller_scalars[name][env_indices_t] = values
@@ -575,7 +614,7 @@ class McRtcResidualActionBase(BaseAction):
 
   @property
   def walking_reference_velocity(self) -> torch.Tensor:
-    """Executed ``(vx, vy, yaw_rate)`` delta in physical units."""
+    """Executed ``(vx, vy, yaw_rate)`` target or delta in physical units."""
     return self._walking_reference_executed
 
   @property
@@ -703,6 +742,14 @@ class McRtcResidualActionBase(BaseAction):
       self._walking_reference_active.copy_(
         self._walking_reference_executed.abs().amax(dim=1) > 1.0e-6
       )
+    elif self._walking_velocity_command_name is not None:
+      command = self._env.command_manager.get_command(
+        self._walking_velocity_command_name
+      )
+      assert command is not None
+      self._walking_reference_requested.copy_(command)
+      self._walking_reference_executed.copy_(command)
+      self._walking_reference_active.fill_(True)
     if self._print_every:
       self._print_pending = True
 

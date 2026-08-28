@@ -12,3 +12,9 @@ from mc_mjlab.actions.mc_rtc_residual_joint_torque_actions import (
 from mc_mjlab.actions.mc_rtc_residual_joint_torque_actions import (
   McRtcResidualJointTorqueActionCfg as McRtcResidualJointTorqueActionCfg,
 )
+from mc_mjlab.actions.residual_mpc_joint_torque_action import (
+  ResidualMpcJointTorqueAction as ResidualMpcJointTorqueAction,
+)
+from mc_mjlab.actions.residual_mpc_joint_torque_action import (
+  ResidualMpcJointTorqueActionCfg as ResidualMpcJointTorqueActionCfg,
+)

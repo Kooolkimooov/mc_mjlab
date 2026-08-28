@@ -104,7 +104,9 @@ class ControllerIoBinding:
     use_controller_reset: bool,
     output_channels: Sequence[str],
     output_vectors: Sequence[str] = (),
+    output_scalars: Sequence[str] = (),
     datastore_vector_commands: Sequence[tuple[str, str]] = (),
+    datastore_vector_command_is_absolute: Sequence[bool] = (),
     datastore_scalar_commands: Sequence[tuple[str, str]] = (),
   ):
     self._env = env
@@ -114,7 +116,11 @@ class ControllerIoBinding:
     self._device = target_ids.device
     self._output_channels = tuple(output_channels)
     self._output_vectors = tuple(output_vectors)
+    self._output_scalars = tuple(output_scalars)
     self._datastore_vector_commands = tuple(datastore_vector_commands)
+    self._datastore_vector_command_is_absolute = tuple(
+      datastore_vector_command_is_absolute
+    )
     self._datastore_scalar_commands = tuple(datastore_scalar_commands)
     self._num_targets = len(self._target_names)
 
@@ -211,7 +217,9 @@ class ControllerIoBinding:
       wrenches=tuple(n for n, _, _ in wrench_sensors),
       output_channels=self._output_channels,
       output_vectors=self._output_vectors,
+      output_scalars=self._output_scalars,
       datastore_vector_commands=self._datastore_vector_commands,
+      datastore_vector_command_is_absolute=(self._datastore_vector_command_is_absolute),
       datastore_scalar_commands=self._datastore_scalar_commands,
     )
 
@@ -343,6 +351,18 @@ class ControllerIoBinding:
         rows[:, off + 3 * i : off + 3 * i + 3], dtype=dtype, device=self._device
       )
       for i, name in enumerate(self._output_vectors)
+    }
+
+  def read_controller_scalars(
+    self, out_np: np.ndarray, env_indices: list[int]
+  ) -> dict[str, torch.Tensor]:
+    """Unpack the configured read-only scalar outputs for ``env_indices``."""
+    off = self.layout.scalar_output_off
+    rows = out_np[env_indices]
+    dtype = torch.get_default_dtype()
+    return {
+      name: torch.tensor(rows[:, off + i], dtype=dtype, device=self._device)
+      for i, name in enumerate(self._output_scalars)
     }
 
   def read_datastore_scalar_commands(
