@@ -157,10 +157,34 @@ summarized per direction, and each interval is narrow only in the sense that the
 sign is consistent across four independent strata and roughly 250 episodes. Treat
 the direction of the effect as the finding and the magnitude as provisional.
 
+**The seed ran 856 iterations and the training curves are flat.** Smoothed over
+60 iterations, `zmp_error` sat in `0.0394-0.0417` for the whole run and
+`recovery_dcm_error` in `0.0137-0.0156`. Both best windows land late (iterations
+753 and 758), so the run never clearly peaked, but a 6% band over 856 iterations
+is wandering rather than learning. `policy_mean_rms` climbed monotonically
+(`0.070` at 100, `0.136` at 300, `0.201` at 856) while the hazard union drifted
+from its best `0.4153` to `0.4860`, so the policy kept getting more assertive
+without the metrics following. It was stopped at 856 rather than 1500 on that
+basis.
+
+Against the four-joint `ankle` arm on the identical mixture (`impulse_speed`
+`0.142` against `0.143`), the two-joint policy fell less (`0.475` against
+`0.542`), tracked recovery slightly better (`0.01492` against `0.01583`) and used
+*less* residual (`0.00513` against `0.006623`). Those arms stopped at different
+iteration counts, so this is suggestive, not controlled.
+
+**It also exposed a run-killing numerical defect**, unrelated to authority: the
+first attempt died at iteration 262 when one saturated action overflowed the PPO
+ratio and advantage masking turned the resulting `inf` into `NaN`. See
+[ppo.md](ppo.md#LOG_PROB_FLOOR); the fix let the second attempt pass 13 KL spikes
+above `0.05`, peaking at `0.151`, without dying.
+
 **Re-measure if:** the authority set, detector calibration, residual scale, or
 push direction distribution changes.
 
 **History:**
+- 2026-08-28 — trained seed 42 for 856 iterations at `dcm_stability 0.5`; the
+  curves are flat and the run exposed the `LOG_PROB_FLOOR` defect.
 - 2026-08-27 — added after direction-resolved qualification separated sagittal
   improvement from lateral degradation in the same checkpoint.
 

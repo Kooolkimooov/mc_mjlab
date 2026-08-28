@@ -294,6 +294,15 @@ compared the `*_sha256` fields stored in the checkpoint. Those are derived
 values, so a stale or forged digest could mask a real difference or invent one.
 The payload now decides.
 
+**A field added after a checkpoint was written is not an interface change.**
+On 2026-08-28 the action term gained `controller_scalars`, and every checkpoint
+trained before it became unqualifiable: the saved manifest cannot contain a key
+that did not exist. `validate_effective_training_manifest` now drops keys the
+active contract *gained* before comparing, and names them. Removed keys and
+changed values still fail, and observation ordering, dimensions and effective
+parameters are compared separately, so an addition that really does move the
+actor interface still shows up there.
+
 **Re-measure if:** the manifest schema changes or a new field is added that
 should be enforced rather than recorded.
 

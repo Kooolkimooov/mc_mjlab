@@ -7,12 +7,13 @@ import math
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args, get_type_hints
 
 import torch
 
 # Sibling script, resolved by the interpreter's script directory at runtime.
 from qualify_checkpoints import (  # ty: ignore[unresolved-import]
+  AUTHORITY_SETS,
   Episode,
   _cluster_stats,
   _t_critical,
@@ -833,6 +834,22 @@ def verify_source_hash_is_audit_only() -> None:
   evaluator["record"]["num_workers"] = 8
   assert source_drift(saved, evaluator) == []
 
+  # A field added after the checkpoint was written is not an interface change.
+  grown = json.loads(json.dumps(saved))
+  grown["policy_interface"]["terms"]["a"]["new_field"] = []
+  grown["training_contract"]["terms"]["a"]["new_field"] = []
+  for full in (True, False):
+    validate_effective_training_manifest(saved, grown, full_resume=full)
+  # A field the active contract lost is still fatal.
+  shrunk = json.loads(json.dumps(saved))
+  del shrunk["policy_interface"]["terms"]["a"]["callable"]
+  try:
+    validate_effective_training_manifest(saved, shrunk, full_resume=False)
+  except RuntimeError:
+    pass
+  else:
+    raise AssertionError("a removed interface field was accepted")
+
   # A genuine interface change still raises.
   renamed = json.loads(json.dumps(saved))
   renamed["policy_interface"]["terms"]["a"]["callable"]["name"] = "m:other"
@@ -921,6 +938,10 @@ def verify_stratified_impulse() -> None:
     for side in ("left", "right")
     for joint in robot_cfg.get_leg_joints("HRP5P", side)[-1:]
   }
+  # The qualifier must be able to evaluate every set the env cfg can build.
+  hints = get_type_hints(residual_balance_position_env_cfg)
+  declared = get_args(hints["authority_set"])
+  assert set(declared) == set(AUTHORITY_SETS), (declared, AUTHORITY_SETS)
   assert pitch_joints, "the ankle-pitch authority set is empty"
   assert not pitch_joints & roll, sorted(pitch_joints & roll)
   ankle_joints = set(ankle.residual_actuator_names)  # ty: ignore[unresolved-attribute]

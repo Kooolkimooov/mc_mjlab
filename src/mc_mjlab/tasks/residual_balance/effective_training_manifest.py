@@ -468,6 +468,31 @@ def _differences(saved: Any, active: Any, prefix: str = "") -> list[str]:
   return [] if saved == active else [prefix or "<root>"]
 
 
+def _added_keys(saved: Any, active: Any, prefix: str = "") -> list[str]:
+  """Return paths the active contract gained, which a checkpoint could not record."""
+  if isinstance(saved, dict) and isinstance(active, dict):
+    paths = []
+    for key in sorted(active):
+      path = f"{prefix}.{key}" if prefix else key
+      if key not in saved:
+        paths.append(path)
+      else:
+        paths.extend(_added_keys(saved[key], active[key], path))
+    return paths
+  return []
+
+
+def _drop_paths(value: Any, paths: set[str], prefix: str = "") -> Any:
+  """Rebuild a contract without the named leaves."""
+  if not isinstance(value, dict):
+    return value
+  return {
+    key: _drop_paths(item, paths, f"{prefix}.{key}" if prefix else key)
+    for key, item in value.items()
+    if (f"{prefix}.{key}" if prefix else key) not in paths
+  }
+
+
 def validate_effective_training_manifest(
   saved: dict, active: dict, *, full_resume: bool
 ) -> None:
@@ -480,7 +505,21 @@ def validate_effective_training_manifest(
   # audit-only still carries them. docs/evaluation.md#source_drift
   saved_payload = _strip_source_hashes(saved.get(payload_key))
   active_payload = _strip_source_hashes(active.get(payload_key))
+  # A field added after a checkpoint was written cannot appear in its manifest,
+  # so an addition alone must not strand it. Removals and changed values still
+  # fail, and observation ordering and dimensions are compared separately.
+  # docs/evaluation.md#source_drift
+  added = set(_added_keys(saved_payload, active_payload))
+  if added:
+    saved_payload = _drop_paths(saved_payload, added)
+    active_payload = _drop_paths(active_payload, added)
   if _digest(saved_payload) == _digest(active_payload):
+    if added:
+      print(
+        f"[mc_mjlab] checkpoint predates {len(added)} contract "
+        f"{'field' if len(added) == 1 else 'fields'}: {', '.join(sorted(added)[:4])}",
+        flush=True,
+      )
     _warn_source_drift(saved, active)
     return
   paths = _differences(saved_payload, active_payload)[:12]

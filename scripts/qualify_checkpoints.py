@@ -40,6 +40,8 @@ from mc_mjlab.tasks.residual_balance.residual_balance_runner import (
 )
 
 SCENARIOS = ("nominal", "current_kick", "finite_impulse", "robust")
+#: Must stay in step with the env cfg's own authority-set choices.
+AUTHORITY_SETS = ("uniform", "ankle", "ankle_pitch", "sagittal", "hardware")
 DISTURBANCE_WARMUP_S = 10.0
 POLICY_STEP_S = 0.02
 
@@ -874,7 +876,7 @@ def main() -> None:
   parser.add_argument("--control", choices=("position", "torque"), default="position")
   parser.add_argument(
     "--authority-set",
-    choices=("uniform", "ankle", "sagittal", "hardware"),
+    choices=AUTHORITY_SETS,
     default=None,
   )
   parser.add_argument(
