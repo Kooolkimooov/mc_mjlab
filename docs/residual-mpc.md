@@ -208,3 +208,50 @@ changes.
 - 2026-08-28 — widened from `(0.0, 0.25)` after the prior's boundary was measured
   at about `0.30`; the old box sat entirely inside it, which is why the baseline
   scored `97.9-99.99%` of ceiling and left nothing to learn.
+
+## ismpc_walking
+
+**Current:** the prior's speed is capped by footstep geometry, not by the
+velocity reference, and only one of the three governing parameters is reachable
+from Python.
+
+**What caps it.** From the installed
+`LogisticController_ismpc.yaml`: `footsteps_planner.mean_speed: 0.1` (line 156),
+`FootManager.deltaTransLimit: [0.1 m, 0.08 m, 5 deg]` per step (line 225), and
+`ismpc.ts: 1.3` with `ts_range: [0.7, 2]`. Dividing the per-step translation
+limit by the step duration predicts `0.077 m/s` forward and `0.062 m/s` lateral;
+measured values are `0.085` and `0.071`. The reference is accepted in full —
+`get_ref_vel` reads back a commanded `0.600` unchanged — so nothing between the
+command and the planner is at fault.
+
+All three axes respond and all three are slow. Lateral is symmetric: `vy = -0.30`
+and `+0.30` give errors `0.230` and `0.227`, so about `+/-0.071 m/s`, against a
+`0.072` noise floor at `vy = 0`.
+
+**What is reachable at runtime.** `set_ts`, `set_tds`, `set_com_height`,
+`set_torso_pitch`, `set_ref_vel` and `set_disturbance` all marshal through the
+patched bindings. `set_ts` works and is clamped to the config's own range:
+`get_ts_target` starts at `1.2`, `set_ts(0.7)` takes effect, and `set_ts(0.4)`
+silently clamps back to `0.7`. That is a `1.71x` step-rate increase, predicting
+roughly `0.146 m/s`.
+
+**What is not.** `ismpc_walking::get_config` and `configure` carry
+`ControllerConfiguration&`, which the bindings refuse:
+`unsupported signature std::function<ControllerConfiguration& ()>`. So
+`mean_speed` and `deltaTransLimit` — the two parameters that would actually open
+the envelope — cannot be changed from Python. This repo's `etc/mc_rtc.yaml`
+holds only the global keys (`MainRobot`, `Timestep`, `Enabled`), so there is no
+repo-local override either; they live in the installed workspace file that
+CLAUDE.md already warns a rebuild reverts.
+
+**Consequence for the reproduction.** Without touching workspace configuration
+the prior tops out near `0.146 m/s`, so the command box should be about
+`(0.0, 0.30)` rather than the `(0.0, 0.60)` currently set, and the experiment is
+the architecture on a deliberately slow prior rather than the paper's regime.
+
+**Re-measure if:** the installed controller yaml, the binding's supported types,
+or `ts_range` changes.
+
+**History:**
+- 2026-08-28 — mapped the datastore surface after `set_ref_vel` was cleared of
+  suspicion; the cap is `deltaTransLimit / ts`, and only `ts` is reachable.
