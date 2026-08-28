@@ -208,6 +208,26 @@ def verify_blending() -> None:
   assert projected.tolist() == [[True, False]]
 
 
+def verify_tracking_reward_discriminates() -> None:
+  """Check the bare prior cannot already score the tracking reward's ceiling."""
+  import math
+
+  from mc_mjlab.tasks.residual_mpc.residual_mpc_env_cfg import (
+    COMMAND_RANGES,
+    LINEAR_TRACKING_SIGMA,
+  )
+
+  # Measured settled speed of the ISMPC prior. docs/residual-mpc.md#COMMAND_RANGES
+  prior_speed = 0.085
+  top = COMMAND_RANGES[0][1]
+  error = ((top - prior_speed) / (1.0 + abs(top))) ** 2
+  score = math.exp(-error / LINEAR_TRACKING_SIGMA)
+  assert 0.5 < score < 0.8, (
+    f"the prior scores {score:.3f} at the top of the command box; sigma "
+    f"{LINEAR_TRACKING_SIGMA} leaves it nothing to earn"
+  )
+
+
 def main() -> None:
   """Run every deterministic ResidualMPC contract."""
   verify_layout()
@@ -215,6 +235,7 @@ def main() -> None:
   verify_phases()
   verify_history()
   verify_blending()
+  verify_tracking_reward_discriminates()
   print("ResidualMPC deterministic contracts: PASS")
 
 

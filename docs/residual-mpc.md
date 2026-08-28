@@ -255,3 +255,46 @@ or `ts_range` changes.
 **History:**
 - 2026-08-28 — mapped the datastore surface after `set_ref_vel` was cleared of
   suspicion; the cap is `deltaTransLimit / ts`, and only `ts` is reachable.
+
+## LINEAR_TRACKING_SIGMA
+
+**Current:** `0.06`, down from `0.5`. Sized off the measured prior rather than
+picked, following [reward-shaping.md](reward-shaping.md#ZMP_TRACKING_STD).
+
+**At `0.5` the reward could not tell a policy from the bare controller.** The
+ISMPC walks at a settled `0.085 m/s` whatever it is told, and
+`exp(-((c - v)/(1 + |c|))^2 / sigma)` scored it:
+
+| commanded | 0.00 | 0.10 | 0.20 | 0.30 | 0.60 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| prior at `sigma = 0.5` | 0.986 | 1.000 | 0.982 | 0.947 | **0.813** |
+| prior at `sigma = 0.06` | 0.887 | 0.997 | 0.858 | **0.634** | 0.178 |
+
+Commanded at `0.6 m/s` while walking at `0.085`, the old term still paid `81%`
+of its maximum. That is why the first seed-42 run scored `97.9%` of the
+`linear_tracking` ceiling with no policy, and why widening the command box alone
+would not have helped: the box was never the binding constraint, the kernel
+width was.
+
+**The paper does not fix `sigma`**, so this is a free parameter being sized, not
+a fidelity break. Table I gives the functional form and the weight (`10.0`); the
+scale is ours to choose, and it has to be chosen against the controller we
+actually have.
+
+At `0.06` the prior scores `0.634` at the top of the box, leaving about a third
+of the term for a residual to earn — the same target
+`ZMP_TRACKING_STD` was sized to. `verify_tracking_reward_discriminates` asserts
+the prior's score stays inside `(0.5, 0.8)`, so a later change to either the box
+or the prior's speed cannot silently restore a reward nothing can win.
+
+**Only the linear term is retuned.** `angular_tracking` keeps `0.5` because `wz`
+is held at zero and the yaw envelope is unmeasured; `orientation` and `height`
+keep it because the prior already scores `29.99/30` and `29.97/30` on them,
+which is correct behaviour rather than a blunt kernel.
+
+**Re-measure if:** the prior's settled speed, the command box, or the controller
+changes — all three move where the kernel should sit.
+
+**History:**
+- 2026-08-28 — tightened from `0.5` after the bare prior was measured at `81-100%`
+  of the tracking ceiling across the whole command range.
