@@ -722,6 +722,45 @@ pair separates them.
 - 2026-08-31 — added so the speed cap would have been visible from the training
   curves alone.
 
+## sigma02-cmd015-040
+
+**Current:** the first run where the residual beats its prior on the objective.
+`model_999`, paired against its own zero-action arm at 16 environments, per step:
+
+| term | prior | policy | delta | p |
+| --- | ---: | ---: | ---: | ---: |
+| `linear_tracking` | 0.04497 | 0.05092 | **`+13.2%`** | **`2.6e-02`** |
+| `torque_l2` | -0.04088 | -0.04299 | `-5.1%` | `1.0e-02` |
+| `joint_regularization` | -0.00008 | -0.00008 | `-4.1%` | `1.7e-02` |
+| **TOTAL** | **0.07361** | **0.07745** | **`+5.2%`** | **`8.2e-02`** |
+
+**It spends torque to buy tracking**, which is the trade a residual is supposed
+to make and the mirror of `## kincstr06-cmd050`, where it spent tracking to save
+torque. Total is positive but not significant at `0.05`, so the defensible claim
+is "significantly better on the objective, directionally better overall" — one
+seed, one checkpoint.
+
+**This weakens the structural argument recorded elsewhere here.** That argument
+said a torque residual cannot reach tracking headroom because step length is set
+by the footstep planner upstream. It gained `13.2%` regardless, so the claim was
+too strong: executing a planned step better, and recovering from a kick faster,
+both improve tracking without changing the plan. What remains true is that the
+residual cannot make the planner take a *longer* step, so the envelope itself
+still ends where `## kinematics_cstr` puts it.
+
+**Deterministic speed is below the prior's** — `0.186-0.197 m/s` against `0.243`
+— while tracking reward is better. Both arms in the comparison start each episode
+with the FSM standing for several seconds and absorb the same kicks, so the
+per-step average is far below the settled envelope figures in
+`## COMMAND_RANGES`; the two are not comparable, and only the paired delta is.
+
+**Re-measure if:** the disturbance, `sigma`, or the command box changes — this
+run used the kick, `sigma = 0.02` and `(0.15, 0.40)` together.
+
+**History:**
+- 2026-08-31 — first measurable win for the residual, after the disturbance was
+  brought in line with the paper.
+
 ## mean_speed
 
 **Current:** the planner's cruise speed is now settable at runtime, but the task
