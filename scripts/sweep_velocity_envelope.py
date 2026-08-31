@@ -65,6 +65,8 @@ def evaluate(twist, arm: str, policy, args) -> list[Sample]:
   # Terminated envs must stay terminated: an in-place reset would silently score
   # a fresh episode against the same command.
   cfg.auto_reset = False
+  if args.in_process:
+    cfg.actions["mc_rtc_residual"].use_worker_processes = False
   env = ManagerBasedRlEnv(cfg, device=args.device)
   try:
     wrapped = RslRlVecEnvWrapper(env)
@@ -137,6 +139,7 @@ def main() -> None:
   p.add_argument("--settle-s", type=float, default=SETTLE_S)
   p.add_argument("--seed", type=int, default=42)
   p.add_argument("--no-pushes", action="store_true")
+  p.add_argument("--in-process", action="store_true")
   p.add_argument("--device", default="cuda:0")
   p.add_argument("--out-dir", type=Path, default=SWEEP_DIR)
   args = p.parse_args()

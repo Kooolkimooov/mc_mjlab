@@ -526,23 +526,32 @@ class ControllerHost:
       # Checked after `init` instead: a global plugin registers its entries
       # there, so a plugin-provided callback does not exist yet at configure.
       self._required_callbacks = callbacks
-      for getter in layout.output_scalars:
-        _read_scalar_output(datastore, getter)
-      for getter, setter in layout.datastore_vector_commands:
-        current = datastore.call(getter)
-        datastore.call(setter, current)
-      for getter, setter in layout.datastore_scalar_commands:
-        current = datastore.call(getter)
-        if isinstance(current, bool):
-          raise TypeError(f"datastore getter {getter!r} returned bool, expected scalar")
-        value = float(current)
-        if not math.isfinite(value):
-          raise ValueError(f"datastore getter {getter!r} returned {value}")
-        setter_type = datastore.type(setter)
-        if not setter_type.startswith("std::function<void (double"):
-          raise TypeError(
-            f"datastore setter {setter!r} has type {setter_type}, expected double"
-          )
+
+  def _validate_datastore_callbacks(self, datastore: Any, layout: IoLayout) -> None:
+    """Round-trip every configured callback, after `init` has registered them."""
+    # Deferred from `configure`: a global plugin registers its datastore entries
+    # during `init`, so calling one earlier raises KeyError -- which reaches the
+    # pool as an empty-looking payload. docs/residual-mpc.md#mean_speed
+    required = getattr(self, "_required_callbacks", ())
+    missing = [key for key in required if not datastore.has(key)]
+    if missing:
+      raise ValueError(f"controller datastore is missing callbacks {missing}")
+    for getter in layout.output_scalars:
+      _read_scalar_output(datastore, getter)
+    for getter, setter in layout.datastore_vector_commands:
+      datastore.call(setter, datastore.call(getter))
+    for getter, setter in layout.datastore_scalar_commands:
+      current = datastore.call(getter)
+      if isinstance(current, bool):
+        raise TypeError(f"datastore getter {getter!r} returned bool, expected scalar")
+      value = float(current)
+      if not math.isfinite(value):
+        raise ValueError(f"datastore getter {getter!r} returned {value}")
+      setter_type = datastore.type(setter)
+      if not setter_type.startswith("std::function<void (double"):
+        raise TypeError(
+          f"datastore setter {setter!r} has type {setter_type}, expected double"
+        )
 
   def _output_guard(
     self, env_id: int, hot: bool = False
@@ -611,12 +620,7 @@ class ControllerHost:
           )
 
         controller.running = True
-        required = getattr(self, "_required_callbacks", ())
-        if required:
-          store = controller.controller().datastore()
-          missing = [key for key in required if not store.has(key)]
-          if missing:
-            raise ValueError(f"controller datastore is missing callbacks {missing}")
+        self._validate_datastore_callbacks(controller.controller().datastore(), layout)
         # Whatever made the QP give up is gone with the new state.
         self._failed[local] = False
         self._command_baselines[local] = [None] * len(layout.datastore_vector_commands)

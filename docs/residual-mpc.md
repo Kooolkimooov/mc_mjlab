@@ -399,13 +399,30 @@ registered by a *global plugin* — which is registered during `init` — could 
 pass. The existence check now runs after `init`; the binding-capability check
 stays at configure, being ordering-independent.
 
-**Still blocked.** With the pair wired and held through
-`datastore_scalar_holds`, the pool fails during `configure` with an empty
-payload, past the missing-callback stage. Unresolved, so the task keeps the
-installed `0.1 m/s` and the constants sit unused. Whether raising the cruise
-speed actually lifts the measured `0.085 m/s` is therefore still unmeasured —
-`set_ref_vel` accepted values perfectly while changing nothing, so registration
-is not evidence.
+**Raising it changes nothing measurable.** Held at `0.3` through
+`datastore_scalar_holds` and swept in-process, the envelope is identical to the
+installed `0.1` to three decimals:
+
+| commanded `vx` | 0.00 | 0.20 | 0.40 | 0.60 |
+| --- | ---: | ---: | ---: | ---: |
+| `mean_speed = 0.1` | 0.071 | 0.136 | 0.319 | 0.515 |
+| `mean_speed = 0.3` | 0.075 | 0.138 | 0.320 | 0.516 |
+
+So `mean_speed` is not the cap, exactly as `set_ref_vel` was not. **One
+alternative is not excluded**: the hold is confirmed set on the action term's
+buffer, and the setter round-trips standalone, but the value was never read back
+*from inside a running simulation*. Adding `footsteps_planner::get_mean_speed`
+to `controller_scalars` would separate "the knob does nothing" from "the knob
+never arrived", and that check has not been done.
+
+Measured speed of `0.085 m/s` at `ts` near `1.25 s` implies a step of about
+`0.106 m`, which matches `FootManager.deltaTransLimit[0] = 0.1` closely enough to
+be the next suspect, with `kinematics_cstr` behind it.
+
+**The worker path is still broken.** In-process
+(`use_worker_processes=False`) builds and runs; with worker processes the pool
+still fails during `configure` with an empty payload. Training uses workers, so
+the task keeps the installed default and the constants stay unwired.
 
 **Re-measure if:** the plugin is rebuilt from clean, or the configure failure is
 resolved.
