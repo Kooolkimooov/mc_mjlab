@@ -474,13 +474,40 @@ is given to `0.3%`, so `beta_stab`, `zmp_cstr_square` and `next_stp_cstr_ratio`
 were never candidates — the step was already short before the controller saw it.
 
 **Neither yaml is in force**, so editing them does nothing; see the provenance
-note under `## set_ts`. The runtime setter is the working knob, and like every
-other workspace entry here a clean rebuild drops it.
+note under `## set_ts`. The runtime setter is the working knob; it is a source
+edit, so a rebuild keeps it and only a `git restore` removes it.
 
-**Raising it is not yet validated as safe.** `0.2714 m/s` was held for 15 s in
-two environments with pushes off and no termination. Nothing has been measured
-about falls, the ZMP margin, or whether the stabilizer keeps up at a step length
-six times the tuned one, and `zmp_cstr_square` is still sized for HRP4.
+**Swept for stability; `0.6` is the setting to use.** Four environments, pushes
+off, `25 s` scored after a `15 s` settle at each value, `vx = 0.6` commanded:
+
+| `d_h_x` | planned step | `vx` | `z` mean | `z` min | terminations |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 0.20 | 0.1000 | 0.0907 | 0.7660 | 0.7571 | 0 |
+| 0.40 | 0.2000 | 0.1802 | 0.7660 | 0.7545 | 0 |
+| **0.60** | **0.3000** | **0.2690** | 0.7660 | 0.7508 | 0 |
+| 0.80 | 0.4000 | 0.2720 | 0.7661 | 0.7499 | 0 |
+| 1.00 | 0.5000 | 0.2715 | 0.7661 | 0.7508 | 0 |
+| 1.20 | 0.6000 | 0.2712 | 0.7661 | 0.7505 | 0 |
+
+No terminations anywhere and root height is flat to `0.01%`, so nothing here
+destabilises the gait. Speed is linear in `d_h_x` up to `0.6` and then flat:
+`0.6` captures `0.269` of the `0.272` available, so a larger box only makes the
+planner request steps the controller will not execute — `0.6 m` planned against
+`0.35 m` realised at `1.2`.
+
+**A second cap sits at `0.272 m/s`**, ISMPC-side and untested, most likely
+`foosteps_kin_cstr: [0.6, 0.25]` — a `0.6 m` full width is `+-0.3 m` per step,
+about `0.23 m/s` at this cadence. `optimal_step_dx` should read near `0.3` while
+the plan reads `0.5`, which would confirm it.
+
+**This is a screen, not a safety case.** Pushes were off, `zmp_cstr_square` is
+still sized for HRP4, and `25 s` across four environments is a thin sample for
+termination counts; the flat `z_min` is the stronger evidence.
+
+**Training cannot use this yet.** The setter reaches in-process controllers only,
+and the worker-process `configure` path is still broken, so a training run gets
+the unmodified prior. Making the planner actually read its configuration would
+remove the need for the runtime setter entirely.
 
 **Re-measure if:** the plugin is rebuilt from clean, or the planner starts
 reading its configuration.
@@ -517,9 +544,12 @@ public and already read at `plugin.cpp:95` for a GUI input. Assigning it
 directly rather than rebuilding the planner avoids discarding the live plan.
 
 Verified against a running controller: the keys register after `init`, and
-`get` / `set 0.30` / `get` reads `0.1 -> 0.3`. **A clean workspace rebuild drops
-this**, and nothing else in this repository would explain the task getting
-slower afterwards.
+`get` / `set 0.30` / `get` reads `0.1 -> 0.3`. The edit lives in the workspace
+*source* tree, so a rebuild preserves it and `ninja install` reapplies it; a
+`git restore` in `FootSteps_Planner` is what drops it. Edits to files under
+`install/` are the opposite — `ninja install` overwrites them, as it did to this
+plugin's yaml. Nothing in this repository would explain the task getting slower
+after either.
 
 **One host bug this exposed and fixed.** `ControllerHost.configure` validated
 every configured datastore callback before `controller.init`, so any entry
