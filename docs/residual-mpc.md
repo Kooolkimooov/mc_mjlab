@@ -754,6 +754,25 @@ with the FSM standing for several seconds and absorb the same kicks, so the
 per-step average is far below the settled envelope figures in
 `## COMMAND_RANGES`; the two are not comparable, and only the paired delta is.
 
+**The gain is the disturbance's, not the reward tuning's.** `paperkick-cmd050`,
+trained before either reward change, scored on the *same* current objective:
+
+| per step | prior | `paperkick` | `sigma02` |
+| --- | ---: | ---: | ---: |
+| `linear_tracking` | ~0.0455 | 0.04947 `+7.9%` (p `0.17`) | **0.05092 `+13.2%`** (p `0.026`) |
+| `torque_l2` | ~-0.0416 | -0.04220 `-0.4%` (p `0.73`) | -0.04299 `-5.1%` (p `0.010`) |
+| **TOTAL** | ~0.0732 | **0.07668 `+5.3%`** (p `0.11`) | **0.07745 `+5.2%`** (p `0.08`) |
+
+The two totals are indistinguishable, so `sigma = 0.02` and the `(0.15, 0.40)`
+floor — both chosen against the freeze artifact — did not improve the result.
+What they changed is the *composition*: `sigma02` tracks better on an identical
+yardstick (`0.05092` against `0.04947`, a real difference rather than a
+sensitivity artifact, since both were measured under the same config) and pays
+more torque for it. A better trade, not a better outcome.
+
+Neither total is significant at `0.05`. The one significant result on the
+objective is `sigma02`'s tracking gain.
+
 **Re-measure if:** the disturbance, `sigma`, or the command box changes — this
 run used the kick, `sigma = 0.02` and `(0.15, 0.40)` together.
 
