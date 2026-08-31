@@ -326,11 +326,34 @@ oscillated near zero — briefly negative at `-0.004` — for the rest of the ru
 Reward and episode length both looked healthy throughout, which is exactly why
 `## forward_speed` exists.
 
+**It did not work, and it failed against its own prediction.** `sigma02-cmd015-040`
+froze exactly as its predecessor did: `forward_speed` reached `0.094` by iteration
+`136`, collapsed to `0.001` by `229`, and averaged `0.0239` over the last `200`
+iterations against the prior's `0.243`. Its maximum, `0.186`, was at iteration
+`17` — the near-untrained policy was the fastest the run ever got — and only
+`7.5%` of iterations exceeded `0.10 m/s`.
+
+The tie point was `2.23` falls per episode while the observed rate was about
+`0.6` (episode length `1859` of `3000`), so the rebalanced reward favoured
+walking by roughly `474` to `252` and the policy froze anyway. **The reward
+balance is therefore not what holds the freeze in place**, and the arithmetic
+above, while correct, is not the explanation.
+
+**What the evidence points to instead.** Freezing is a low-variance local optimum
+that is easy to find, while walking through an `8 s` kick is not. The policy must
+*actively* suppress the gait to stand still — a zero residual walks at `0.243` —
+and it pays `torque_l2` to do so, which reads as escaping instability rather than
+chasing reward. Early episodes also end well before the kick, so the only lesson
+available is that whatever precedes it is bad. A disturbance curriculum, as
+`tasks/residual_balance` already uses via `stratified_finite_impulse_curriculum`,
+is the untested lever.
+
 **Re-measure if:** the termination weight, episode length, or the prior's fall
 rate under the kick changes — all three set where the tie point falls.
 
 **History:**
-- 2026-08-31 — `0.06 -> 0.02` and the box floored at `0.15` after a run froze.
+- 2026-08-31 — `0.06 -> 0.02` and the box floored at `0.15` after a run froze;
+  the next run froze too, refuting the incentive explanation.
 - 2026-08-29 — `0.5 -> 0.06`, when the prior scored `97.9%` of the ceiling.
 
 ## linear_tracking
