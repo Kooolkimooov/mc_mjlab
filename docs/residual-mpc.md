@@ -299,7 +299,7 @@ changes — all three move where the kernel should sit.
 - 2026-08-28 — tightened from `0.5` after the bare prior was measured at `81-100%`
   of the tracking ceiling across the whole command range.
 
-## mean_speed
+## linear_tracking
 
 **Current:** with the objective calibrated so the prior leaves a fifth of the
 tracking term unearned, the residual still captures none of it and costs torque.
@@ -401,7 +401,8 @@ stays at configure, being ordering-independent.
 
 **Raising it changes nothing measurable.** Held at `0.3` through
 `datastore_scalar_holds` and swept in-process, the envelope is identical to the
-installed `0.1` to three decimals:
+installed `0.1` to three decimals. Cells are mean tracking *error* in `m/s`, not
+achieved speed: a `0.60` command reading `0.515` achieved `0.085`.
 
 | commanded `vx` | 0.00 | 0.20 | 0.40 | 0.60 |
 | --- | ---: | ---: | ---: | ---: |
@@ -452,7 +453,8 @@ step generation is correct, so the limit is inside the planner or the ISMPC QP.
 what the planner receives rather than what was asked for.
 
 **`next_stp_cstr_ratio` is not the cap either.** Set explicitly to `1.0`, a
-tenfold relaxation of the installed `0.1`, the envelope is unchanged:
+tenfold relaxation of the installed `0.1`, the envelope is unchanged (tracking
+error in `m/s`, as above):
 
 | commanded `vx` | 0.20 | 0.40 |
 | --- | ---: | ---: |
@@ -476,8 +478,7 @@ multiplies the next step's ZMP constraint box by it, so `zmp_cstr_square:
 [0.14, 0.08]` becomes roughly `1.4 cm x 0.8 cm`. A centre-of-pressure pinned that
 close to the foot centre caps the achievable acceleration, and therefore the
 gait speed, no matter what velocity is commanded — which is the observed
-behaviour. Unverified: raising it is a one-line yaml change and the next thing to
-try.
+behaviour. Tested and refuted at an explicit `1.0`; see above.
 
 **Superseded suspect:** `StepRecoveryState`. `UpdatePlanner_input` zeroes
 `step_velocity` outright while it is set (`Walking_controller.cpp:431`), and it
