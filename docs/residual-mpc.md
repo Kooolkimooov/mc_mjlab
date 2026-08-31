@@ -540,6 +540,46 @@ reading its configuration.
   `StepRecoveryState`, `zmp_cstr_square` and footstep-QP failure were each
   refuted; two earlier config experiments were inert because the yaml is unread.
 
+## kincstr06-cmd050
+
+**Current:** with the objective finally calibrated so the prior leaves real
+headroom, the residual still does not beat it — and the reason is now visible
+rather than inferred. 1000 iterations, seed 42, `model_999`, paired against its
+own zero-action arm at 16 environments, per step so episode length divides out:
+
+| term | prior | policy | delta | p |
+| --- | ---: | ---: | ---: | ---: |
+| `linear_tracking` | 0.07756 | 0.07425 | `-4.3%` | `2.2e-02` |
+| `torque_l2` | -0.04401 | -0.04154 | `+5.6%` | `1.4e-03` |
+| **TOTAL** | **0.10342** | **0.10253** | **`-0.9%`** | **`0.50`** |
+
+**The calibration worked.** `linear_tracking` has a per-step ceiling of `0.1`
+(weight `10` times `step_dt`), so the prior sits at `77.6%` of it against the
+`97.9%` it scored before `kinematics_cstr` and `COMMAND_RANGES` moved. Headroom
+is `22.4%`, not `2.1%`, and the measurement resolves effects far smaller than
+that — both individual terms come back significant.
+
+**The residual optimised what it can reach.** Tracking got significantly *worse*
+and torque significantly *better*, netting a wash. That is the structural
+limitation as data: a torque residual cannot lengthen a footstep plan, so the
+tracking headroom stays out of reach, while torque economy is directly in its
+control. The training curves agree — `Metrics/twist/error_vel_xy` ends at
+`0.459` against `0.104` for the zero-initialised policy, and smoothed
+reward-per-step peaks at iteration `0`.
+
+**Episode length is not the story.** It grew `117 -> ~1900` and oscillated in a
+`1700-1980` band from iteration `178` on, while reward-per-step stayed flat
+within `+-2%` for `370` iterations. Two separate reads of "the peak" from that
+curve were both wrong, once in each direction; the length-independent measure
+was flat the whole time.
+
+**Re-measure if:** the prior becomes torque-emitting, or `foosteps_kin_cstr`
+opens the way `kinematics_cstr` did.
+
+**History:**
+- 2026-08-31 — first run on the recalibrated task; headroom is real and the
+  residual captures none of it, trading tracking for torque.
+
 ## mean_speed
 
 **Current:** the planner's cruise speed is now settable at runtime, but the task
