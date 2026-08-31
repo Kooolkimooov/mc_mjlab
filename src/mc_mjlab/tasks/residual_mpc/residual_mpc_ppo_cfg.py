@@ -30,7 +30,9 @@ def residual_mpc_ppo_cfg(
       value_loss_coef=1.0,
       use_clipped_value_loss=True,
       clip_param=0.2,
-      entropy_coef=0.1,
+      # At 0.1 the entropy term outweighed the surrogate 8.5x and pinned std to
+      # its ceiling for a whole run. docs/residual-mpc.md#entropy_coef
+      entropy_coef=0.01,
       num_learning_epochs=5,
       num_mini_batches=4,
       learning_rate=1.0e-5,

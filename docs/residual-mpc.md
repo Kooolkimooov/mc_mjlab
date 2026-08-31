@@ -780,6 +780,52 @@ run used the kick, `sigma = 0.02` and `(0.15, 0.40)` together.
 - 2026-08-31 — first measurable win for the residual, after the disturbance was
   brought in line with the paper.
 
+## entropy_coef
+
+**Current:** `0.01`. At the previous `0.1` the entropy bonus was the dominant
+term in the loss, and the policy optimised noise rather than reward.
+
+**Measured on `sigma02-cmd015-040`:**
+
+| term | value at iteration 999 | coefficient | contribution |
+| --- | ---: | ---: | ---: |
+| entropy | `1.44` | `0.1` | **`0.144`** |
+| surrogate | `-0.0169` | `1.0` | `0.017` |
+
+The entropy term outweighed the surrogate objective by `8.5x`. `Policy/mean_std`
+rose from its `0.1` initialisation to the `0.30` ceiling of `std_range` by
+iteration `100` and stayed there for the remaining `900`, which is what a
+dominant entropy bonus buys: maximum permitted noise, permanently.
+
+**This is what made the training curves unreadable.** `Metrics/twist/error_vel_xy`
+jumps `0.264 -> 0.613` exactly as std reaches `0.30`, and
+`Episode_Metrics/forward_speed` collapses at the same point, while the
+deterministic policy walks at `0.19 m/s`. Two runs were misread as frozen on
+those curves; see `## forward_speed`.
+
+**`0.01` is the value the paper inherits.** ResidualMPC states it uses "the same
+PPO hyperparameters from [52]" — Jeon et al. 2023, *Benchmarking potential based
+rewards for learning humanoid locomotion* — which uses the stock rsl_rl settings,
+where `entropy_coef` is `0.01`. The `0.1` here was a local deviation, not a
+paper-faithful choice.
+
+**Not the authority limit.** `projection_fraction` averages `0.001` across the
+run and `maximum_effort_ratio` about `0.52`, so the residual's blended torque is
+essentially never clipped and it sits at half its effort limit. Raising
+`ACTION_SCALE_BLEND_FACTOR` or lambda would change nothing; the policy is not
+asking for more than it is allowed.
+
+**Learning rate is not implicated.** The adaptive schedule held it between
+`1.0e-05` and `2.25e-05` all run, so KL is near target and the schedule is
+working as intended.
+
+**Re-measure if:** `std_range`, the reward scale, or the action space changes —
+all three move where the entropy term sits relative to the surrogate.
+
+**History:**
+- 2026-08-31 — `0.1 -> 0.01` after the entropy term was found to outweigh the
+  surrogate by `8.5x`; changed alone, so the effect is attributable.
+
 ## mean_speed
 
 **Current:** the planner's cruise speed is now settable at runtime, but the task
