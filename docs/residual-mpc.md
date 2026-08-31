@@ -819,6 +819,52 @@ asking for more than it is allowed.
 `1.0e-05` and `2.25e-05` all run, so KL is near target and the schedule is
 working as intended.
 
+**It halved the problem rather than removing it.** At `0.01` the std still climbs
+to the same `0.30` ceiling, just more slowly — `0.100` at init, `0.148` by
+iteration `100`, `0.231` by `304`, saturated by roughly `500`. Any positive
+entropy bonus pushes std up until it hits the bound. Everything degrades with it,
+monotonically:
+
+| iteration | 100 | **150** | 200 | 250 | 999 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `Policy/mean_std` | 0.148 | 0.169 | 0.192 | 0.207 | 0.300 |
+| smoothed reward/step | 0.0732 | **0.0746** | 0.0704 | 0.0645 | 0.0529 |
+
+Reward per step peaks at iteration `140` and falls `29%` by the end of the run.
+The next lever is therefore `std_range`'s ceiling — a bound cannot creep the way
+a pressure does — and `0.15` is where this run measurably performed best. That
+bound is ours, not the paper's: the reference uses an unbounded Gaussian with
+`init_noise_std = 1.0`.
+
+**Measured result, `model_150` against its own zero-action arm:**
+
+| term | prior | policy | delta | p |
+| --- | ---: | ---: | ---: | ---: |
+| `linear_tracking` | 0.04401 | 0.05165 | **`+17.3%`** | **`6.7e-03`** |
+| `termination` | -0.00035 | -0.00019 | `-44.0%` | `5.9e-02` |
+| `torque_l2` | -0.04011 | -0.04221 | `-5.2%` | `1.1e-02` |
+| **TOTAL** | **0.07331** | **0.07902** | **`+7.8%`** | **`1.9e-02`** |
+
+Against every earlier run on the same yardstick:
+
+| run | tracking | p | total | p |
+| --- | ---: | ---: | ---: | ---: |
+| `kincstr06-cmd050` | `-4.3%` | `0.022` | `-0.9%` | `0.50` |
+| `paperkick-cmd050` | `+7.9%` | `0.17` | `+5.3%` | `0.11` |
+| `sigma02-cmd015-040` | `+13.2%` | `0.026` | `+5.2%` | `0.082` |
+| **`ent001` `model_150`** | **`+17.3%`** | **`0.0067`** | **`+7.8%`** | **`0.0185`** |
+
+The first significant total, and the `-44%` termination delta is the
+kick-recovery gain that `## INITIAL_VELOCITY_RANGE` predicted would be the only
+headroom a torque residual could reach.
+
+**Two limits on that claim.** `linear_tracking` at `p = 0.0067` does not clear a
+Bonferroni threshold of `0.005` across ten terms, though TOTAL is a single
+primary endpoint and is not subject to that correction. And this is `model_150`
+where every other row is `model_999`, so part of the gain may be the checkpoint
+rather than the coefficient; capping `std_range` and comparing a final checkpoint
+would separate them.
+
 **Re-measure if:** `std_range`, the reward scale, or the action space changes —
 all three move where the entropy term sits relative to the surrogate.
 
