@@ -408,12 +408,40 @@ installed `0.1` to three decimals:
 | `mean_speed = 0.1` | 0.071 | 0.136 | 0.319 | 0.515 |
 | `mean_speed = 0.3` | 0.075 | 0.138 | 0.320 | 0.516 |
 
-So `mean_speed` is not the cap, exactly as `set_ref_vel` was not. **One
-alternative is not excluded**: the hold is confirmed set on the action term's
-buffer, and the setter round-trips standalone, but the value was never read back
-*from inside a running simulation*. Adding `footsteps_planner::get_mean_speed`
-to `controller_scalars` would separate "the knob does nothing" from "the knob
-never arrived", and that check has not been done.
+**The knob arrives and is ignored.** Read back through `controller_scalars`
+from inside a running simulation while commanding `0.6 m/s`:
+
+```
+t= 5.0s  live mean_speed=0.3000  baseline=0.1000  measured vx=+0.0252
+t=10.0s  live mean_speed=0.3000  baseline=0.1000  measured vx=+0.1279
+t=15.0s  live mean_speed=0.3000  baseline=0.1000  measured vx=+0.0612
+```
+
+The offset reaches the controllers, the baseline is captured correctly, and the
+speed does not change. So the earlier ambiguity is closed in the unhelpful
+direction: it is not that the value failed to arrive.
+
+**`mean_speed` is dead code in this planner.** `v_` appears in
+`FootSteps_Planner` only at `planner_config.cpp:44` (loaded from config),
+`plugin.cpp:109` (shown in a GUI form) and in the two entries added here. It is
+never read in `footsteps_planner.cpp`, so nothing in step generation consults
+it. The knob works and drives nothing.
+
+**Where the limit is not.** `set_ref_vel` also sets `velocityControl = true`
+(`Walking_controller.h:400`), so velocity mode is active and
+`UpdatePlanner_input` pushes `reference_velocity` unscaled across the whole
+preview horizon. `kinematics_cstr: [0.6, 0.08]` gives `d_h_x = 0.6 m`, which over
+a `~1.3 s` step would permit `0.46 m/s`. Neither the mode, the reference, nor the
+kinematic rectangle explains a `0.106 m` step.
+
+**The open suspect** is `StepRecoveryState`. `UpdatePlanner_input` zeroes
+`step_velocity` outright while it is set (`Walking_controller.cpp:431`), and it
+latches to `true` at line 565 on the recovery path that also clears `Stop`. A
+controller stuck in that state would plan for zero velocity regardless of the
+command, which matches a constant slow gait that ignores every input. It is not
+exposed as a scalar getter, and the neighbouring `robot_walking`, `stop_phase`
+and `double_support` getters return `bool`, which `_read_scalar_output` rejects
+by design — so confirming it needs either a new getter or widening that reader.
 
 Measured speed of `0.085 m/s` at `ts` near `1.25 s` implies a step of about
 `0.106 m`, which matches `FootManager.deltaTransLimit[0] = 0.1` closely enough to
