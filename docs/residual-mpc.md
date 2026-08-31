@@ -171,8 +171,23 @@ the kind of limit the paper's residual is supposed to extend.
 
 ## COMMAND_RANGES
 
-**Current:** `vx` in `(0.0, 0.60)`, `vy` and `wz` held at zero. Chosen to straddle
-the prior's measured boundary rather than sit inside it.
+**Current:** `vx` in `(0.0, 0.30)`, `vy` and `wz` held at zero. Chosen to straddle
+the prior's measured boundary rather than sit inside it. An earlier revision of
+this line said `(0.0, 0.60)`; the constant has read `(0.0, 0.30)` throughout.
+
+**Most of the box earns a flat zero, which is not the same as unearned.** The
+prior tops out near `0.085 m/s` and `LINEAR_TRACKING_SIGMA` is `0.06`, so the
+tracking term against a prior-speed rollout is:
+
+| commanded `vx` | 0.10 | 0.15 | 0.20 | 0.25 | 0.30 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `exp(-(err/sigma)^2)` | 0.94 | 0.31 | 0.025 | `5.2e-4` | `2.7e-6` |
+
+Above about `0.20` the term is numerically dead: the policy cannot tell `0.25`
+from `0.30`, so there is no gradient toward closing the gap, only a flat region.
+Headroom the optimiser cannot feel is not headroom. The usable learning band is
+roughly `vx <= 0.18`, which argues for widening `sigma` or capping the box near
+`0.18` rather than leaving two thirds of it flat.
 
 **Measured envelope of the ISMPC prior**, eight environments per command, 40 s
 episodes with the first 20 s discarded, no policy:
@@ -361,6 +376,66 @@ move.
 **History:**
 - 2026-08-29 — recalibrated objective, 300-iteration seed, paired comparison;
   the residual is significantly worse than the prior it is meant to improve.
+
+## set_ts
+
+**Current:** the ISMPC's speed ceiling is a ceiling on **step length**, not on
+velocity. Step length is invariant at `~0.109 m` while speed scales as `1 / ts`.
+Commanding `vx = 0.6 m/s` and varying step duration through
+`ismpc_walking::set_ts`, in-process, pushes off, 35 s per point settled over the
+last 17 s:
+
+| `ts` | 1.30 s | 1.00 s | 0.80 s |
+| --- | ---: | ---: | ---: |
+| mean `vx` (`m/s`) | 0.0848 | 0.1087 | 0.1370 |
+| implied step length (`m`) | 0.1102 | 0.1087 | 0.1096 |
+
+Step length holds to `1.4%` across a `1.6x` change in cadence, and speed tracks
+`0.109 / ts` to within `1%`. This also proves `set_ts` is honoured, which no
+getter could confirm: `ismpc_walking` exposes `get_tds` but no `get_ts`.
+
+**The command reaches the solver, which is on a constraint.** Sweeping commanded
+`vx` with `ts` at its installed `1.3`, `qp_objective` rises monotonically while
+the command is tracked and then pins at the same point speed does:
+
+| commanded `vx` | 0.03 | 0.05 | 0.08 | 0.10 | 0.12 | 0.30 | 0.60 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| achieved `vx` | 0.0333 | 0.0551 | 0.0875 | 0.0911 | 0.0918 | 0.0912 | 0.0916 |
+| `qp_objective` | -260 | -672 | -1660 | -1800 | -1800 | -1800 | -1803 |
+
+Tracking is faithful to `0.08 m/s`; above it both quantities are flat to `0.2%`
+across a sixfold command increase. A solver merely under-asked would show a flat
+cost throughout, so the plan handed to the QP stops changing above `~0.09 m/s`.
+
+**`zmp_cstr_square` is not the cap.** The installed `[0.14,0.08]` carries a
+`# hrp4` comment while this runs HRP5P, whose feet are larger, so a mis-sized
+centre-of-pressure box was the leading candidate. Doubled to `[0.28,0.12]` with
+`zmp_cstr_square_sg_supp` `[0.14,0.05] -> [0.28,0.10]`, commanding `0.6`:
+`vx = 0.0916` against a baseline `0.0916`, `qp_objective -1799.8` against
+`-1803.0`. The installed file has been restored and verified byte-identical.
+
+**What is left.** Every named candidate is now refuted: `mean_speed` (dead code),
+`next_stp_cstr_ratio`, `StepRecoveryState`, the FSM overwriting the command
+(`WalkCmdVel::run` never touches velocity; only `start` and a GUI button do), and
+`zmp_cstr_square`. `kinematics_cstr` permits `0.3-0.6 m`, so the kinematic
+rectangle does not bind at `0.109 m` either. The remaining explanation is the
+footstep planner's own QP choosing a short step against a reference that
+`IntegrateVelProfile` places `~0.78 m` ahead. Confirming that needs the planner's
+*output* step, which no datastore entry exposes as a marshallable type — a
+`double` getter for the first planned step's x-displacement, and a plugin
+rebuild.
+
+**Read the installed config, not the plugin's.** `LogisticController_ismpc.yaml`
+carries its own `footsteps_planner` block (`kinematics_cstr: [0.6,0.08]`,
+`delta: 0.1`, `Tp: 10`) which disagrees with
+`mc_plugins/etc/footsteps_planner_plugin.yaml` (`[0.3,0.05]`, `0.05`, `6`) on
+every value.
+
+**Re-measure if:** `ts`, `kinematics_cstr` or the planner's QP weights change.
+
+**History:**
+- 2026-08-31 — cap identified as a fixed `0.109 m` step; `zmp_cstr_square`
+  refuted; `set_ts` confirmed as the only working speed lever.
 
 ## mean_speed
 
