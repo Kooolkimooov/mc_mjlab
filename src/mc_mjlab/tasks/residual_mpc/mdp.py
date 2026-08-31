@@ -12,6 +12,7 @@ from mc_mjlab.actions.residual_mpc_joint_torque_action import (
   ResidualMpcJointTorqueAction,
 )
 from mc_mjlab.residual_mpc import contact_phases
+from mc_mjlab.tasks import mdp as shared_mdp
 
 if TYPE_CHECKING:
   from mjlab.entity import Entity
@@ -242,6 +243,42 @@ def refresh_action_scaling(
 def projection_fraction(env: ManagerBasedRlEnv) -> torch.Tensor:
   """Fraction of leg actions whose blended torque was projected."""
   return _action(env).projection_mask.float().mean(dim=1)
+
+
+class initial_velocity_kick(shared_mdp.push_and_record):
+  """One base-velocity kick per episode, withheld until the FSM is walking."""
+
+  def __call__(  # type: ignore[override]
+    self,
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor | None,
+    velocity_range: dict[str, tuple[float, float]],
+    warmup_s: float = 0.0,
+    asset_cfg: SceneEntityCfg | None = None,
+  ) -> None:
+    ids = torch.arange(env.num_envs, device=env.device) if env_ids is None else env_ids
+    age = env.episode_length_buf[ids]
+    # `last_push_step` is global while `age` is per-episode, so this is "the last
+    # kick happened inside the current episode" rather than "ever".
+    kicked = (env.common_step_counter - self.last_push_step[ids]) < age
+    ids = ids[(age * env.step_dt >= warmup_s) & ~kicked]
+    if ids.numel() == 0:
+      return
+    super().__call__(env, ids, velocity_range, asset_cfg=asset_cfg)
+
+
+def forward_speed(
+  env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg = _ROBOT_CFG
+) -> torch.Tensor:
+  """Base forward speed, so the gait is readable without inferring it from error."""
+  return _asset(env, asset_cfg).data.root_link_lin_vel_b[:, 0]
+
+
+def commanded_speed(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
+  """Commanded forward speed; the companion forward_speed is read against it."""
+  command = env.command_manager.get_command(command_name)
+  assert command is not None
+  return command[:, 0]
 
 
 def maximum_effort_ratio(env: ManagerBasedRlEnv) -> torch.Tensor:

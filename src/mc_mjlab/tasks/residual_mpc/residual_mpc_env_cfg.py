@@ -45,6 +45,16 @@ COMMAND_NAME = "twist"
 #: cannot track, so this must straddle its failure boundary, not sit inside it.
 #: docs/residual-mpc.md#COMMAND_RANGES
 COMMAND_RANGES = ((0.0, 0.50), (0.0, 0.0), (0.0, 0.0))
+
+#: Paper-faithful reset disturbance, per axis. docs/residual-mpc.md#INITIAL_VELOCITY_RANGE
+INITIAL_VELOCITY_RANGE = {
+  "x": (-0.5, 0.5),
+  "y": (-0.5, 0.5),
+  "yaw": (-0.5, 0.5),
+}
+
+#: The FSM is not walking before this. docs/residual-mpc.md#KICK_WARMUP_S
+KICK_WARMUP_S = 8.0
 #: Sized so the bare ISMPC scores about two thirds at the top of the box,
 #: leaving a third for the residual. The paper does not fix sigma.
 #: docs/residual-mpc.md#LINEAR_TRACKING_SIGMA
@@ -266,19 +276,19 @@ def residual_mpc_env_cfg(
         func=mdp.refresh_action_scaling, mode="startup"
       ),
     }
-  events["push_robot"] = EventTermCfg(
-    func=shared_mdp.finite_impulse_curriculum,
-    mode="step",
-    params={
-      "enabled": pushes,
-      "interval_range_s": (5.0, 7.0),
-      "warmup_s": 10.0,
-      "duration_range_s": (0.08, 0.20),
-      "height_range_m": (0.0, 0.25),
-      "stages": ((0, (0.10, 0.25)),),
-      "asset_cfg": SceneEntityCfg("robot"),
-    },
-  )
+  if pushes:
+    # ResidualMPC Fig. 4 disturbs the base once and scores survival after, rather
+    # than pushing repeatedly. Held to KICK_WARMUP_S because the FSM stands for
+    # the first seconds of an episode. docs/residual-mpc.md#INITIAL_VELOCITY_RANGE
+    events["initial_base_velocity"] = EventTermCfg(
+      func=mdp.initial_velocity_kick,
+      mode="step",
+      params={
+        "velocity_range": INITIAL_VELOCITY_RANGE,
+        "warmup_s": KICK_WARMUP_S,
+        "asset_cfg": SceneEntityCfg("robot"),
+      },
+    )
 
   self_collision_sensor = ContactSensorCfg(
     name=SELF_COLLISION_SENSOR,
@@ -301,6 +311,12 @@ def residual_mpc_env_cfg(
     "projection_fraction": MetricsTermCfg(func=mdp.projection_fraction),
     "maximum_effort_ratio": MetricsTermCfg(
       func=mdp.maximum_effort_ratio, reduce="max", per_substep=True
+    ),
+    # Read as a pair: error_vel_xy alone cannot say whether a gait is slow or
+    # merely mistracking. docs/residual-mpc.md#forward_speed
+    "forward_speed": MetricsTermCfg(func=mdp.forward_speed),
+    "commanded_speed": MetricsTermCfg(
+      func=mdp.commanded_speed, params={"command_name": COMMAND_NAME}
     ),
   }
 

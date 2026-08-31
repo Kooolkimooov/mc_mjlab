@@ -11,6 +11,8 @@ kinematic ISMPC controller still runs at 500 Hz and replans at 20 Hz.
 
 **History:**
 
+- 2026-08-31 — disturbance brought in line with the paper: a single base-velocity
+  kick replaces a recurring impulse train. `## INITIAL_VELOCITY_RANGE`
 - 2026-08-28 — first forward-only HRP5P task; lateral/yaw commands, terrain,
   end-to-end comparison, and full-seed studies remain out of scope.
 
@@ -579,6 +581,77 @@ opens the way `kinematics_cstr` did.
 **History:**
 - 2026-08-31 — first run on the recalibrated task; headroom is real and the
   residual captures none of it, trading tracking for torque.
+
+## INITIAL_VELOCITY_RANGE
+
+**Current:** one base-velocity kick per episode, `+-0.5 m/s` planar and
+`+-0.5 rad/s` yaw, withheld until `KICK_WARMUP_S`. This replaces a recurring
+impulse train that fired every `5-7 s` indefinitely.
+
+**The paper never pushes the robot.** Its only disturbance is a randomized
+initial base velocity, `||v_xy|| <= 0.5 m/s` and `||w|| <= 0.5 rad/s`, with
+survival scored over the following five seconds
+([Jeon 2025](https://arxiv.org/abs/2510.12717) Fig. 4). Robustness is otherwise
+shown on unseen terrain and gaits; training is on flat ground with no terrain
+randomization. The recurring impulses here were a local invention and a harder
+problem than the paper's, consuming reward its policy never has to defend.
+
+**One deviation:** the paper bounds the *norm*, while
+`push_by_setting_velocity` samples per axis, so a corner sample reaches `0.707`.
+
+**This is the first headroom a residual can actually reach.** Recovering from a
+kick is a torque-level problem; the tracking headroom is not, being fixed by the
+footstep plan upstream — see `## kincstr06-cmd050`. Measured on the bare prior,
+`28` terminations across `16` environments in `90 s`, spread evenly across
+commands rather than concentrated at speed, so it is the kick and not the
+command that fells it.
+
+**Re-measure if:** `KICK_WARMUP_S`, the episode length, or the gait changes.
+
+**History:**
+- 2026-08-31 — replaced the recurring impulse train after checking the paper.
+
+## KICK_WARMUP_S
+
+**Current:** `8.0 s`. The kick is suppressed until then and fires once per
+episode, leaving `22 s` of a `30 s` episode to recover.
+
+**A kick at reset lands on a robot that is not walking.** The FSM stands through
+the first seconds after a controller reset: measured `vx` is `-0.003` at `2 s`,
+`-0.002` at `4 s`, `0.076` at `6 s` and still rising at `8 s`
+(`## SETTLE_S`). Disturbing at `t = 0` would test the controller's startup
+transient rather than its gait, and the controller reset may simply absorb it.
+`8 s` is the first point the gait is reliably established.
+
+**Once per episode, not per interval.** `initial_velocity_kick` compares the
+global `last_push_step` against the per-episode `episode_length_buf`, so the
+event cannot fire twice in one episode however often the manager calls it.
+
+**Known limitation:** the timing is deterministic, so a policy can in principle
+anticipate it. The paper's `t = 0` kick is equally deterministic, so this
+matches rather than worsens it, but a randomized window would be stronger.
+
+**Re-measure if:** the FSM's startup sequence or `episode_length_s` changes.
+
+**History:**
+- 2026-08-31 — introduced with the paper-faithful disturbance; a first
+  implementation fired at reset and was measuring the standing transient.
+
+## forward_speed
+
+**Current:** `forward_speed` and `commanded_speed` log every run as
+`Episode_Metrics`, giving base speed beside the command that asked for it.
+
+**`error_vel_xy` alone cannot diagnose a gait.** An error norm reads the same
+whether the robot is walking too slowly or tracking badly at speed, which is
+exactly the ambiguity that hid the `0.09 m/s` cap for as long as it did. The
+pair separates them.
+
+**Re-measure if:** never — these are diagnostics, not tuned values.
+
+**History:**
+- 2026-08-31 — added so the speed cap would have been visible from the training
+  curves alone.
 
 ## mean_speed
 
