@@ -326,6 +326,33 @@ oscillated near zero — briefly negative at `-0.004` — for the rest of the ru
 Reward and episode length both looked healthy throughout, which is exactly why
 `## forward_speed` exists.
 
+**THE FREEZE WAS AN ARTIFACT. Everything in this section rests on a mistake.**
+`Episode_Metrics/forward_speed` is logged from *training* rollouts, which sample
+with `std ~0.24` across twelve torque channels, and that noise breaks the gait.
+The deterministic policy walks. `model_999` of `sigma02-cmd015-040`, scored
+through `get_inference_policy`, 8 environments, `40 s`, `12 s` settle:
+
+| | mean `vx` | mean command | falls |
+| --- | ---: | ---: | ---: |
+| kick on | `+0.1972` | 0.279 | 5 |
+| kick off | `+0.1857` | 0.246 | 0 |
+
+This repository already documents the same trap for terminations — "training-time
+falls are exploration, not behaviour" under `## residual_mpc_ppo_cfg` — and the
+lesson was not applied to a newly added metric. **Read `forward_speed` as a
+measure of exploration noise, exactly like the termination curves.** The
+deterministic speed is the one that means anything, and it needs a checkpoint
+evaluation, not a curve.
+
+The `sigma` and `COMMAND_RANGES` changes below were therefore made against a
+problem that does not exist. They are not obviously harmful — a tighter `sigma`
+and a floored box are defensible on their own terms — but they were not
+motivated by evidence, and the run comparison in `## kincstr06-cmd050` used the
+older values, so the two are no longer like for like.
+
+**The superseded reasoning follows, kept because the arithmetic is sound and only
+its premise was wrong.**
+
 **It did not work, and it failed against its own prediction.** `sigma02-cmd015-040`
 froze exactly as its predecessor did: `forward_speed` reached `0.094` by iteration
 `136`, collapsed to `0.001` by `229`, and averaged `0.0239` over the last `200`
@@ -676,6 +703,13 @@ matches rather than worsens it, but a randomized window would be stronger.
 
 **Current:** `forward_speed` and `commanded_speed` log every run as
 `Episode_Metrics`, giving base speed beside the command that asked for it.
+
+**These are exploration-noise measurements, not behaviour.** Like every training
+curve here they come from stochastic rollouts, so a policy whose deterministic
+mean walks at `0.19 m/s` can log `0.002`. Two full runs were read as "the policy
+froze" on exactly that mistake. To learn what a policy actually does, load the
+checkpoint and score `get_inference_policy`; the curve only says how much the
+sampled noise disturbs the gait.
 
 **`error_vel_xy` alone cannot diagnose a gait.** An error norm reads the same
 whether the robot is walking too slowly or tracking badly at speed, which is
