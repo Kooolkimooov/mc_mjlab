@@ -299,7 +299,7 @@ changes — all three move where the kernel should sit.
 - 2026-08-28 — tightened from `0.5` after the bare prior was measured at `81-100%`
   of the tracking ceiling across the whole command range.
 
-## deltaTransLimit
+## mean_speed
 
 **Current:** with the objective calibrated so the prior leaves a fifth of the
 tracking term unearned, the residual still captures none of it and costs torque.
@@ -317,11 +317,18 @@ The measurement is now capable: the prior scores `80.9%` of the
 roughly `57` points were available. The policy took none of them and lost `7.2`
 overall, significantly.
 
-**Why, and it is structural.** The ISMPC's speed is bounded by
-`deltaTransLimit / ts` — where the footstep planner puts the feet, and how long
-it takes to get there. A torque residual can change how the robot executes a
-planned footstep; it cannot make the planner take a longer one. The limitation
-and the residual live in different spaces.
+**Why, and it is structural.** The ISMPC's speed is bounded by its footstep
+plan — where the planner puts the feet, and how long it takes to get there. A
+torque residual can change how the robot executes a planned footstep; it cannot
+make the planner take a longer one. The limitation and the residual live in
+different spaces.
+
+The measured `0.085 m/s` fits `footsteps_planner.mean_speed: 0.1` (line 156 of
+the installed yaml) and also `FootManager.deltaTransLimit / ts` = `0.1 / 1.3`.
+An earlier revision of this section named `deltaTransLimit`; with
+`LogisticController_ismpc` enabled and **no `FootManager::` datastore entries
+present at all**, `mean_speed` is the likelier owner. Neither is confirmed, and
+the argument below does not depend on which.
 
 In [Jeon 2025](https://arxiv.org/abs/2510.12717) they live in the same space: the
 prior is a kinodynamic whole-body MPC emitting torques at 100 Hz, so a torque
@@ -330,9 +337,21 @@ followed by tracking, and the binding constraint sits upstream of anything the
 residual touches. That is why the architecture reproduces faithfully — blending,
 weights, network, initialisation all match — while the *result* does not.
 
-**What follows.** Raising `footsteps_planner.mean_speed` and
-`FootManager.deltaTransLimit` in the installed controller yaml would move the
-limit into a region where a residual has something to push against. Nothing on
+**The datastore cannot reach it.** Every route is blocked at the binding layer:
+`ismpc_walking::get_config` and `configure` carry `ControllerConfiguration&`, the
+`WalkingInterface` entry holds
+`std::shared_ptr<mc_walking::WalkingInterface>`, and `datastore.get` refuses both
+with *"which the Python bindings cannot handle"*. A full `--all` listing shows
+only three non-`ismpc_walking::` keys and no `FootManager::` namespace. The
+writable surface is the scalar and vector setters alone — `set_ts`, `set_tds`,
+`set_com_height`, `set_torso_pitch`, `set_ref_vel`, `set_ref_pose`, `set_n_step`
+— of which only `set_ts` touches speed, and it clamps at `0.7` for at most
+`1.71x`.
+
+**What follows.** Raising the planner's speed limit in the installed controller
+yaml would move the constraint into a region where a residual has something to
+push against, and extending the patched bindings to marshal
+`ControllerConfiguration` would make it settable at runtime instead. Nothing on
 the RL side reaches it: not the command box, not `sigma`, not the budget, and
 not more seeds.
 
