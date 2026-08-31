@@ -44,7 +44,7 @@ COMMAND_NAME = "twist"
 #: Commanded (vx, vy, wz) box. The paper's claim is about commands the MPC prior
 #: cannot track, so this must straddle its failure boundary, not sit inside it.
 #: docs/residual-mpc.md#COMMAND_RANGES
-COMMAND_RANGES = ((0.0, 0.50), (0.0, 0.0), (0.0, 0.0))
+COMMAND_RANGES = ((0.15, 0.40), (0.0, 0.0), (0.0, 0.0))
 
 #: Paper-faithful reset disturbance, per axis. docs/residual-mpc.md#INITIAL_VELOCITY_RANGE
 INITIAL_VELOCITY_RANGE = {
@@ -58,7 +58,7 @@ KICK_WARMUP_S = 8.0
 #: Sized so the bare ISMPC scores about two thirds at the top of the box,
 #: leaving a third for the residual. The paper does not fix sigma.
 #: docs/residual-mpc.md#LINEAR_TRACKING_SIGMA
-LINEAR_TRACKING_SIGMA = 0.06
+LINEAR_TRACKING_SIGMA = 0.02
 #: Baseline-relative offset for the planner's cruise speed (installed default
 #: 0.1 m/s). Not yet wired: the pool fails during configure with an empty
 #: payload when it is. docs/residual-mpc.md#mean_speed

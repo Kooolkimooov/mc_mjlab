@@ -173,10 +173,22 @@ the kind of limit the paper's residual is supposed to extend.
 
 ## COMMAND_RANGES
 
-**Current:** `vx` in `(0.0, 0.50)`, `vy` and `wz` held at zero. Chosen so the
-prior scores `0.674` of the tracking term at the hardest command, after
-`kinematics_cstr` raised its speed from `0.085` to `0.269 m/s`. An earlier
-revision of this line said `(0.0, 0.60)` while the constant read `(0.0, 0.30)`.
+**Current:** `vx` in `(0.15, 0.40)`, `vy` and `wz` held at zero. The floor is the
+load-bearing half: near-zero commands make standing still nearly correct, which
+is what let a policy freeze. The top leaves the prior at `0.533` of the tracking
+term with `sigma = 0.02` — see `## LINEAR_TRACKING_SIGMA` for the arithmetic.
+
+**Measured prior envelope** under the paper's kick, 16 environments each pinned
+to one command for `90 s`:
+
+| commanded `vx` | 0.05 | 0.15 | 0.25 | 0.30 | 0.40 | 0.50 | 0.60 | 0.80 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| achieved | 0.038 | 0.148 | 0.241 | 0.243 | 0.236 | 0.243 | 0.213 | 0.199 |
+| error | 0.012 | **0.002** | 0.009 | 0.057 | 0.164 | 0.257 | 0.387 | 0.601 |
+
+Tracking is near-exact to `0.30` and saturates around `0.24 m/s`, so `0.40` sits
+just past the prior's reach without being hopeless. An earlier revision of this
+line said `(0.0, 0.60)` while the constant read `(0.0, 0.30)`.
 
 **Sized against the prior's measured speed.** `linear_velocity_tracking` is
 `exp(-sum(((cmd - v) / (1 + |cmd|))^2) / sigma)` — the error is *normalized* by
@@ -280,46 +292,46 @@ or `ts_range` changes.
 
 ## LINEAR_TRACKING_SIGMA
 
-**Current:** `0.06`, down from `0.5`. Sized off the measured prior rather than
-picked, following [reward-shaping.md](reward-shaping.md#ZMP_TRACKING_STD).
+**Current:** `0.02`, with `COMMAND_RANGES` floored at `0.15`. Together these stop
+standing still from outscoring walking.
 
-**At `0.5` the reward could not tell a policy from the bare controller.** The
-ISMPC walks at a settled `0.085 m/s` whatever it is told, and
-`exp(-((c - v)/(1 + |c|))^2 / sigma)` scored it:
+**The freeze was an incentive, not a bug.** At `sigma = 0.06` over a
+`(0.0, 0.50)` box, a motionless robot still scored `0.551` of the tracking term —
+near-zero commands are common and standing is nearly correct for them — while
+also collecting angular, orientation and height reward in full, since none of
+those depend on moving. Only `linear_tracking` separates the two behaviours:
 
-| commanded | 0.00 | 0.10 | 0.20 | 0.30 | 0.60 |
+| box | sigma | `E[stand]` | `E[walk]` | falls/episode to tie | prior at top |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| prior at `sigma = 0.5` | 0.986 | 1.000 | 0.982 | 0.947 | **0.813** |
-| prior at `sigma = 0.06` | 0.887 | 0.997 | 0.858 | **0.634** | 0.178 |
+| (0.00, 0.50) | 0.06 | 0.551 | 0.920 | **1.11** | 0.613 |
+| (0.15, 0.40) | 0.03 | 0.248 | 0.917 | 2.01 | 0.658 |
+| **(0.15, 0.40)** | **0.02** | **0.139** | **0.883** | **2.23** | **0.533** |
 
-Commanded at `0.6 m/s` while walking at `0.085`, the old term still paid `81%`
-of its maximum. That is why the first seed-42 run scored `97.9%` of the
-`linear_tracking` ceiling with no policy, and why widening the command box alone
-would not have helped: the box was never the binding constraint, the kernel
-width was.
+"Falls to tie" is how many terminations per episode a walking policy can absorb
+before freezing pays the same, at `-100` per termination over a `3000`-step
+episode. The old setting tied at `1.11`. The bare prior only falls about `0.5`
+times per episode, but an *exploring* policy falls far more — at iteration `66`
+mean episode length was `923` steps, about `2.3` falls per nominal episode. So
+the trap is specific to early training: exploration noise pushes the fall rate
+past the tie point, freezing becomes optimal, and the policy stops walking before
+it ever learns to.
 
-**The paper does not fix `sigma`**, so this is a free parameter being sized, not
-a fidelity break. Table I gives the functional form and the weight (`10.0`); the
-scale is ours to choose, and it has to be chosen against the controller we
-actually have.
+Raising the floor to `0.15` does most of the work by removing the commands where
+standing is genuinely correct; `rel_standing_envs = 0.1` still commands a tenth
+of environments to stand, which remains right.
 
-At `0.06` the prior scores `0.634` at the top of the box, leaving about a third
-of the term for a residual to earn — the same target
-`ZMP_TRACKING_STD` was sized to. `verify_tracking_reward_discriminates` asserts
-the prior's score stays inside `(0.5, 0.8)`, so a later change to either the box
-or the prior's speed cannot silently restore a reward nothing can win.
+**Observed, `paperkick-cmd050`:** `forward_speed` collapsed `0.062 -> 0.025 ->
+0.011` over the first `209` iterations while episode length doubled, then
+oscillated near zero — briefly negative at `-0.004` — for the rest of the run.
+Reward and episode length both looked healthy throughout, which is exactly why
+`## forward_speed` exists.
 
-**Only the linear term is retuned.** `angular_tracking` keeps `0.5` because `wz`
-is held at zero and the yaw envelope is unmeasured; `orientation` and `height`
-keep it because the prior already scores `29.99/30` and `29.97/30` on them,
-which is correct behaviour rather than a blunt kernel.
-
-**Re-measure if:** the prior's settled speed, the command box, or the controller
-changes — all three move where the kernel should sit.
+**Re-measure if:** the termination weight, episode length, or the prior's fall
+rate under the kick changes — all three set where the tie point falls.
 
 **History:**
-- 2026-08-28 — tightened from `0.5` after the bare prior was measured at `81-100%`
-  of the tracking ceiling across the whole command range.
+- 2026-08-31 — `0.06 -> 0.02` and the box floored at `0.15` after a run froze.
+- 2026-08-29 — `0.5 -> 0.06`, when the prior scored `97.9%` of the ceiling.
 
 ## linear_tracking
 
