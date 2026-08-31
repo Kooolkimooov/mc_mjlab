@@ -49,6 +49,13 @@ COMMAND_RANGES = ((0.0, 0.30), (0.0, 0.0), (0.0, 0.0))
 #: leaving a third for the residual. The paper does not fix sigma.
 #: docs/residual-mpc.md#LINEAR_TRACKING_SIGMA
 LINEAR_TRACKING_SIGMA = 0.06
+#: Baseline-relative offset for the planner's cruise speed (installed default
+#: 0.1 m/s). Not yet wired: the pool fails during configure with an empty
+#: payload when it is. docs/residual-mpc.md#mean_speed
+MEAN_SPEED_OFFSET = 0.20
+MEAN_SPEED_COMMANDS = (
+  ("footsteps_planner::get_mean_speed", "footsteps_planner::set_mean_speed"),
+)
 
 
 def residual_mpc_env_cfg(

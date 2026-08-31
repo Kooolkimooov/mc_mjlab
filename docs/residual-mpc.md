@@ -361,3 +361,55 @@ move.
 **History:**
 - 2026-08-29 — recalibrated objective, 300-iteration seed, paired comparison;
   the residual is significantly worse than the prior it is meant to improve.
+
+## mean_speed
+
+**Current:** the planner's cruise speed is now settable at runtime, but the task
+does not yet use it. `MEAN_SPEED_OFFSET` and `MEAN_SPEED_COMMANDS` are defined
+and unwired.
+
+**A workspace C++ change backs this, and it is not in this repository.**
+`~/workspace/src/FootSteps_Planner/src/plugin.cpp` gained two datastore entries
+beside the existing `footsteps_planner::configure`:
+
+```cpp
+datastore().make_call("footsteps_planner::set_mean_speed",
+                      [this](double speed) {
+                        config_.add("mean_speed", speed);
+                        planner_.v_ = speed;
+                      });
+datastore().make_call("footsteps_planner::get_mean_speed",
+                      [this]() -> double { return planner_.v_; });
+```
+
+A `double` because the bindings marshal doubles but refuse
+`mc_rtc::Configuration`, which is what the neighbouring `configure` takes, and
+refuse `std::shared_ptr<mc_walking::WalkingInterface>` too. `planner_.v_` is
+public and already read at `plugin.cpp:95` for a GUI input. Assigning it
+directly rather than rebuilding the planner avoids discarding the live plan.
+
+Verified against a running controller: the keys register after `init`, and
+`get` / `set 0.30` / `get` reads `0.1 -> 0.3`. **A clean workspace rebuild drops
+this**, and nothing else in this repository would explain the task getting
+slower afterwards.
+
+**One host bug this exposed and fixed.** `ControllerHost.configure` validated
+every configured datastore callback before `controller.init`, so any entry
+registered by a *global plugin* — which is registered during `init` — could never
+pass. The existence check now runs after `init`; the binding-capability check
+stays at configure, being ordering-independent.
+
+**Still blocked.** With the pair wired and held through
+`datastore_scalar_holds`, the pool fails during `configure` with an empty
+payload, past the missing-callback stage. Unresolved, so the task keeps the
+installed `0.1 m/s` and the constants sit unused. Whether raising the cruise
+speed actually lifts the measured `0.085 m/s` is therefore still unmeasured —
+`set_ref_vel` accepted values perfectly while changing nothing, so registration
+is not evidence.
+
+**Re-measure if:** the plugin is rebuilt from clean, or the configure failure is
+resolved.
+
+**History:**
+- 2026-08-31 — added the scalar entries and `datastore_scalar_holds`; the
+  runtime path works standalone and fails inside the worker pool.

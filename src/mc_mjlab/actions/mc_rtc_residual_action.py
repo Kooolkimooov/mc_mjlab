@@ -120,6 +120,10 @@ class McRtcResidualActionCfg(BaseActionCfg):
   datastore_scalar_commands: tuple[tuple[str, str], ...] = ()
   """Probe-only paired scalar getter/setters; values are baseline-relative."""
 
+  datastore_scalar_holds: tuple[float, ...] = ()
+  """Constant baseline-relative offset held on each paired scalar for the whole
+  run. Empty leaves them probe-driven; otherwise one value per command pair."""
+
 
 class McRtcResidualActionBase(BaseAction):
   """mc_rtc residual action base: steps controllers via a pool, adds RL residual."""
@@ -346,6 +350,19 @@ class McRtcResidualActionBase(BaseAction):
       self.num_envs, count, dtype=torch.bool, device=self.device
     )
     self._datastore_scalar_delta = torch.zeros(self.num_envs, count, device=self.device)
+    holds = tuple(cfg.datastore_scalar_holds)
+    self._datastore_scalar_holds = holds
+    self._datastore_scalar_hold_values = torch.zeros(count, device=self.device)
+    if holds:
+      if len(holds) != count:
+        raise ValueError(
+          f"datastore_scalar_holds has {len(holds)} values for {count} commands"
+        )
+      # Held for the whole run rather than pulsed, so a task can retune a
+      # controller parameter it cannot reach through configuration.
+      self._datastore_scalar_hold_values = torch.tensor(holds, device=self.device)
+      self._datastore_scalar_delta[:] = self._datastore_scalar_hold_values
+      self._datastore_scalar_active[:] = True
 
   def _setup_hardware_bounds(self) -> None:
     """Resolve RobotModule position, velocity, and effort bounds to target order."""
@@ -777,8 +794,10 @@ class McRtcResidualActionBase(BaseAction):
     self._walking_reference_executed[env_ids] = 0.0
     self._previous_walking_reference_executed[env_ids] = 0.0
     self._walking_reference_active[env_ids] = False
-    self._datastore_scalar_active[env_ids] = False
-    self._datastore_scalar_delta[env_ids] = 0.0
+    # A held offset is a property of the task, not of the episode, so a reset
+    # must restore it rather than clear it.
+    self._datastore_scalar_active[env_ids] = bool(self._datastore_scalar_holds)
+    self._datastore_scalar_delta[env_ids] = self._datastore_scalar_hold_values
     self._projection_mask[env_ids] = False
     if self._recovery_authority is not None:
       self._recovery_authority.reset(env_ids)

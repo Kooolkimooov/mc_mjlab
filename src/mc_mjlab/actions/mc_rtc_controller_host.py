@@ -523,9 +523,9 @@ class ControllerHost:
           "the mc_rtc Python binding lacks DataStore.call(); rebuild the local "
           "binding with generic datastore accessor support"
         )
-      missing = [key for key in callbacks if not datastore.has(key)]
-      if missing:
-        raise ValueError(f"controller datastore is missing callbacks {missing}")
+      # Checked after `init` instead: a global plugin registers its entries
+      # there, so a plugin-provided callback does not exist yet at configure.
+      self._required_callbacks = callbacks
       for getter in layout.output_scalars:
         _read_scalar_output(datastore, getter)
       for getter, setter in layout.datastore_vector_commands:
@@ -611,6 +611,12 @@ class ControllerHost:
           )
 
         controller.running = True
+        required = getattr(self, "_required_callbacks", ())
+        if required:
+          store = controller.controller().datastore()
+          missing = [key for key in required if not store.has(key)]
+          if missing:
+            raise ValueError(f"controller datastore is missing callbacks {missing}")
         # Whatever made the QP give up is gone with the new state.
         self._failed[local] = False
         self._command_baselines[local] = [None] * len(layout.datastore_vector_commands)
