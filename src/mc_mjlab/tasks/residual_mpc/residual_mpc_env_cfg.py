@@ -44,7 +44,7 @@ COMMAND_NAME = "twist"
 #: Commanded (vx, vy, wz) box. The paper's claim is about commands the MPC prior
 #: cannot track, so this must straddle its failure boundary, not sit inside it.
 #: docs/residual-mpc.md#COMMAND_RANGES
-COMMAND_RANGES = ((0.0, 0.30), (0.0, 0.0), (0.0, 0.0))
+COMMAND_RANGES = ((0.0, 0.50), (0.0, 0.0), (0.0, 0.0))
 #: Sized so the bare ISMPC scores about two thirds at the top of the box,
 #: leaving a third for the residual. The paper does not fix sigma.
 #: docs/residual-mpc.md#LINEAR_TRACKING_SIGMA

@@ -218,7 +218,7 @@ def verify_tracking_reward_discriminates() -> None:
   )
 
   # Measured settled speed of the ISMPC prior. docs/residual-mpc.md#COMMAND_RANGES
-  prior_speed = 0.085
+  prior_speed = 0.269
   top = COMMAND_RANGES[0][1]
   error = ((top - prior_speed) / (1.0 + abs(top))) ** 2
   score = math.exp(-error / LINEAR_TRACKING_SIGMA)

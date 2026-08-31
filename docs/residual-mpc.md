@@ -171,23 +171,28 @@ the kind of limit the paper's residual is supposed to extend.
 
 ## COMMAND_RANGES
 
-**Current:** `vx` in `(0.0, 0.30)`, `vy` and `wz` held at zero. Chosen to straddle
-the prior's measured boundary rather than sit inside it. An earlier revision of
-this line said `(0.0, 0.60)`; the constant has read `(0.0, 0.30)` throughout.
+**Current:** `vx` in `(0.0, 0.50)`, `vy` and `wz` held at zero. Chosen so the
+prior scores `0.674` of the tracking term at the hardest command, after
+`kinematics_cstr` raised its speed from `0.085` to `0.269 m/s`. An earlier
+revision of this line said `(0.0, 0.60)` while the constant read `(0.0, 0.30)`.
 
-**Most of the box earns a flat zero, which is not the same as unearned.** The
-prior tops out near `0.085 m/s` and `LINEAR_TRACKING_SIGMA` is `0.06`, so the
-tracking term against a prior-speed rollout is:
+**Sized against the prior's measured speed.** `linear_velocity_tracking` is
+`exp(-sum(((cmd - v) / (1 + |cmd|))^2) / sigma)` — the error is *normalized* by
+the command and divided by `sigma`, not by `sigma^2`. With the prior at
+`0.269 m/s` and `LINEAR_TRACKING_SIGMA = 0.06`:
 
-| commanded `vx` | 0.10 | 0.15 | 0.20 | 0.25 | 0.30 |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `exp(-(err/sigma)^2)` | 0.94 | 0.31 | 0.025 | `5.2e-4` | `2.7e-6` |
+| box top | 0.30 | 0.40 | 0.45 | **0.50** | 0.55 | 0.60 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| prior's score at the top | 0.991 | 0.864 | 0.771 | **0.674** | 0.578 | 0.490 |
 
-Above about `0.20` the term is numerically dead: the policy cannot tell `0.25`
-from `0.30`, so there is no gradient toward closing the gap, only a flat region.
-Headroom the optimiser cannot feel is not headroom. The usable learning band is
-roughly `vx <= 0.18`, which argues for widening `sigma` or capping the box near
-`0.18` rather than leaving two thirds of it flat.
+`0.50` puts the prior at `0.674` at the hardest command — clearly short of the
+ceiling, with a smooth gradient the whole way rather than a flat region.
+
+An earlier revision of this section printed `exp(-(err/sigma)^2)` on unnormalized
+error and concluded the term went numerically dead above `0.20`. That was the
+wrong functional form: at the old `0.085 m/s` prior the real scores across
+`0.10-0.30` were `0.997 / 0.948 / 0.858 / 0.748 / 0.634`, a gentle gradient
+throughout, and the "usable band `vx <= 0.18`" that followed from it was wrong.
 
 **Measured envelope of the ISMPC prior**, eight environments per command, 40 s
 episodes with the first 20 s discarded, no policy:
@@ -495,10 +500,28 @@ destabilises the gait. Speed is linear in `d_h_x` up to `0.6` and then flat:
 planner request steps the controller will not execute — `0.6 m` planned against
 `0.35 m` realised at `1.2`.
 
-**A second cap sits at `0.272 m/s`**, ISMPC-side and untested, most likely
-`foosteps_kin_cstr: [0.6, 0.25]` — a `0.6 m` full width is `+-0.3 m` per step,
-about `0.23 m/s` at this cadence. `optimal_step_dx` should read near `0.3` while
-the plan reads `0.5`, which would confirm it.
+**A second cap sits at `0.272 m/s`, confirmed ISMPC-side.** Reading the planner's
+request against the controller's commitment:
+
+| `d_h_x` | planned | optimal | `vx` |
+| --- | ---: | ---: | ---: |
+| 0.6 | 0.3000 | 0.2976 | 0.2688 |
+| 1.2 | 0.6000 | **0.2998** | 0.2713 |
+
+The ISMPC clips at `0.30 m`, which is `foosteps_kin_cstr: [0.6, 0.25]` — a
+`0.6 m` full width, `+-0.3 m` per step. At `d_h_x = 0.6` the planner asks `0.3000`
+and the controller commits `0.2976`, so the two limits meet exactly there: below
+it the planner binds, above it the controller does and the extra request is
+discarded. That is the argument for `0.6` and not more.
+
+**Where the value actually comes from.** Neither the plugin yaml nor the
+controller block wins: mc_rtc merges the *robot* file last, and
+`mc_logistic_controller/src/controller/etc/robots/hrp5_p.yaml` sets
+`kinematics_cstr: [0.2, 0.2]`. That is the file to edit, and doing so needs no
+runtime setter — verified through worker processes, the configuration training
+uses: `planned 0.3000, vx +0.2694, z_min 0.7508, 0 terminations`, matching the
+in-process result. One caution: that file also feeds `LogisticController_bwc`
+and `_none` for HRP5P.
 
 **This is a screen, not a safety case.** Pushes were off, `zmp_cstr_square` is
 still sized for HRP4, and `25 s` across four environments is a thin sample for
