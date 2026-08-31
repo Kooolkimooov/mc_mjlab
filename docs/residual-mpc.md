@@ -417,25 +417,78 @@ centre-of-pressure box was the leading candidate. Doubled to `[0.28,0.12]` with
 **What is left.** Every named candidate is now refuted: `mean_speed` (dead code),
 `next_stp_cstr_ratio`, `StepRecoveryState`, the FSM overwriting the command
 (`WalkCmdVel::run` never touches velocity; only `start` and a GUI button do), and
-`zmp_cstr_square`. `kinematics_cstr` permits `0.3-0.6 m`, so the kinematic
-rectangle does not bind at `0.109 m` either. The remaining explanation is the
-footstep planner's own QP choosing a short step against a reference that
-`IntegrateVelProfile` places `~0.78 m` ahead. Confirming that needs the planner's
-*output* step, which no datastore entry exposes as a marshallable type — a
-`double` getter for the first planned step's x-displacement, and a plugin
-rebuild.
+`zmp_cstr_square`. The footstep QP does not fail either: with `console_output`
+set to `all`, `[Footsteps planner] Step QP failed` appears zero times at both
+`0.05` and `0.60`, so there is no fallback path being taken.
 
-**Read the installed config, not the plugin's.** `LogisticController_ismpc.yaml`
-carries its own `footsteps_planner` block (`kinematics_cstr: [0.6,0.08]`,
-`delta: 0.1`, `Tp: 10`) which disagrees with
-`mc_plugins/etc/footsteps_planner_plugin.yaml` (`[0.3,0.05]`, `0.05`, `6`) on
-every value.
+The cap is `kinematics_cstr`, measured directly — see `## kinematics_cstr`.
+
+**Neither yaml reaches the planner; it runs on the header default.** The plugin
+loads its own `mc_plugins/etc/footsteps_planner_plugin.yaml`
+(`kinematics_cstr: [0.3,0.05]`) and then overlays the controller's own
+`footsteps_planner` block (`[0.6,0.08]`) at `plugin.cpp:49-56`. Measured live,
+`d_h_x` is neither: it is `0.2`, the header default at `footsteps_planner.h:474`.
+Editing either file is therefore inert, which is why two config experiments here
+returned no change and one of them was wrongly recorded as a refutation.
+
+`Walking_controller.cpp:77` does read the block into `planner_config_`, which is
+referenced nowhere else — but that is a separate unused copy, not the path the
+plugin uses. An earlier revision of this section called the block dead on that
+basis; it is not dead, it is simply not winning.
 
 **Re-measure if:** `ts`, `kinematics_cstr` or the planner's QP weights change.
 
 **History:**
 - 2026-08-31 — cap identified as a fixed `0.109 m` step; `zmp_cstr_square`
   refuted; `set_ts` confirmed as the only working speed lever.
+
+## kinematics_cstr
+
+**Current:** the ISMPC's speed ceiling is the footstep planner's kinematic step
+box. Planned step length is exactly `d_h_x / 2`, and `d_h_x` is `0.2` — the
+header default at `footsteps_planner.h:474`, not either configured value.
+Commanding `vx = 0.6` and setting `d_h_x` live through
+`footsteps_planner::set_kin_cstr_x`:
+
+| `d_h_x` | planned step `dx` | measured `vx` |
+| --- | ---: | ---: |
+| `0.2` (in force) | 0.1000 | 0.0914 |
+| `1.2` | 0.6000 | **0.2714** |
+
+Step length tracks `d_h_x / 2` to four decimals, and a sixfold box gives `2.97x`
+the speed at an unchanged command. This is the constraint every other candidate
+was mistaken for.
+
+**The planner clamps; the ISMPC does not.** Reading the planner's request against
+what the controller's own footstep QP commits to, both relative to the support
+foot:
+
+| commanded `vx` | planned `dx` | optimal `dx` | measured `vx` |
+| --- | ---: | ---: | ---: |
+| 0.05 | 0.0600 | 0.0598 | 0.0550 |
+| 0.60 | 0.1000 | 0.0997 | 0.0918 |
+
+At `0.05` the reference (`v * ts`, about `0.065`) passes through unclamped; at
+`0.60` a reference of `0.78 m` is cut to `0.1000`. The ISMPC tracks whatever it
+is given to `0.3%`, so `beta_stab`, `zmp_cstr_square` and `next_stp_cstr_ratio`
+were never candidates — the step was already short before the controller saw it.
+
+**Neither yaml is in force**, so editing them does nothing; see the provenance
+note under `## set_ts`. The runtime setter is the working knob, and like every
+other workspace entry here a clean rebuild drops it.
+
+**Raising it is not yet validated as safe.** `0.2714 m/s` was held for 15 s in
+two environments with pushes off and no termination. Nothing has been measured
+about falls, the ZMP margin, or whether the stabilizer keeps up at a step length
+six times the tuned one, and `zmp_cstr_square` is still sized for HRP4.
+
+**Re-measure if:** the plugin is rebuilt from clean, or the planner starts
+reading its configuration.
+
+**History:**
+- 2026-08-31 — identified as the cap after `mean_speed`, `next_stp_cstr_ratio`,
+  `StepRecoveryState`, `zmp_cstr_square` and footstep-QP failure were each
+  refuted; two earlier config experiments were inert because the yaml is unread.
 
 ## mean_speed
 
