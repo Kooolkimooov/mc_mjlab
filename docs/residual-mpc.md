@@ -451,7 +451,25 @@ step generation is correct, so the limit is inside the planner or the ISMPC QP.
 `step_velocity_x` mirrors `UpdatePlanner_input`'s own expression, so it reports
 what the planner receives rather than what was asked for.
 
-**The leading candidate is `next_stp_cstr_ratio`.** The installed yaml sets
+**`next_stp_cstr_ratio` is not the cap either.** Set explicitly to `1.0`, a
+tenfold relaxation of the installed `0.1`, the envelope is unchanged:
+
+| commanded `vx` | 0.20 | 0.40 |
+| --- | ---: | ---: |
+| ratio `0.1` | 0.138 | 0.320 |
+| ratio `1.0` | 0.138 | 0.321 |
+
+A first attempt commented the key out instead, on the reasoning that mc_rtc
+would fall back to the header default of `2`. That run was uninformative:
+neither `LogisticController_ismpc.yaml` nor the package's `ismpc_walking.yaml`
+defines the key, and `offset_static` is likewise read at
+`Walking_controller.h:69` while absent from both — which shows only that mc_rtc
+does not *throw* on a missing key, not what value the member ends up with. An
+unchanged result was consistent with the default, with zero, and with no change
+at all. The explicit `1.0` has no such ambiguity. The installed file has been
+restored to `0.1` and verified byte-identical to its backup.
+
+**Superseded candidate:** `next_stp_cstr_ratio`. The installed yaml sets
 `ismpc.next_stp_cstr_ratio: 0.1` against a default of `2`
 (`ControllerConfiguration.h:58`), a twentyfold tightening. `ISMPC_Solver.cpp:774`
 multiplies the next step's ZMP constraint box by it, so `zmp_cstr_square:
