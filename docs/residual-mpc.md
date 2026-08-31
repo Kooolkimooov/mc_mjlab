@@ -434,7 +434,34 @@ preview horizon. `kinematics_cstr: [0.6, 0.08]` gives `d_h_x = 0.6 m`, which ove
 a `~1.3 s` step would permit `0.46 m/s`. Neither the mode, the reference, nor the
 kinematic rectangle explains a `0.106 m` step.
 
-**The open suspect** is `StepRecoveryState`. `UpdatePlanner_input` zeroes
+**`StepRecoveryState` is not it.** Four `double` getters added to
+`ismpc_walking` — `step_recovery`, `step_velocity_x`, `walking`, `stopped`,
+doubles because `_read_scalar_output` rejects `bool` by design — read in-sim
+while commanding `0.6 m/s`:
+
+| t | recov | step_vx | walk | stop | ref_vx | meas_vx |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 8.0 | 0 | 0.600 | 1 | 0 | 0.600 | +0.094 |
+| 12.0 | 0 | 0.600 | 1 | 0 | 0.600 | +0.143 |
+| 20.0 | 0 | 0.600 | 1 | 0 | 0.600 | +0.087 |
+
+The recovery state never latches, the planner is handed the full commanded
+velocity, and the robot walks normally without stopping. Everything upstream of
+step generation is correct, so the limit is inside the planner or the ISMPC QP.
+`step_velocity_x` mirrors `UpdatePlanner_input`'s own expression, so it reports
+what the planner receives rather than what was asked for.
+
+**The leading candidate is `next_stp_cstr_ratio`.** The installed yaml sets
+`ismpc.next_stp_cstr_ratio: 0.1` against a default of `2`
+(`ControllerConfiguration.h:58`), a twentyfold tightening. `ISMPC_Solver.cpp:774`
+multiplies the next step's ZMP constraint box by it, so `zmp_cstr_square:
+[0.14, 0.08]` becomes roughly `1.4 cm x 0.8 cm`. A centre-of-pressure pinned that
+close to the foot centre caps the achievable acceleration, and therefore the
+gait speed, no matter what velocity is commanded — which is the observed
+behaviour. Unverified: raising it is a one-line yaml change and the next thing to
+try.
+
+**Superseded suspect:** `StepRecoveryState`. `UpdatePlanner_input` zeroes
 `step_velocity` outright while it is set (`Walking_controller.cpp:431`), and it
 latches to `true` at line 565 on the recovery path that also clears `Stop`. A
 controller stuck in that state would plan for zero velocity regardless of the
