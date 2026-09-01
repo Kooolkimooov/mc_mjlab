@@ -12,8 +12,10 @@ under `logs/comparisons/`, both named for the run and model 187.
 
 ## entropy_coef
 
-**Current:** `0.0005`. Keep it: zero entropy did not suppress deterministic
-policy-mean growth enough to pass the screen.
+**Current:** this screen selected `0.0005`: zero entropy did not suppress
+deterministic policy-mean growth enough to pass. The active training config moved
+to `0.00005` on 2026-09-01 together with ResidualMPC's tighter `0.15` standard-
+deviation ceiling; that cross-task setting has not yet repeated this screen.
 
 **Re-measure if:** the action distribution, standard-deviation parameterization
 or residual reward changes.
@@ -56,9 +58,9 @@ reward operates on raw action and its physical meaning depends on those values.
 
 ## screening decision
 
-**Current:** no arm was promoted to a 500-iteration run. Retain position scale
-`0.01`, entropy `0.0005`, learned std, magnitude weight `-0.1` and rate weight
-`-0.1`.
+**Current:** no arm was promoted to a 500-iteration run. The screen retained
+position scale `0.01`, entropy `0.0005`, learned std, magnitude weight `-0.1`
+and rate weight `-0.1`.
 
 | Arm | Mean tail vs ref | Mean slope vs ref | Tracking | Hazard | Decision |
 | --- | ---: | ---: | ---: | ---: | --- |

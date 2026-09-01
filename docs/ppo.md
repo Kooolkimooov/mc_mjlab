@@ -179,7 +179,7 @@ contract, adaptive thresholds, or optimizer ownership.
 
 ## std_range
 
-**Current:** `(0.05, 0.30)` on one learned scalar latent standard deviation shared
+**Current:** `(0.05, 0.15)` on one learned scalar latent standard deviation shared
 by every residual joint. The action is `tanh(latent)`, so every stochastic and
 deterministic request lies inside the normalized action bounds. Log probability
 includes the tanh Jacobian, KL is the equivalent latent-Normal KL, and entropy
@@ -193,8 +193,15 @@ unchanged weight step. Over the 2026-08-12_18-30-10 run `Policy/mean_std` fell
 floor for 54% of the last 500 iterations. Clamping sigma at roughly half
 `init_std` addresses the collapse and the pinning together.
 
-The upper bound is the old worry, not the current one: at 0.005 entropy the std
-used to climb 0.2 -> 0.52 unchecked.
+The upper bound remains necessary: at 0.005 entropy the std used to climb
+0.2 -> 0.52 unchecked. The previous `0.30` ceiling was replaced by the `0.15`
+ceiling that bounded the powered ResidualMPC run; its effect on residual balance
+still needs a task-specific re-measurement.
+
+**History:**
+- 2026-09-01 — aligned the ceiling with ResidualMPC's `(0.05, 0.15)` setting.
+- The first bounded residual-balance runs used `(0.05, 0.30)` after observing
+  both collapse to `0.044` and unchecked growth past `0.5`.
 
 ## learn_std
 
@@ -205,18 +212,19 @@ it is not a proposed default.
 
 ## entropy_coef
 
-**Current:** `0.0005` — an order of magnitude below mjlab's locomotion configs
-(0.005), because on a *residual* task the exploration noise is itself a
-disturbance: it goes through the real PD gains onto the joints the controller is
-balancing on.
+**Current:** `0.00005`, a tenfold reduction from `0.0005` mirroring the
+ResidualMPC entropy fix, paired with the tighter
+`std_range = (0.05, 0.15)`. On a *residual* task exploration noise is itself a
+disturbance, so both changes reduce pressure toward physical dither.
 
-Reduced, not zeroed. Zero does not remove the noise — `std` stays learnable and
-starts at `init_std` either way — it removes the pressure to *grow* it, and the
-opposite failure (std collapsing early onto a brittle local optimum) is the more
-expensive one to discover late. The `std_range` clamp bounds the inflation from
-both ends anyway.
+Zero does not remove the noise — `std` stays learnable and starts at `init_std`
+either way — it removes the pressure to *grow* it. The smaller nonzero
+coefficient retains some pressure against collapse, while the `std_range` clamp
+bounds inflation at `0.15`.
 
 **History:**
+- 2026-09-01 — reduced `0.0005` tenfold alongside ResidualMPC's tighter
+  standard-deviation ceiling.
 - At 0.005 nothing pushed back: `Policy/mean_std` climbed 0.2 -> 0.52 over 20899
   iterations, and 0.2 -> 0.62 over the 14417 before that. That was ruinous only in
   combination with `residual_scale = 0.1`, where it left the dither at 115-140% of

@@ -80,6 +80,7 @@ from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
 )
 from mc_mjlab.tasks.residual_balance.residual_balance_ppo_cfg import (
   POLICY_STEPS_PER_ENV,
+  residual_balance_ppo_cfg,
 )
 from mc_mjlab.tasks.residual_balance.reward_audit import (
   RewardAuditRecorder,
@@ -331,6 +332,13 @@ def verify_distribution() -> None:
   loss.backward()
   assert distribution.std_param.shape == (1,)
   assert mean.grad is not None and math.isfinite(float(mean.grad.abs().max()))
+
+
+def verify_residual_balance_exploration_cfg() -> None:
+  """Keep residual balance aligned with the powered ResidualMPC exploration fix."""
+  cfg = residual_balance_ppo_cfg()
+  assert cfg.actor.distribution_cfg["std_range"] == (0.05, 0.15)
+  assert cfg.algorithm.entropy_coef == 0.00005
 
 
 def verify_zero_initialization() -> None:
@@ -1354,6 +1362,7 @@ def verify_resume_curriculum_synchronization() -> None:
 def main() -> None:
   """Run every local improvement-contract assertion."""
   verify_distribution()
+  verify_residual_balance_exploration_cfg()
   verify_zero_initialization()
   verify_request_pricing()
   verify_projection()

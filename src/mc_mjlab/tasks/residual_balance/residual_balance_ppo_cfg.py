@@ -49,7 +49,8 @@ def residual_balance_ppo_cfg(
       distribution_cfg={
         "class_name": ("mc_mjlab.tasks.squashed_gaussian:SquashedGaussianDistribution"),
         "init_std": 0.1,
-        "std_range": (0.05, 0.30),
+        # Match the powered ResidualMPC setting. docs/ppo.md#std_range
+        "std_range": (0.05, 0.15),
         "learn_std": True,
       },
     ),
@@ -60,7 +61,8 @@ def residual_balance_ppo_cfg(
       value_loss_coef=1.0,
       use_clipped_value_loss=True,
       clip_param=0.2 if objective_clipping else 1.0e6,
-      entropy_coef=0.0005,
+      # Tenfold reduction, paired with the tighter ceiling. docs/ppo.md#entropy_coef
+      entropy_coef=0.00005,
       # Their product is the adaptive schedule's step count: 20 events allow a
       # 1.5^20 = 3325x rate collapse in one iteration, 4 events only 5x.
       num_learning_epochs=num_learning_epochs,

@@ -78,7 +78,7 @@ Primary code anchors:
 | `normalize_advantage_per_mini_batch` | `False` | Inherited | mjlab/rsl_rl default: normalize over the complete rollout. Not explicitly selected or tested here. |
 | `num_learning_epochs` | `2` | Local-measured | Began at mjlab's `5`; reduced with minibatches after the adaptive LR hit its floor from iteration 0. Four schedule events cannot collapse `1e-3` to `1e-5` within one iteration. |
 | `num_mini_batches` | `2` | Local-measured | Began at mjlab's `4`; paired with two epochs. At 128 envs and 256 steps this gives two 16,384-sample minibatches and four optimizer updates per iteration. |
-| `entropy_coef` | `0.0005` | Local-measured | Began at `0.005`, the exact initial mjlab tracking value. Reduced 10× after policy std grew `0.2→0.52/0.62`; residual exploration is itself a physical disturbance. |
+| `entropy_coef` | `0.00005` | Local-design | Residual balance previously used `0.0005` after std grew `0.2→0.52/0.62`; reduced tenfold on 2026-09-01 alongside the tighter ResidualMPC sigma ceiling. |
 | `desired_kl` | `0.02` | Local-measured | Began at mjlab/rsl_rl `0.01`; doubled after the adaptive rate immediately pinned to `1e-5`. It is a schedule target, not PPO's clipping parameter. |
 | `gamma` | `0.997` | Paper-form / local-measured | Began at mjlab `0.99`. Increased after a policy improved immediate ZMP agreement while worsening delayed falls; gives a 6.7 s geometric horizon at 50 Hz. |
 | `lam` | `0.99` | Paper-form / local-derived | Began at mjlab `0.95`. The [GAE paper](https://arxiv.org/abs/1506.02438) supplies the estimator and bias/variance role; `0.99` was derived locally so `gamma×lambda` covers delayed falls. |
@@ -100,7 +100,7 @@ The complete measurements are in [ppo.md](ppo.md).
 | distribution | scalar Gaussian | Upstream-exact | Copied from mjlab/rsl_rl. |
 | CNN / RNN | disabled | Inherited | `cnn_cfg=None`, `rnn_type=None`; inherited recurrent dimensions and CNN sharing settings are inert. |
 | `init_std` | `0.1` | Local-design / measured check | Initial task chose `0.2`; lowered after a 500-iteration policy remained below baseline. The exact first `0.2` has no deeper recorded numeric root. |
-| `std_range` | `(0.05, 0.30)` | Local-measured | Added after std fell to `0.044` in one run and exceeded `0.5` in earlier runs. No upstream equivalent supplied these bounds. |
+| `std_range` | `(0.05, 0.15)` | Local-design | The former `(0.05, 0.30)` bound followed a collapse to `0.044` and growth past `0.5`; aligned on 2026-09-01 with the tighter powered ResidualMPC ceiling. |
 | `learn_std` | `True` | Inherited / explicit | rsl_rl's `GaussianDistribution` default. Written explicitly so the fixed-standard-deviation diagnostic arm is selectable from the CLI. |
 | mean-head initialization | exactly zero | Local-measured | Makes iteration 0's deterministic action equal the zero-residual controller; fixes behavior not controlled by `init_std`. |
 
