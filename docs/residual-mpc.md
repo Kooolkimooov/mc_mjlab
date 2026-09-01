@@ -916,6 +916,38 @@ than producing gain — which was its purpose, since it makes `model_999` scorea
 - 2026-09-01 — `0.30 -> 0.15`, set from the iteration-140 peak of the
   `entropy_coef = 0.01` run.
 
+## POWERED_RESULT
+
+**Current:** measured properly, the residual is **worse** than its prior on
+established walking. `std015` `model_999`, 64 environments, 45 minutes,
+`--skip-s 5.5`, clustered by environment:
+
+| term | prior | policy | delta | p |
+| --- | ---: | ---: | ---: | ---: |
+| `linear_tracking` | 0.05517 | 0.05269 | `-4.5%` | `1.9e-04` per-episode |
+| **TOTAL** clustered | 0.07682 | 0.07359 | **`-4.2%`** | **`8.7e-03`** |
+
+The per-episode p is not trustworthy on its own; see
+`docs/evaluation.md#episodes-are-not-independent-samples`.
+
+**This supersedes every positive figure recorded above.** Those came from
+16-environment runs — eight per arm — where the standard error on the difference
+is about `3%` of the mean, the same size as the effects claimed, and where the
+p-values treated correlated episodes as independent. The same checkpoint scored
+`+3.2%` at 16 environments and `-4.2%` at 64.
+
+**What the residual actually does.** It starts the robot moving sooner than the
+prior, during the `5.5 s` in which the FSM is still standing, and tracks worse
+once the gait exists. Unskipped scoring nets those together into an apparent
+small gain; separating them shows a startup effect and a walking regression.
+
+**Re-measure if:** anything in the task or policy changes — and at `--num-envs 64`
+or more, with the clustered test, never at 16.
+
+**History:**
+- 2026-09-01 — the sign reversed under adequate power; the reproduction does not
+  currently show a residual that improves on its prior.
+
 ## tuning_plateau
 
 **Current:** five paired comparisons, all on the same objective. Configuration
