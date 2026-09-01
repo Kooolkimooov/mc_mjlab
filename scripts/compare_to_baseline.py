@@ -161,7 +161,9 @@ class Arm:
     return [e for e in self.episodes if e.nth < k], k
 
 
-def _run_both(env, wrapped, policy, minutes: float, policy_ids) -> tuple[Arm, Arm]:
+def _run_both(
+  env, wrapped, policy, minutes: float, policy_ids, skip_steps: int = 0
+) -> tuple[Arm, Arm]:
   """Step both arms at once, split by env index -- docs/evaluation.md#both-arms-at-once."""
   policy_set = set(policy_ids)
   base = Arm(
@@ -177,6 +179,10 @@ def _run_both(env, wrapped, policy, minutes: float, policy_ids) -> tuple[Arm, Ar
   counter = [0] * env.num_envs
   is_policy = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
   is_policy[policy_ids] = True
+  # Reward accrued before the gait exists is a cost both arms pay identically, so
+  # it only dilutes the delta. docs/evaluation.md#skip_s
+  skip_sums = {n: torch.zeros(env.num_envs, device=env.device) for n in reward_terms}
+  dropped = 0
 
   env.reset()
   deadline = time.monotonic() + minutes * 60.0
@@ -189,6 +195,13 @@ def _run_both(env, wrapped, policy, minutes: float, policy_ids) -> tuple[Arm, Ar
     policy.reset(terminated | time_outs)
     base.steps += 1
     pol.steps += 1
+    if skip_steps:
+      # `episode_length_buf` increments by one per step, so each env crosses the
+      # threshold exactly once per episode.
+      at = (env.episode_length_buf == skip_steps).nonzero(as_tuple=False).flatten()
+      if at.numel():
+        for n in reward_terms:
+          skip_sums[n][at] = env.reward_manager._episode_sums[n][at]
     done = (terminated | time_outs).nonzero(as_tuple=False).flatten()
     if done.numel() == 0:
       continue
@@ -196,17 +209,30 @@ def _run_both(env, wrapped, policy, minutes: float, policy_ids) -> tuple[Arm, Ar
     lengths = env.episode_length_buf[done].tolist()
     flags = {n: env.termination_manager.get_term(n)[done].tolist() for n in term_names}
     for i, env_id in enumerate(done.tolist()):
+      length = int(lengths[i]) - skip_steps
+      counter[env_id] += 1
+      if length <= 0:
+        # Never reached the walking phase; it has no scoreable window at all.
+        dropped += 1
+        continue
       (pol if bool(is_policy[env_id]) else base).episodes.append(
         Episode(
           env_id=env_id,
-          nth=counter[env_id],
-          length=int(lengths[i]),
+          nth=counter[env_id] - 1,
+          length=length,
           terms={n: int(flags[n][i]) for n in term_names},
-          rewards={n: float(sums[n][i].item()) for n in reward_terms},
+          rewards={
+            n: float((sums[n][i] - skip_sums[n][env_id]).item()) for n in reward_terms
+          },
         )
       )
-      counter[env_id] += 1
+    for n in reward_terms:
+      skip_sums[n][done] = 0.0
     _reset_done(env, done)
+  if skip_steps and dropped:
+    print(
+      f"[compare] dropped {dropped} episodes shorter than the {skip_steps}-step skip"
+    )
   return base, pol
 
 
@@ -359,6 +385,15 @@ def main() -> None:
     "so this can run beside a training job, which already holds cpu_count - 2",
   )
   p.add_argument(
+    "--skip-s",
+    type=float,
+    default=0.0,
+    help="discard this many seconds at the start of every episode before "
+    "scoring; the FSM stands for about 5.5 s after a controller reset, and "
+    "that window dilutes the delta without biasing it "
+    "(docs/evaluation.md#skip_s)",
+  )
+  p.add_argument(
     "--minutes",
     type=float,
     default=8.0,
@@ -494,7 +529,9 @@ def main() -> None:
   # Both arms step together, split by env index, so they share the wall-clock
   # window and the worker pool instead of running in sequence.
   policy_ids = list(range(env.num_envs // 2, env.num_envs))
-  base, pol = _run_both(env, wrapped, policy, args.minutes, policy_ids)
+  base, pol = _run_both(
+    env, wrapped, policy, args.minutes, policy_ids, round(args.skip_s / env.step_dt)
+  )
   print(
     f"[compare] done: {len(base.episodes)} baseline / {len(pol.episodes)} "
     f"policy episodes"

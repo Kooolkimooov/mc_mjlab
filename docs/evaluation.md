@@ -585,3 +585,43 @@ The trace replay is the fast path for filter-only changes. Acceptance requires
 nominal mean authority at most 5%, at least 80% recovery samples above 5%
 authority in the first 2 s, and fewer than 1% above 5% after 2 s. The live check
 then drives nonzero action to assert exact inactive residual zeroing.
+
+## skip_s
+
+**Current:** `--skip-s` discards a leading window of every episode before
+scoring. Default `0.0`. It exists to test whether a result depends on the
+non-walking startup, and on ResidualMPC it showed that one does.
+
+**The FSM does not walk immediately.** After a controller reset the robot stands:
+measured forward speed is `~0` through `4.0 s`, reaches `50%` of settled at
+`4.6 s` and `90%` at `5.48 s`, settling at `0.227 m/s`. Every episode pays this,
+because `MCGlobalController::reset()` rebuilds the controller.
+
+**It is not a common cost, which is the point.** The reasoning that motivated the
+flag was that both arms sit through the same startup, so it only dilutes the
+delta. That was wrong. Scoring `std015` `model_999` both ways, same checkpoint,
+same `--num-envs 16`, 78/79 episodes against 78/78:
+
+| | unskipped | `--skip-s 5.5` |
+| --- | ---: | ---: |
+| baseline `linear_tracking` | 0.04823 | **0.05218** |
+| policy `linear_tracking` | 0.05262 | 0.05332 |
+| tracking delta | `+9.1%` (p `0.081`) | `+2.2%` (p `0.66`) |
+| **TOTAL** | `+5.1%` (p `0.0997`) | **`+3.2%`** (p `0.415`) |
+
+The baseline gains `8.2%` from the skip while the policy gains `1.3%`, so the
+policy was beating the prior *inside* the startup window and the delta collapses
+when it is removed. The likely mechanism is the residual creeping the robot
+forward while the FSM stands, earning tracking reward the prior forgoes.
+
+**Read both numbers.** Unskipped is the task as trained and is what every
+recorded ResidualMPC comparison used. Skipped isolates established walking, and
+on that measure the residual's advantage is `+3.2%` and not significant. Neither
+is wrong; they answer different questions, and quoting only the first overstates
+what the policy does once the gait exists.
+
+**Re-measure if:** the FSM's startup changes, or the controller stops being
+rebuilt at every reset.
+
+**History:**
+- 2026-09-01 — added to test a dilution hypothesis, which it refuted.

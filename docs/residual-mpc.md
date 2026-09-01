@@ -946,6 +946,13 @@ checkpoint (`model_150`) differs from theirs.
 tracking gains of `+7.9%` to `+17.3%`. The direction is consistent; the magnitude
 is not resolved.
 
+**And much of it is the startup, not the gait.** Rescoring `std015` with the
+first `5.5 s` of each episode discarded drops the total from `+5.1%` to `+3.2%`
+(p `0.42`) and tracking from `+9.1%` to `+2.2%`, because the baseline gains far
+more from the skip than the policy does. See `docs/evaluation.md#skip_s`. Every
+figure in the table above is the unskipped measure, which is the task as trained;
+on established walking alone the advantage is smaller and not significant.
+
 **Seeds, not tuning, is the next spend.** Further configuration changes cannot be
 evaluated below this noise floor, whereas repeated seeds of one configuration
 would resolve a `~5%` effect and give the variance needed to compare anything
