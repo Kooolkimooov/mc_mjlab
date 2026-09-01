@@ -49,6 +49,57 @@ the competition possible in the first place.
 **History:**
 - 2026-09-01 — recorded with the ResidualMPC torque evidence that motivated it.
 
+## RESULT
+
+**Current:** residual feedback roughly halves survival on this prior. The
+formulation transfers structurally but not behaviourally: what a compliant
+impedance controller absorbs, a balance-critical QP stabilizer does not.
+
+**Matched-iteration episode length**, 128 environments, identical env config
+(measured: zero differences outside the action term):
+
+| run | 50 | 100 | 150 | 200 | 245 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| feedback, hybrid | 754 | 945 | 1004 | 946 | 960 |
+| feedback, `joint_position` only | 741 | 1032 | 991 | 984 | 909 |
+| **ResidualMPC + curriculum** | 478 | 1224 | 2172 | 2296 | **2318** |
+| ResidualMPC, no curriculum (`std015`) | 534 | 1318 | 2011 | 2207 | 2079 |
+
+**The curriculum is not the cause.** It was added at the same time as the
+feedback channel, so both were confounded until this control ran. ResidualMPC
+with it tracks ResidualMPC without it, and `kick_scale` stayed at `1.0` because
+survival never fell below the regress threshold — the term behaves as designed.
+
+**Neither is the channel count or the root-pose modality.** Dropping the torque
+residual and every modality but `joint_position` changed nothing: `909` against
+`960` at iteration 245. The remaining cause is the joint-position feedback
+residual itself.
+
+**And it is worse than it looks.** Both feedback runs drove `kick_scale` to its
+`0.4` floor, so they survived half as long against a disturbance `2.5x` milder
+than the one ResidualMPC held at `1.0`.
+
+**The mechanism is the one `## feedback_scale` warns about.** A virtual joint
+offset is a lie told to a stabilizer that closes a state and force feedback loop.
+Ranjbar's prior is a Cartesian impedance controller on a 7-DoF arm, where a
+false joint reading perturbs a spring-damper; here it perturbs what keeps the
+robot upright. `## SCOPE` records that difference; this is it measured.
+
+**What is not claimed.** No deterministic checkpoint comparison was run — these
+are training curves, and this repository has been wrong reading those before
+(`docs/residual-mpc.md#forward_speed`). The claim is about survival during
+training under matched conditions, which is what the four runs share. A paired
+`compare_to_baseline` at 64 environments would be needed to say anything about
+tracking quality.
+
+**Re-measure if:** `feedback_scale` is swept — `0.02 rad` is twice the encoder
+bias and remains unswept, so a far smaller offset might be tolerable even if this
+one is not.
+
+**History:**
+- 2026-09-01 — three runs plus a control; the feedback channel halves survival
+  and the curriculum is exonerated.
+
 ## feedback_modalities
 
 **Current:** `("joint_position",)` by default. Each entry adds a block to the end
