@@ -76,8 +76,15 @@ residual and every modality but `joint_position` changed nothing: `909` against
 residual itself.
 
 **And it is worse than it looks.** Both feedback runs drove `kick_scale` to its
-`0.4` floor, so they survived half as long against a disturbance `2.5x` milder
-than the one ResidualMPC held at `1.0`.
+`0.4` floor within the first `~100` iterations, so across the window compared
+above they survived half as long against a disturbance `2.5x` milder than the
+`1.0` ResidualMPC was holding at iteration `245`.
+
+ResidualMPC reaches the same floor eventually — `kick_scale` was `0.4` by
+iteration `474` — so the difficulty gap is a property of the comparison window,
+not of the whole run. It does not weaken the result: by then both arms sit at the
+same easiest setting and ResidualMPC still survives about twice as long
+(`1948` at `474`).
 
 **The mechanism is the one `## feedback_scale` warns about.** A virtual joint
 offset is a lie told to a stabilizer that closes a state and force feedback loop.
