@@ -49,6 +49,94 @@ the competition possible in the first place.
 **History:**
 - 2026-09-01 — recorded with the ResidualMPC torque evidence that motivated it.
 
+## feedback_modalities
+
+**Current:** `("joint_position",)` by default. Each entry adds a block to the end
+of the action vector, in the order listed, so the layout is
+`[torque residual | walking reference | joint_position | root_pose]`.
+
+| modality | width | offsets | scale |
+| --- | ---: | --- | --- |
+| `joint_position` | one per residual joint | encoder columns, `in_np[:, 0:T]` | `feedback_scale`, rad |
+| `root_pose` | 6 | root block, `ro:ro+3` and `ro+3:ro+7` | `root_translation_scale` m, `root_rotation_scale` rad |
+
+**Why a second space.** Ranjbar's argument is that the residual should enter a
+space *relevant to the task*, and the paper evaluates an end-effector-pose
+variant beside the joint-position one. For a biped the analogue is the root pose:
+the ISMPC stabilizer keys off base state, so a correction there has more leverage
+than one distributed across leg encoders.
+
+**Rotation is composed, not added.** The root block carries a `wxyz` quaternion;
+adding to it yields something that is not a rotation.
+`ControllerIoBinding._compose_small_rotation` builds a unit quaternion from the
+residual's rotation vector, multiplies in the body frame, and renormalises.
+
+**Applied after both branches.** `_fill_root_and_sensor_columns` writes the root
+block in either the named-routing or the fallback path, and the IMU columns are
+overwritten afterwards, so the offset is applied last rather than inside a branch.
+
+**The root channel reaches the controller, hard.** Probed in-process with the
+torque residual zeroed, one channel saturated at a time, reading the ISMPC's own
+plan rather than inferring from motion:
+
+| condition | `planned_step_dx` | `qp_objective` | `vx` |
+| --- | ---: | ---: | ---: |
+| zero | +0.1435 | -5,407 | +0.1290 |
+| root pitch `+0.02 rad` | **+0.2438** | -29,215 | +0.2283 |
+| root pitch `-0.02 rad` | +0.2152 | -91,875 | +0.1969 |
+| root x `+0.01 m` | +0.1888 | **-171,929** | +0.1686 |
+
+A `0.02 rad` tilt nearly doubles the planned step and adds `77%` to speed; a
+`1 cm` position offset multiplies the QP cost by `32`. The controller believes it
+is falling and lunges. **That is far more authority than intended**, which is why
+`root_rotation_scale` and `root_translation_scale` were set roughly `4x` below
+the values probed, at `0.005 rad` and `0.0025 m`.
+
+This probe existed to catch the opposite failure — a knob that sets a value and
+drives nothing, as `footsteps_planner::set_mean_speed` did
+(`docs/residual-mpc.md#mean_speed`). It found the reverse, and the scales are
+sized from it rather than guessed.
+
+**Re-measure if:** a modality is added — the widths feed `action_dim`, and every
+recorded checkpoint is tied to that width.
+
+**History:**
+- 2026-09-01 — `root_pose` added beside `joint_position` and both enabled by
+  default; scales set from the probe above.
+
+## survival_kick_curriculum
+
+**Current:** `initial_velocity_kick.scale` moves on the smoothed fraction of
+episodes that end in `time_out`. Above `0.7` survival the kick grows by `0.05`,
+below `0.6` it shrinks, clamped to `[0.4, 2.0]`. Wired into **both**
+`residual_mpc_env_cfg` and `residual_feedback_env_cfg`, and omitted when
+`pushes=False`, since there is no kick to scale.
+
+**It mirrors the paper's table.** Ranjbar raises task uncertainty when the
+success rate exceeds `0.7` and lowers it below `0.6`, by a fixed increment. Our
+uncertainty is the reset kick rather than hole pose, and survival stands in for
+insertion success.
+
+**Structure borrowed, not reinvented.** The smoothing and the advance/regress
+deadband follow `episode_length_impulse_curriculum` (`tasks/mdp.py`), which could
+not be reused directly: it requires a `stratified_finite_impulse_curriculum` push
+term, and both tasks now use `initial_velocity_kick`. Like that term, it reads
+the termination buffers during `curriculum_manager.compute`, which runs before
+`_reset_idx` clears them.
+
+**It invalidates the recorded ResidualMPC comparisons.** Every figure under
+`docs/residual-mpc.md#POWERED_RESULT` and `#tuning_plateau` was trained at fixed
+difficulty. Re-baseline before comparing anything against them, at `--num-envs 64`
+with the clustered test — never at 16
+(`docs/evaluation.md#episodes-are-not-independent-samples`).
+
+**Re-measure if:** the episode length or termination set changes — both move what
+"survived" means.
+
+**History:**
+- 2026-09-01 — added to both tasks so the residual-feedback comparison stays
+  like-for-like.
+
 ## feedback_scale
 
 **Current:** `0.02` rad (about `1.15` degrees) at a saturated action, applied per

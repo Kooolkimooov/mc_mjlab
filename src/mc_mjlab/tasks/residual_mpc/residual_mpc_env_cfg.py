@@ -13,6 +13,7 @@ from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp import dr
 from mjlab.managers.action_manager import ActionTermCfg
 from mjlab.managers.command_manager import CommandTermCfg
+from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.metrics_manager import MetricsTermCfg
 from mjlab.managers.observation_manager import ObservationGroupCfg, ObservationTermCfg
@@ -320,7 +321,7 @@ def residual_mpc_env_cfg(
     ),
   }
 
-  return ManagerBasedRlEnvCfg(
+  cfg = ManagerBasedRlEnvCfg(
     scene=SceneCfg(
       num_envs=1 if play else num_envs,
       terrain=TerrainEntityCfg(terrain_type="plane"),
@@ -349,3 +350,11 @@ def residual_mpc_env_cfg(
       ),
     ),
   )
+  if pushes:
+    # Paper-style adaptive difficulty: raise the kick above the advance survival
+    # rate, lower it below the regress rate.
+    # docs/residual-feedback.md#survival_kick_curriculum
+    cfg.curriculum = {
+      "kick_difficulty": CurriculumTermCfg(func=mdp.survival_kick_curriculum)
+    }
+  return cfg

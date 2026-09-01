@@ -10,13 +10,19 @@ from mc_mjlab.actions.residual_feedback_action import (
 from mc_mjlab.tasks.residual_mpc import mdp
 from mc_mjlab.tasks.residual_mpc.residual_mpc_env_cfg import residual_mpc_env_cfg
 
-#: Encoder offset at a saturated feedback action. docs/residual-feedback.md
+#: Feedback spaces and their saturated offsets. docs/residual-feedback.md
+FEEDBACK_MODALITIES = ("joint_position", "root_pose")
 FEEDBACK_SCALE = 0.02
+ROOT_TRANSLATION_SCALE = 0.0025
+ROOT_ROTATION_SCALE = 0.005
 
 
 def residual_feedback_env_cfg(
   play: bool = False,
+  feedback_modalities: tuple[str, ...] = FEEDBACK_MODALITIES,
   feedback_scale: float = FEEDBACK_SCALE,
+  root_translation_scale: float = ROOT_TRANSLATION_SCALE,
+  root_rotation_scale: float = ROOT_ROTATION_SCALE,
   torque_channel: bool = True,
   **kwargs,
 ) -> ManagerBasedRlEnvCfg:
@@ -27,7 +33,10 @@ def residual_feedback_env_cfg(
   carried = {f.name: getattr(base, f.name) for f in fields(base)}
   cfg.actions[mdp.ACTION_NAME] = ResidualFeedbackJointTorqueActionCfg(
     **carried,
+    feedback_modalities=tuple(feedback_modalities),
     feedback_scale=feedback_scale,
+    root_translation_scale=root_translation_scale,
+    root_rotation_scale=root_rotation_scale,
     torque_channel=torque_channel,
   )
   return cfg

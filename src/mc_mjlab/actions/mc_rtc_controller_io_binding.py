@@ -113,10 +113,12 @@ class ControllerIoBinding:
     self._entity = entity
     self._target_names = list(target_names)
     self._target_ids_np = target_ids.cpu().numpy()
-    # Residual *feedback*: superposed on the encoders the controller reads, so a
+    # Residual *feedback*: superposed on the state the controller reads, so a
     # policy can steer the solve instead of fighting its output.
-    # docs/residual-feedback.md#feedback_scale
+    # docs/residual-feedback.md#feedback_modalities
     self._feedback_offset_np: np.ndarray | None = None
+    self._root_translation_offset_np: np.ndarray | None = None
+    self._root_rotation_offset_np: np.ndarray | None = None
     self._device = target_ids.device
     self._output_channels = tuple(output_channels)
     self._output_vectors = tuple(output_vectors)
@@ -409,6 +411,46 @@ class ControllerIoBinding:
     """Superpose a residual on the encoder feedback handed to the controller."""
     self._feedback_offset_np = None if offset is None else offset.cpu().numpy()
 
+  def set_root_pose_offset(
+    self, translation: torch.Tensor | None, rotation: torch.Tensor | None
+  ) -> None:
+    """Superpose a residual on the root pose the controller reads."""
+    self._root_translation_offset_np = (
+      None if translation is None else translation.cpu().numpy()
+    )
+    self._root_rotation_offset_np = None if rotation is None else rotation.cpu().numpy()
+
+  @staticmethod
+  def _compose_small_rotation(quat: np.ndarray, rotvec: np.ndarray) -> np.ndarray:
+    """Rotate `quat` (wxyz) by a body-frame rotation vector; adding would break it."""
+    angle = np.linalg.norm(rotvec, axis=1, keepdims=True)
+    half = 0.5 * angle
+    # sinc-style guard: the axis is arbitrary at zero angle, the term vanishes.
+    scale = np.where(angle > 1.0e-9, np.sin(half) / np.maximum(angle, 1.0e-9), 0.5)
+    dq = np.concatenate([np.cos(half), rotvec * scale], axis=1)
+    w1, x1, y1, z1 = (quat[:, i] for i in range(4))
+    w2, x2, y2, z2 = (dq[:, i] for i in range(4))
+    out = np.stack(
+      [
+        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+      ],
+      axis=1,
+    )
+    return out / np.maximum(np.linalg.norm(out, axis=1, keepdims=True), 1.0e-12)
+
+  def _apply_root_pose_offset(self, in_np: np.ndarray) -> None:
+    """Offset the root pose after whichever branch wrote it."""
+    ro = self.layout.root_off
+    if self._root_translation_offset_np is not None:
+      in_np[:, ro : ro + 3] += self._root_translation_offset_np
+    if self._root_rotation_offset_np is not None:
+      in_np[:, ro + 3 : ro + 7] = self._compose_small_rotation(
+        in_np[:, ro + 3 : ro + 7], self._root_rotation_offset_np
+      )
+
   def _fill_joint_columns(self, in_np: np.ndarray) -> None:
     """Write encoder/velocity/torque columns of the input block (all envs)."""
     T = self.layout.num_targets
@@ -465,3 +507,5 @@ class ControllerIoBinding:
         if self._accel_adr >= 0:
           a = self._accel_adr
           in_np[:, ro + 13 : ro + 16] = sensordata[:, a : a + 3]
+
+    self._apply_root_pose_offset(in_np)
