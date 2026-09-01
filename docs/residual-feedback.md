@@ -188,12 +188,30 @@ difficulty. Re-baseline before comparing anything against them, at `--num-envs 6
 with the clustered test — never at 16
 (`docs/evaluation.md#episodes-are-not-independent-samples`).
 
+**It regulates to its setpoint.** Over the full `mpc-curriculum-control` run:
+
+| quantity | min | max | mean | final |
+| --- | ---: | ---: | ---: | ---: |
+| `kick_scale` | 0.400 | 2.000 | 1.093 | 1.875 |
+| smoothed survival | 0.020 | 0.868 | **0.633** | 0.799 |
+
+Mean survival lands inside the `[0.6, 0.7]` deadband, which is what the term is
+for. `kick_scale` exercised both clamps and reversed at each — `1.0` to the `0.4`
+floor while the policy struggled, up to the `2.0` ceiling once it did not, then
+back. Wide swings are the adjuster hunting around its setpoint with a fixed
+increment, not instability.
+
+**It costs nothing on ResidualMPC.** Smoothed reward per step peaks at `0.07431`
+against `std015`'s `0.07475` without a curriculum, and ends higher (`0.07034`
+against `0.06957`). Episode length tracks the no-curriculum run throughout
+(`## RESULT`). This run is the re-baseline that adding the curriculum required.
+
 **Re-measure if:** the episode length or termination set changes — both move what
 "survived" means.
 
 **History:**
 - 2026-09-01 — added to both tasks so the residual-feedback comparison stays
-  like-for-like.
+  like-for-like; validated over a full run, and neutral on ResidualMPC.
 
 ## feedback_scale
 
