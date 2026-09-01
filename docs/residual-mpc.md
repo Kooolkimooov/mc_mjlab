@@ -893,17 +893,70 @@ settings, which use an unbounded Gaussian with `init_noise_std = 1.0`. The
 bounded squashed Gaussian here is the deliberate hardware-safety choice recorded
 under `## PPO_SAFETY_CHOICE`, and the cap is part of it.
 
-**What it should show.** A final checkpoint that is worth comparing: every
-earlier run's `model_999` was trained at saturated std, which is why the best
-result so far came from `model_150`. If the cap works, the peak stops moving
-backwards and `model_999` becomes the checkpoint to score — which also removes
-the checkpoint confound from the `## entropy_coef` result.
+**It stopped the decay without raising the peak.** Std pins at the new `0.15`
+ceiling — any entropy bonus still walks it there, the ceiling is simply lower —
+and smoothed reward per step holds flat across the run:
+
+| iteration | 150 | 300 | 500 | 700 | 900 | 999 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| reward/step | 0.0737 | 0.0692 | 0.0704 | 0.0711 | 0.0687 | **0.0696** |
+
+The final value is `7%` below the peak against `29%` for `entropy_coef = 0.01`,
+and `32%` above that run's final. The peak itself is unchanged (`0.0748` at
+iteration `127` here, `0.0748` at `140` there), so the cap prevents loss rather
+than producing gain — which was its purpose, since it makes `model_999` scoreable.
+
+**Scored, and the tuning has plateaued.** `model_999` returns `+5.1%` total
+(p `0.0997`), tracking `+9.1%` (p `0.081`) — the same band as every run before
+`ent001`. See `## tuning_plateau`.
 
 **Re-measure if:** `entropy_coef` or the action scale changes.
 
 **History:**
 - 2026-09-01 — `0.30 -> 0.15`, set from the iteration-140 peak of the
   `entropy_coef = 0.01` run.
+
+## tuning_plateau
+
+**Current:** five paired comparisons, all on the same objective. Configuration
+differences between the last four are smaller than the measurement noise.
+
+| run | checkpoint | tracking | p | total | p | prior's tracking |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `kincstr06-cmd050` | `model_999` | `-4.3%` | `0.022` | `-0.9%` | `0.50` | — |
+| `paperkick-cmd050` | `model_999` | `+7.9%` | `0.17` | `+5.3%` | `0.11` | 0.04585 |
+| `sigma02-cmd015-040` | `model_999` | `+13.2%` | `0.026` | `+5.2%` | `0.082` | 0.04497 |
+| `ent001` | `model_150` | `+17.3%` | `0.0067` | `+7.8%` | `0.019` | 0.04401 |
+| `std015` | `model_999` | `+9.1%` | `0.081` | `+5.1%` | `0.0997` | 0.04823 |
+
+**The noise floor is the size of the effects being compared.** The last column is
+the *same prior* every time — a zero-action arm with no policy — yet it scores
+`0.04401` to `0.04823`, a `9%` spread from command draws and kick samples alone.
+The configuration differences under test move the total between `+5.1%` and
+`+7.8%`, which is the same magnitude. At one seed per configuration they cannot
+be separated.
+
+**`ent001`'s `+7.8%` was over-read at the time**, including in this document, as
+the entropy fix roughly doubling the effect. It is more likely a favourable draw:
+the run before it and the run after it both return about `+5.2%`, and its
+checkpoint (`model_150`) differs from theirs.
+
+**What is solid.** Four independent runs put the residual between `+5.1%` and
+`+7.8%` on total per-step reward against its own prior, every one positive, with
+tracking gains of `+7.9%` to `+17.3%`. The direction is consistent; the magnitude
+is not resolved.
+
+**Seeds, not tuning, is the next spend.** Further configuration changes cannot be
+evaluated below this noise floor, whereas repeated seeds of one configuration
+would resolve a `~5%` effect and give the variance needed to compare anything
+else afterwards.
+
+**Re-measure if:** `--num-envs` or the comparison duration rises — both shrink
+the noise floor and would change this conclusion.
+
+**History:**
+- 2026-09-01 — recorded after `std015` returned to the `+5%` band, showing the
+  `ent001` result was within run-to-run variation.
 
 ## mean_speed
 
