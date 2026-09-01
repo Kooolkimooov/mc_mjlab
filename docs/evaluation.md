@@ -625,3 +625,42 @@ rebuilt at every reset.
 
 **History:**
 - 2026-09-01 — added to test a dilution hypothesis, which it refuted.
+
+## Episodes are not independent samples
+
+**`_welch_p` treats every episode as one sample, and that is wrong here.** The
+domain randomization terms — `randomize_friction`, `randomize_pd_gains`,
+`randomize_effort` — are all `mode="startup"`, so each environment keeps its own
+friction, gains and effort limits for the entire run. Every episode from an
+environment shares them. `qualify_checkpoints.py` already clusters by
+seed-environment for this reason; `compare_to_baseline.py` does not.
+
+**Measured on `std015` `model_999`, 64 environments, 45 minutes, `--skip-s 5.5`:**
+
+| test | delta | p |
+| --- | ---: | ---: |
+| per-episode Welch, as the script prints it | `-3.9%` | `3.2e-05` |
+| clustered: one mean per environment, then Welch | **`-4.2%`** | **`8.7e-03`** |
+
+The printed p is `270x` too small. An intra-class correlation of `0.05-0.08`
+predicts a design effect of only `1.4-1.7`, so the discrepancy is larger than
+that alone explains: with between-environment sd at about `6%` of the mean, the
+environment is a bigger source of variance than the episode.
+
+**The arms do not share their randomization.** `_run_both` splits environments by
+index, and each environment's friction and gains are drawn independently, so the
+two arms are compared across *different* draws. At `--num-envs 16` — eight per
+arm — the standard error on the difference is about `3%` of the mean, which is
+the same size as the effects being reported. That is why the same checkpoint
+scored `+3.2%` at 16 environments and `-4.2%` at 64.
+
+**Use at least 32 environments per arm and cluster the test.** Everything
+recorded before 2026-09-01 used 16 environments total with the per-episode p, and
+should be read as indicative at best.
+
+**Re-measure if:** the randomization moves to `mode="reset"`, which would make
+episodes within an environment independent and this section obsolete.
+
+**History:**
+- 2026-09-01 — found after a 64-environment run reversed the sign of a result
+  that four 16-environment runs had reported as positive.
