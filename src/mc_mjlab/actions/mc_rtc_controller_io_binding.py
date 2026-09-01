@@ -113,6 +113,10 @@ class ControllerIoBinding:
     self._entity = entity
     self._target_names = list(target_names)
     self._target_ids_np = target_ids.cpu().numpy()
+    # Residual *feedback*: superposed on the encoders the controller reads, so a
+    # policy can steer the solve instead of fighting its output.
+    # docs/residual-feedback.md#feedback_scale
+    self._feedback_offset_np: np.ndarray | None = None
     self._device = target_ids.device
     self._output_channels = tuple(output_channels)
     self._output_vectors = tuple(output_vectors)
@@ -401,6 +405,10 @@ class ControllerIoBinding:
       ),
     )
 
+  def set_feedback_offset(self, offset: torch.Tensor | None) -> None:
+    """Superpose a residual on the encoder feedback handed to the controller."""
+    self._feedback_offset_np = None if offset is None else offset.cpu().numpy()
+
   def _fill_joint_columns(self, in_np: np.ndarray) -> None:
     """Write encoder/velocity/torque columns of the input block (all envs)."""
     T = self.layout.num_targets
@@ -410,6 +418,8 @@ class ControllerIoBinding:
     current_pos = self._entity.data.joint_pos_biased.cpu().numpy()
     current_vel = self._entity.data.joint_vel.cpu().numpy()
     in_np[:, 0:T] = current_pos[:, self._target_ids_np]
+    if self._feedback_offset_np is not None:
+      in_np[:, 0:T] += self._feedback_offset_np
     in_np[:, T : 2 * T] = current_vel[:, self._target_ids_np]
     in_np[:, 2 * T : 3 * T] = self._env.sim.data.qfrc_actuator.cpu().numpy()[
       :, self._target_dof_adr
