@@ -117,8 +117,10 @@ class ControllerIoBinding:
     # policy can steer the solve instead of fighting its output.
     # docs/residual-feedback.md#feedback_modalities
     self._feedback_offset_np: np.ndarray | None = None
+    self._joint_velocity_offset_np: np.ndarray | None = None
     self._root_translation_offset_np: np.ndarray | None = None
     self._root_rotation_offset_np: np.ndarray | None = None
+    self._wrench_offset_np: np.ndarray | None = None
     self._device = target_ids.device
     self._output_channels = tuple(output_channels)
     self._output_vectors = tuple(output_vectors)
@@ -411,6 +413,14 @@ class ControllerIoBinding:
     """Superpose a residual on the encoder feedback handed to the controller."""
     self._feedback_offset_np = None if offset is None else offset.cpu().numpy()
 
+  def set_joint_velocity_offset(self, offset: torch.Tensor | None) -> None:
+    """Superpose a residual on the joint velocities handed to the controller."""
+    self._joint_velocity_offset_np = None if offset is None else offset.cpu().numpy()
+
+  def set_wrench_offset(self, offset: torch.Tensor | None) -> None:
+    """Superpose a residual on the force-sensor wrenches the stabilizer closes on."""
+    self._wrench_offset_np = None if offset is None else offset.cpu().numpy()
+
   def set_root_pose_offset(
     self, translation: torch.Tensor | None, rotation: torch.Tensor | None
   ) -> None:
@@ -441,8 +451,12 @@ class ControllerIoBinding:
     )
     return out / np.maximum(np.linalg.norm(out, axis=1, keepdims=True), 1.0e-12)
 
-  def _apply_root_pose_offset(self, in_np: np.ndarray) -> None:
-    """Offset the root pose after whichever branch wrote it."""
+  def _apply_state_feedback_offsets(self, in_np: np.ndarray) -> None:
+    """Offset root pose and wrenches after every branch that writes them."""
+    if self._wrench_offset_np is not None:
+      wo = self.layout.wrench_off
+      width = 6 * len(self.layout.wrenches)
+      in_np[:, wo : wo + width] += self._wrench_offset_np
     ro = self.layout.root_off
     if self._root_translation_offset_np is not None:
       in_np[:, ro : ro + 3] += self._root_translation_offset_np
@@ -463,6 +477,8 @@ class ControllerIoBinding:
     if self._feedback_offset_np is not None:
       in_np[:, 0:T] += self._feedback_offset_np
     in_np[:, T : 2 * T] = current_vel[:, self._target_ids_np]
+    if self._joint_velocity_offset_np is not None:
+      in_np[:, T : 2 * T] += self._joint_velocity_offset_np
     in_np[:, 2 * T : 3 * T] = self._env.sim.data.qfrc_actuator.cpu().numpy()[
       :, self._target_dof_adr
     ]
@@ -508,4 +524,4 @@ class ControllerIoBinding:
           a = self._accel_adr
           in_np[:, ro + 13 : ro + 16] = sensordata[:, a : a + 3]
 
-    self._apply_root_pose_offset(in_np)
+    self._apply_state_feedback_offsets(in_np)

@@ -99,6 +99,12 @@ training under matched conditions, which is what the four runs share. A paired
 `compare_to_baseline` at 64 environments would be needed to say anything about
 tracking quality.
 
+**The two later modalities are untested behaviourally.** `joint_velocity` and
+`wrench` exist for fidelity to the paper's variant list and are off by default.
+Given that joint-position feedback alone halves survival, the expectation is that
+wrench feedback is *worse*, not better — it perturbs the stabilizer's primary
+loop rather than an input to it. Nothing here measures that.
+
 **Re-measure if:** `feedback_scale` is swept — `0.02 rad` is twice the encoder
 bias and remains unswept, so a far smaller offset might be tolerable even if this
 one is not.
@@ -116,7 +122,21 @@ of the action vector, in the order listed, so the layout is
 | modality | width | offsets | scale |
 | --- | ---: | --- | --- |
 | `joint_position` | one per residual joint | encoder columns, `in_np[:, 0:T]` | `feedback_scale`, rad |
+| `joint_velocity` | one per residual joint | velocity columns, `in_np[:, T:2T]` | `joint_velocity_scale`, rad/s |
 | `root_pose` | 6 | root block, `ro:ro+3` and `ro+3:ro+7` | `root_translation_scale` m, `root_rotation_scale` rad |
+| `wrench` | `6 x` force sensors | wrench block, `wrench_off` | `wrench_force_scale` N, `wrench_torque_scale` Nm |
+
+`wrench` resolves its width from the live layout — on HRP5P that is `24`, from
+`RightFootForceSensor`, `LeftFootForceSensor` and both hands — and refuses to
+build on a model with no force sensors. It is the analogue of the paper's
+end-effector wrench channel, and for a walking stabilizer it is the loop the
+controller actually closes on. `joint_velocity` is the modality Ranjbar names as
+optional beside joint position.
+
+**Verified isolated.** Saturating each block in turn, every other modality stays
+at exactly zero: `joint_position` `0.02000`, `joint_velocity` `0.05000`,
+`root_pose` `0.00500`, `wrench` `5.00000`, no leakage in any direction, robot
+still walking at `0.257`. `action_dim` is `66` with all four enabled.
 
 **Why a second space.** Ranjbar's argument is that the residual should enter a
 space *relevant to the task*, and the paper evaluates an end-effector-pose

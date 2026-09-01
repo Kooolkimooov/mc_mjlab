@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 #: Root pose carries 3 translation and 3 rotation channels; joint position is
 #: sized by the residual joints. docs/residual-feedback.md#feedback_modalities
 ROOT_POSE_DIM = 6
-SUPPORTED_MODALITIES = ("joint_position", "root_pose")
+SUPPORTED_MODALITIES = ("joint_position", "joint_velocity", "root_pose", "wrench")
 
 
 @dataclass(kw_only=True)
@@ -38,6 +38,15 @@ class ResidualFeedbackJointTorqueActionCfg(ResidualMpcJointTorqueActionCfg):
 
   root_rotation_scale: float = 0.005
   """Radians of root tilt at a saturated root_pose rotation action."""
+
+  joint_velocity_scale: float = 0.05
+  """Rad/s of encoder-velocity offset at a saturated joint_velocity action."""
+
+  wrench_force_scale: float = 5.0
+  """Newtons of force offset at a saturated wrench action."""
+
+  wrench_torque_scale: float = 2.0
+  """Newton-metres of moment offset at a saturated wrench action."""
 
   torque_channel: bool = True
   """Keep the torque residual; False gives the paper's feedback-only variant."""
@@ -67,7 +76,15 @@ class ResidualFeedbackJointTorqueAction(ResidualMpcJointTorqueAction):
     super().__init__(cfg, env)
     ids = self._residual_ids
     joint_dim = self._num_targets if ids is None else int(ids.numel())
-    self._modality_dims = {"joint_position": joint_dim, "root_pose": ROOT_POSE_DIM}
+    wrench_dim = 6 * len(self._io.layout.wrenches)
+    self._modality_dims = {
+      "joint_position": joint_dim,
+      "joint_velocity": joint_dim,
+      "root_pose": ROOT_POSE_DIM,
+      "wrench": wrench_dim,
+    }
+    if "wrench" in cfg.feedback_modalities and wrench_dim == 0:
+      raise ValueError("wrench feedback needs force sensors, the model has none")
     self._modalities = tuple(cfg.feedback_modalities)
     self._feedback_dim = sum(self._modality_dims[m] for m in self._modalities)
     # Only the env-facing width grows: `_raw_actions` keeps the base class's
@@ -76,8 +93,17 @@ class ResidualFeedbackJointTorqueAction(ResidualMpcJointTorqueAction):
     self._feedback_offset = torch.zeros(
       self.num_envs, self._num_targets, device=self.device
     )
+    self._joint_velocity_offset = torch.zeros_like(self._feedback_offset)
     self._root_translation = torch.zeros(self.num_envs, 3, device=self.device)
     self._root_rotation = torch.zeros(self.num_envs, 3, device=self.device)
+    self._wrench_offset = torch.zeros(self.num_envs, wrench_dim, device=self.device)
+    # Force and moment share a block but not a unit, so the scale alternates in
+    # sixes. docs/residual-feedback.md#feedback_modalities
+    self._wrench_scale = torch.tensor(
+      ([cfg.wrench_force_scale] * 3 + [cfg.wrench_torque_scale] * 3)
+      * len(self._io.layout.wrenches),
+      device=self.device,
+    )
     print(
       f"[mc_rtc] ResidualFeedback: {self._feedback_dim} channel(s) across "
       f"{list(self._modalities)}"
@@ -111,6 +137,19 @@ class ResidualFeedbackJointTorqueAction(ResidualMpcJointTorqueAction):
         self._feedback_offset[:, self._residual_ids] = gated
       self._io.set_feedback_offset(self._feedback_offset)
 
+    if "joint_velocity" in blocks:
+      gated = blocks["joint_velocity"] * self.cfg.joint_velocity_scale * gate
+      if self._residual_ids is None:
+        self._joint_velocity_offset.copy_(gated)
+      else:
+        self._joint_velocity_offset.zero_()
+        self._joint_velocity_offset[:, self._residual_ids] = gated
+      self._io.set_joint_velocity_offset(self._joint_velocity_offset)
+
+    if "wrench" in blocks:
+      self._wrench_offset.copy_(blocks["wrench"] * self._wrench_scale * gate)
+      self._io.set_wrench_offset(self._wrench_offset)
+
     if "root_pose" in blocks:
       root = blocks["root_pose"] * gate
       self._root_translation.copy_(root[:, :3] * self.cfg.root_translation_scale)
@@ -127,8 +166,10 @@ class ResidualFeedbackJointTorqueAction(ResidualMpcJointTorqueAction):
     if env_ids is None:
       env_ids = slice(None)
     self._feedback_offset[env_ids] = 0.0
+    self._joint_velocity_offset[env_ids] = 0.0
     self._root_translation[env_ids] = 0.0
     self._root_rotation[env_ids] = 0.0
+    self._wrench_offset[env_ids] = 0.0
 
   @property
   def feedback_offset(self) -> torch.Tensor:
