@@ -872,6 +872,39 @@ all three move where the entropy term sits relative to the surrogate.
 - 2026-08-31 — `0.1 -> 0.01` after the entropy term was found to outweigh the
   surrogate by `8.5x`; changed alone, so the effect is attributable.
 
+## std_range
+
+**Current:** `(0.05, 0.15)`. The ceiling is the operative half: it is a bound
+where `entropy_coef` was only a pressure.
+
+**Why a bound.** Any positive entropy bonus walks the std to whatever ceiling it
+is given. At `entropy_coef = 0.1` it reached the old `0.30` cap by iteration
+`100`; at `0.01` it still reached it, around `500`. Lowering the coefficient
+changes the speed of the climb, not its destination, so the cap is what actually
+decides where the policy explores.
+
+**`0.15` is where the previous run measured best**, not a guess — smoothed reward
+per step peaked at iteration `140` with `Policy/mean_std` at about `0.16`, and
+fell monotonically as std rose past it (`0.0746` at `150` against `0.0529` at
+`999`, a `29%` loss). See the table under `## entropy_coef`.
+
+**This bound is ours, not the paper's.** ResidualMPC inherits stock rsl_rl
+settings, which use an unbounded Gaussian with `init_noise_std = 1.0`. The
+bounded squashed Gaussian here is the deliberate hardware-safety choice recorded
+under `## PPO_SAFETY_CHOICE`, and the cap is part of it.
+
+**What it should show.** A final checkpoint that is worth comparing: every
+earlier run's `model_999` was trained at saturated std, which is why the best
+result so far came from `model_150`. If the cap works, the peak stops moving
+backwards and `model_999` becomes the checkpoint to score — which also removes
+the checkpoint confound from the `## entropy_coef` result.
+
+**Re-measure if:** `entropy_coef` or the action scale changes.
+
+**History:**
+- 2026-09-01 — `0.30 -> 0.15`, set from the iteration-140 peak of the
+  `entropy_coef = 0.01` run.
+
 ## mean_speed
 
 **Current:** the planner's cruise speed is now settable at runtime, but the task

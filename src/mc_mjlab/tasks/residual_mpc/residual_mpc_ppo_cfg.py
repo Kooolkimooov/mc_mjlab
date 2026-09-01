@@ -17,7 +17,9 @@ def residual_mpc_ppo_cfg(
       # Safety choice: bounded actions and 0.1 initial std. docs/residual-mpc.md
       "class_name": "mc_mjlab.tasks.squashed_gaussian:SquashedGaussianDistribution",
       "init_std": 0.1,
-      "std_range": (0.05, 0.30),
+      # A bound, not a pressure: any entropy bonus walks std to this ceiling, and
+      # reward per step falls 29% doing it. docs/residual-mpc.md#std_range
+      "std_range": (0.05, 0.15),
       "learn_std": True,
     },
   )
