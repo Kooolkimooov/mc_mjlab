@@ -99,11 +99,32 @@ training under matched conditions, which is what the four runs share. A paired
 `compare_to_baseline` at 64 environments would be needed to say anything about
 tracking quality.
 
-**The two later modalities are untested behaviourally.** `joint_velocity` and
-`wrench` exist for fidelity to the paper's variant list and are off by default.
-Given that joint-position feedback alone halves survival, the expectation is that
-wrench feedback is *worse*, not better — it perturbs the stabilizer's primary
-loop rather than an input to it. Nothing here measures that.
+**Wrench feedback does not harm survival, contrary to what was expected here.**
+A 250-iteration run with `wrench` alone (`torque_channel=False`, no joint
+channel) tracks ResidualMPC rather than the joint-position feedback runs:
+
+| iteration | ~136 | 249 |
+| --- | ---: | ---: |
+| wrench only | 2059 | **2340** |
+| ResidualMPC | 2172 (at 150) | 2318 (at 245) |
+| `joint_position` feedback | 991 (at 150) | ~950 |
+
+Its curriculum also raised `kick_scale` to `1.3-1.5`, where the joint-position
+runs sat pinned at the `0.4` floor — the policy was surviving well enough to be
+made harder. This section previously predicted the opposite.
+
+If it holds, the harm is specific to **proprioceptive falsification**: a lie
+about joint position corrupts the kinematic state everything downstream is built
+on, while a force offset is a noisy measurement the stabilizer already expects to
+react against.
+
+**The competing explanation is that the channel is too weak to matter.** `5 N`
+against a per-foot load near `260 N` is about `2%`, so "no harm" may mean "no
+effect", in which case the run only shows that an inert channel is harmless. The
+potency probe that would separate these is still outstanding — the first attempt
+was invalid for the reason recorded under `## feedback_modalities`.
+
+**`joint_velocity` remains untested behaviourally.**
 
 **Re-measure if:** `feedback_scale` is swept — `0.02 rad` is twice the encoder
 bias and remains unswept, so a far smaller offset might be tolerable even if this
@@ -153,9 +174,21 @@ residual's rotation vector, multiplies in the body frame, and renormalises.
 block in either the named-routing or the fallback path, and the IMU columns are
 overwritten afterwards, so the offset is applied last rather than inside a branch.
 
-**The root channel reaches the controller, hard.** Probed in-process with the
-torque residual zeroed, one channel saturated at a time, reading the ISMPC's own
-plan rather than inferring from motion:
+**THE PROBE BELOW IS INVALID — it has no time control.** Its four conditions ran
+sequentially on one environment without a reset, so each row is a *later* window
+of the same continuous episode. Running the identical probe against the unrelated
+`wrench` channel reproduced the same numbers to four significant figures
+(`+0.2438`, `+0.2152`, `-29,215` against `-29,316`), which is only possible if
+the perturbation is not what moves them. What the table shows is the ISMPC
+ramping up over its first minute.
+
+The `root_rotation_scale` and `root_translation_scale` values chosen from it
+(`0.005 rad`, `0.0025 m`) are therefore **unjustified** rather than
+wrong — they may still be sensible, but nothing here establishes them. A sound
+probe builds a fresh environment per condition, as `scripts`-style sweeps do
+elsewhere; the numbers are kept below only to record what was mismeasured.
+
+**Superseded probe:**
 
 | condition | `planned_step_dx` | `qp_objective` | `vx` |
 | --- | ---: | ---: | ---: |
@@ -164,16 +197,11 @@ plan rather than inferring from motion:
 | root pitch `-0.02 rad` | +0.2152 | -91,875 | +0.1969 |
 | root x `+0.01 m` | +0.1888 | **-171,929** | +0.1686 |
 
-A `0.02 rad` tilt nearly doubles the planned step and adds `77%` to speed; a
-`1 cm` position offset multiplies the QP cost by `32`. The controller believes it
-is falling and lunges. **That is far more authority than intended**, which is why
-`root_rotation_scale` and `root_translation_scale` were set roughly `4x` below
-the values probed, at `0.005 rad` and `0.0025 m`.
-
-This probe existed to catch the opposite failure — a knob that sets a value and
-drives nothing, as `footsteps_planner::set_mean_speed` did
-(`docs/residual-mpc.md#mean_speed`). It found the reverse, and the scales are
-sized from it rather than guessed.
+These differences are the trajectory's own evolution across four consecutive
+windows, not the channel's authority. The probe was written to catch a knob that
+drives nothing (`docs/residual-mpc.md#mean_speed`) and instead demonstrated a
+subtler failure: a measurement that moves for a reason other than the one under
+test.
 
 **Re-measure if:** a modality is added — the widths feed `action_dim`, and every
 recorded checkpoint is tied to that width.
