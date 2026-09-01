@@ -174,6 +174,34 @@ residual's rotation vector, multiplies in the body frame, and renormalises.
 block in either the named-routing or the fallback path, and the IMU columns are
 overwritten afterwards, so the offset is applied last rather than inside a branch.
 
+**Only `joint_position` is a working channel.** Measured with a fresh
+environment per condition and an explicit zero control, `root_pose` and `wrench`
+move nothing:
+
+| condition | `planned_step_dx` | `qp_objective` |
+| --- | ---: | ---: |
+| control | +0.1077 | -6,149 |
+| root pitch, `0.005 rad` | +0.1070 | -6,109 |
+| root pitch, `0.02 rad` | +0.1082 | -6,145 |
+| root pitch, **`0.10 rad`** | **+0.1082** | -6,149 |
+| foot `Fz`, `5 N` | +0.1075 | -6,159 |
+
+`plan_dx` is identical to four decimals even at `0.10 rad` — `5.7` degrees of
+false tilt. **mc_rtc does not take base orientation from the root block**: its
+observer derives it from the IMU columns (`_gyro_adr` / `_accel_adr`), so
+offsetting `ro+3:ro+7` writes something nothing reads. Fixing the modality means
+offsetting the IMU instead; as written it is a knob that drives nothing, the
+failure mode `docs/residual-mpc.md#mean_speed` records.
+
+`wrench` at `5 N` against a per-foot load near `260 N` is likewise below the
+noise the stabilizer already tolerates.
+
+**This explains two results that otherwise look meaningful.** The hybrid run
+matched `joint_position`-only (`1004` against `991` at iteration 150) because
+`root_pose` added nothing, and the wrench-only run matched ResidualMPC (`2340`
+against `2318`) because that channel added nothing either. Neither is evidence
+about feedback residuals; both are evidence that an inert channel is harmless.
+
 **THE PROBE BELOW IS INVALID — it has no time control.** Its four conditions ran
 sequentially on one environment without a reset, so each row is a *later* window
 of the same continuous episode. Running the identical probe against the unrelated
