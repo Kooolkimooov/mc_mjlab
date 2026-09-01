@@ -385,6 +385,14 @@ def main() -> None:
     "so this can run beside a training job, which already holds cpu_count - 2",
   )
   p.add_argument(
+    "--nominal",
+    action="store_true",
+    help="evaluate on the true model: drop the startup randomization events and "
+    "the actuator delay lag. Those draws are per-environment and fixed for the "
+    "run, and the two arms hold different ones, so they are the dominant "
+    "variance in a comparison (docs/evaluation.md#nominal)",
+  )
+  p.add_argument(
     "--skip-s",
     type=float,
     default=0.0,
@@ -503,6 +511,18 @@ def main() -> None:
   # place* before returning, zeroing both `episode_length_buf` and the reward
   # manager's `_episode_sums`, so the episode being measured is erased before
   # the caller sees `terminated`.
+  if args.nominal:
+    for name in (
+      "randomize_friction",
+      "randomize_pd_gains",
+      "randomize_effort",
+      "encoder_bias",
+    ):
+      cfg.events.pop(name, None)
+    for entity in cfg.scene.entities.values():
+      for actuator in getattr(entity, "articulation", entity).actuators:
+        actuator.delay_max_lag = 0
+    print("[compare] nominal model: startup randomization and delay lag removed")
   cfg.auto_reset = False
   env = ManagerBasedRlEnv(cfg, device=args.device)
 

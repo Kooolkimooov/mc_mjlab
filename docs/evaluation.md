@@ -664,3 +664,45 @@ episodes within an environment independent and this section obsolete.
 **History:**
 - 2026-09-01 — found after a 64-environment run reversed the sign of a result
   that four 16-environment runs had reported as positive.
+
+## nominal
+
+**Current:** `--nominal` drops the startup randomization events
+(`randomize_friction`, `randomize_pd_gains`, `randomize_effort`,
+`encoder_bias`) and zeroes the actuator delay lag, so both arms run the true
+model. It is off by default, which is how every comparison before 2026-09-01 was
+scored.
+
+**`play=True` does not disable randomization** — it changes only
+`console_output`, `print_residual_every` and `num_envs`. So evaluation and the
+viewer have always run on randomized friction (`+-10%`), PD gains (`+-5%`),
+effort limits (`+-5%`) and a two-step delay lag, with each environment holding
+its own draw for the whole run.
+
+**It is not just noise; it carries signal.** `std015` `model_999`, 64
+environments, `--skip-s 5.5`, clustered by environment:
+
+| | between-env sd | delta | p |
+| --- | ---: | ---: | ---: |
+| randomized | `5.98%` of mean | `-4.21%` | **`0.009`** |
+| `--nominal` | `4.31%` | `-1.32%` | `0.181` |
+
+On the true model the residual is indistinguishable from its prior. The
+significant deficit appears only under randomization, so the policy handles model
+variation worse than the MPC does — which is what one would expect of a prior
+that replans against whatever model it is given versus a network fitted to the
+centre of a training distribution. Reporting a single randomized number conflates
+tracking quality with robustness to model error.
+
+**Randomization is only `28%` of the variance.** Between-environment sd falls
+from `5.98%` to `4.31%`, so the remainder is per-environment command draws and
+kick samples. Matching those across the two arms — env `i` and env `i + N` given
+the same command sequence and the same kick — is the next reduction available,
+and a larger one than `--nominal` was.
+
+**Re-measure if:** the randomization ranges change, or the arms are given matched
+draws.
+
+**History:**
+- 2026-09-01 — added after unmatched randomization was found to be the confound
+  behind a result that reversed sign between 16 and 64 environments.

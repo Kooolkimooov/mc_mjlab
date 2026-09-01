@@ -936,6 +936,13 @@ is about `3%` of the mean, the same size as the effects claimed, and where the
 p-values treated correlated episodes as independent. The same checkpoint scored
 `+3.2%` at 16 environments and `-4.2%` at 64.
 
+**On the true model it is a wash.** Rerun with `--nominal`, which drops the
+startup randomization both arms were unknowingly being scored under, the deficit
+falls to `-1.3%` (p `0.18`) — indistinguishable from the prior. The significant
+`-4.2%` holds only under domain randomization, so the residual's real weakness is
+robustness to model variation rather than tracking.
+`docs/evaluation.md#nominal`
+
 **What the residual actually does.** It starts the robot moving sooner than the
 prior, during the `5.5 s` in which the FSM is still standing, and tracks worse
 once the gait exists. Unskipped scoring nets those together into an apparent
