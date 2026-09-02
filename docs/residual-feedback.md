@@ -212,10 +212,24 @@ configuration tested here — torque residual (`-2.64%`,
 survival), or this. The seed-to-seed spread is `~6` percentage points, which is
 larger than every effect any single run has claimed all session.
 
-**Two differences from the winning run**, neither large enough to matter: it
-scored `model_1100` from a longer resumed run rather than `model_999`, and ran a
-`30`-minute comparison rather than `20`. Neither plausibly spans `+4.35%` to
-`-9.65%`.
+**The `+4.35%` came from the resume, not the architecture.** Seed 42 retrained
+continuously to the same `1249` iterations, scored on the same `model_1100` with
+the same `30`-minute protocol — the interruption is the only variable removed:
+
+| run | prior | policy | delta | p |
+| --- | ---: | ---: | ---: | ---: |
+| seed 42, resumed | 0.08123 | 0.08476 | **`+4.35%`** | `<1e-5` |
+| seed 42, **clean** | 0.08098 | 0.08127 | **`+0.37%`** | `0.66` |
+
+Both arms' priors agree to `0.3%`, so this is a policy difference, not a baseline
+artifact. The resumed run reset `kick_scale` to `1.0` and re-climbed to `2.0`,
+and it kept improving to iteration `1129`; the continuous run peaked at `129` and
+was `4.7%` lower at `1100`. An interrupted curriculum appears to train better
+than a monotone one — a finding about `## survival_kick_curriculum`, not about
+wrench feedback.
+
+I earlier wrote that the resume and checkpoint differences were "neither large
+enough to matter". They were the whole effect.
 
 **The lesson is the protocol, not the architecture.** A single paired comparison
 returns `p < 1e-5` on ~1,000 episodes and still says almost nothing, because the
