@@ -691,8 +691,22 @@ shown on unseen terrain and gaits; training is on flat ground with no terrain
 randomization. The recurring impulses here were a local invention and a harder
 problem than the paper's, consuming reward its policy never has to defend.
 
-**One deviation:** the paper bounds the *norm*, while
-`push_by_setting_velocity` samples per axis, so a corner sample reaches `0.707`.
+**Sampled inside the norm ball, not per axis.** Fig. 4 bounds `||v_xy||` and
+`||w||`, and independent per-axis draws put **21.6%** of samples outside that
+ball, reaching `0.707` at the corners. `initial_velocity_kick` now draws a
+uniform angle with radius `0.5 * sqrt(u)` — the `sqrt` matters, since a uniform
+radius crowds the rim — and yaw uniformly in `[-0.5, 0.5]`.
+
+This is implemented in the subclass rather than in `push_and_record`, because
+that helper's `planar_speed` deliberately means a *fixed* magnitude at a random
+direction: `calibrate_recovery_detector.py` and `verify_live_recovery_detector.py`
+depend on it to probe a detector at a known push velocity, and spreading those
+over `0..v` would silently invalidate both.
+
+**The adaptive magnitude is off by default.** `kick_curriculum=False` now, since
+the paper's disturbance is a fixed distribution; the survival curriculum could
+also scale the kick to `2x`, and it made the two comparison arms face different
+difficulty. It remains available as an opt-in variant.
 
 **This is the first headroom a residual can actually reach.** Recovering from a
 kick is a torque-level problem; the tracking headroom is not, being fixed by the

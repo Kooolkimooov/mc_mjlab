@@ -77,6 +77,7 @@ def residual_mpc_env_cfg(
   num_envs: int = 128,
   num_workers: int | None = None,
   randomization: bool = True,
+  kick_curriculum: bool = False,
   pushes: bool = True,
   fixed_twist: tuple[float, float, float] | None = None,
   command_ranges: tuple[
@@ -355,10 +356,10 @@ def residual_mpc_env_cfg(
       ),
     ),
   )
-  if pushes:
-    # Paper-style adaptive difficulty: raise the kick above the advance survival
-    # rate, lower it below the regress rate.
-    # docs/residual-feedback.md#survival_kick_curriculum
+  if pushes and kick_curriculum:
+    # Off by default: the paper's disturbance is a fixed distribution, and an
+    # adaptive magnitude makes the arms face different difficulty.
+    # docs/residual-mpc.md#kick_curriculum
     cfg.curriculum = {
       "kick_difficulty": CurriculumTermCfg(func=mdp.survival_kick_curriculum)
     }

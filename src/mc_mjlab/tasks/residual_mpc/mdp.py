@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, cast
 import torch
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactSensor
+from mjlab.utils.lab_api.math import quat_apply_inverse
 
 from mc_mjlab.actions.residual_mpc_joint_torque_action import (
   ResidualMpcJointTorqueAction,
@@ -25,6 +26,11 @@ STEP_TIME_CALLBACK = "ismpc_walking::t"
 STEP_DURATION_CALLBACK = "ismpc_walking::get_ts_target"
 QP_OBJECTIVE_CALLBACK = "ismpc_walking::qp_objective"
 _ROBOT_CFG = SceneEntityCfg("robot")
+
+#: ResidualMPC Fig. 4 bounds the planar and yaw *norms*, not each axis.
+#: docs/residual-mpc.md#INITIAL_VELOCITY_RANGE
+PLANAR_KICK_SPEED = 0.5
+YAW_KICK_RATE = 0.5
 
 
 def _action(env: ManagerBasedRlEnv) -> ResidualMpcJointTorqueAction:
@@ -142,8 +148,8 @@ def second_action_rate(env: ManagerBasedRlEnv) -> torch.Tensor:
 
 
 def torque_l2(env: ManagerBasedRlEnv) -> torch.Tensor:
-  """Squared final actuator effort over every actuated joint."""
-  return torch.sum(torch.square(_action(env).final_effort), dim=1)
+  """Mean squared applied effort across the decimation window."""
+  return torch.sum(_action(env).mean_squared_effort, dim=1)
 
 
 def orientation_reward(
@@ -314,10 +320,38 @@ class initial_velocity_kick(shared_mdp.push_and_record):
     ids = ids[(age * env.step_dt >= warmup_s) & ~kicked]
     if ids.numel() == 0:
       return
-    scaled = {
-      k: (lo * self.scale, hi * self.scale) for k, (lo, hi) in velocity_range.items()
-    }
-    super().__call__(env, ids, scaled, asset_cfg=asset_cfg)
+    self._kick(env, ids, asset_cfg)
+
+  def _kick(
+    self,
+    env: ManagerBasedRlEnv,
+    ids: torch.Tensor,
+    asset_cfg: SceneEntityCfg | None,
+  ) -> None:
+    """Sample uniformly inside the paper's norm ball and add it to the base."""
+    asset = env.scene[(asset_cfg or _ROBOT_CFG).name]
+    # Fig. 4 bounds the *norms*, so sampling each axis independently would put
+    # 21.6% of draws outside the ball. docs/residual-mpc.md#INITIAL_VELOCITY_RANGE
+    vel_w = asset.data.root_link_vel_w[ids]
+    delta = torch.zeros_like(vel_w)
+    angle = 2.0 * torch.pi * torch.rand(len(ids), device=env.device)
+    # sqrt(u) keeps the disc uniform; without it the samples crowd the rim.
+    radius = (
+      PLANAR_KICK_SPEED
+      * self.scale
+      * torch.sqrt(torch.rand(len(ids), device=env.device))
+    )
+    delta[:, 0] = radius * torch.cos(angle)
+    delta[:, 1] = radius * torch.sin(angle)
+    yaw = YAW_KICK_RATE * self.scale
+    delta[:, 5] = torch.empty(len(ids), device=env.device).uniform_(-yaw, yaw)
+    # `root_link_vel_w` comes from `cvel`, which MuJoCo does not recompute until
+    # the next forward, so a before/after difference would read zero.
+    asset.write_root_link_velocity_to_sim(vel_w + delta, env_ids=ids)
+    self.last_push_vel[ids] = quat_apply_inverse(
+      asset.data.root_link_quat_w[ids], delta[:, :3]
+    )
+    self.last_push_step[ids] = env.common_step_counter
 
 
 def forward_speed(

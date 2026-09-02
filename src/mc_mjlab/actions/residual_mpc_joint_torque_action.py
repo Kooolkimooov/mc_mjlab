@@ -68,6 +68,8 @@ class ResidualMpcJointTorqueAction(McRtcResidualActionBase):
     self._blended_residual_torque = torch.zeros_like(self._residual_torque)
     self._nominal_torque = torch.zeros_like(self._residual_torque)
     self._final_effort = torch.zeros_like(self._residual_torque)
+    self._effort_sq_sum = torch.zeros_like(self._residual_torque)
+    self._effort_substeps = 0
     self._previous_joint_action = torch.zeros_like(self._processed_actions)
     self._second_previous_joint_action = torch.zeros_like(self._processed_actions)
     self.refresh_effort_limits_and_action_scale()
@@ -110,6 +112,9 @@ class ResidualMpcJointTorqueAction(McRtcResidualActionBase):
     self.blend_factor[env_ids] = values
 
   def process_actions(self, actions: torch.Tensor) -> None:
+    # A policy step begins, so the previous window's effort accumulator is spent.
+    self._effort_sq_sum.zero_()
+    self._effort_substeps = 0
     previous, second_previous = advance_action_history(
       self._processed_actions, self._previous_joint_action
     )
@@ -128,6 +133,7 @@ class ResidualMpcJointTorqueAction(McRtcResidualActionBase):
     self._blended_residual_torque[env_ids] = 0.0
     self._nominal_torque[env_ids] = 0.0
     self._final_effort[env_ids] = 0.0
+    self._effort_sq_sum[env_ids] = 0.0
 
   def _seed_interpolation(self, env_ids: torch.Tensor) -> None:
     stance = self._entity.data.joint_pos_biased[:, self._target_ids]
@@ -163,8 +169,19 @@ class ResidualMpcJointTorqueAction(McRtcResidualActionBase):
     self._residual_torque.copy_(residual)
     self._blended_residual_torque.copy_(blended)
     self._final_effort.copy_(effort)
+    # `torque_l2` scores the whole decimation window, not the last substep:
+    # the 500 Hz peaks between policy steps are real applied control.
+    self._effort_sq_sum += effort.square()
+    self._effort_substeps += 1
     self._entity.set_joint_effort_target(effort, joint_ids=self._target_ids)
     return executed, projected
+
+  @property
+  def mean_squared_effort(self) -> torch.Tensor:
+    """Mean squared applied effort across the decimation window."""
+    if self._effort_substeps == 0:
+      return self._final_effort.square()
+    return self._effort_sq_sum / self._effort_substeps
 
   @property
   def requested_joint_action(self) -> torch.Tensor:
