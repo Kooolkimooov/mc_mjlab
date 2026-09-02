@@ -245,9 +245,29 @@ protocol — gives `-4.66%` (p `<1e-5`), worse than that seed's own clean
 `-11.8%` to `+4.35%`. The `+4.35%` is best read as seed-42 noise that happened to
 land on a resumed run, not as evidence about resuming or about wrench feedback.
 
+**Five randomly drawn seeds settle it.** Seeds `51272, 66938, 18536, 25104, 9038`
+(drawn with `secrets.randbelow`, recorded before use), each through the identical
+resume pipeline:
+
+| seed | prior | policy | delta | z |
+| --- | ---: | ---: | ---: | ---: |
+| 18536 | 0.08150 | 0.07150 | `-12.27%` | `-16.09` |
+| 25104 | 0.08059 | 0.07771 | `-3.57%` | `-4.51` |
+| 51272 | 0.08017 | 0.07164 | `-10.63%` | `-13.51` |
+| 66938 | 0.08168 | 0.07883 | `-3.50%` | `-4.38` |
+| 9038 | 0.08153 | 0.07383 | `-9.45%` | `-13.05` |
+
+**Mean `-7.88%`, sd `4.10`, t `-4.30`, `0/5` positive.** Adding seeds 42 and 1:
+seven resumed runs, mean `-5.68%`, range `-12.3%` to `+4.35%`, **`1/7` positive**.
+
+Every prior arm scores `0.080-0.082` while the policies span `0.0715-0.0848`, so
+the variance lives in the policy, not the measurement. Seed 42's `+4.35%` is the
+tail of a distribution centred near `-6%`.
+
 I twice explained that single number with a mechanism — first the architecture,
-then the resume — and both explanations died on the next measurement. The spread
-is simply wider than the effect.
+then the resume — and both died on the next measurement. The spread was simply
+wider than the effect, which is what a null distribution measured up front would
+have shown before either explanation was written down.
 
 **The lesson is the protocol, not the architecture.** A single paired comparison
 returns `p < 1e-5` on ~1,000 episodes and still says almost nothing, because the
