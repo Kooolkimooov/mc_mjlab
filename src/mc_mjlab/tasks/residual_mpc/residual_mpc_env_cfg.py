@@ -103,7 +103,12 @@ def residual_mpc_env_cfg(
   if len(leg_joints) != 12:
     raise ValueError(f"expected HRP5P's 12 leg joints, got {len(leg_joints)}")
   nominal_height = mc_rtc.get_default_root_position(robot_name)[2]
-  joint_cfg = SceneEntityCfg("robot", joint_names=tuple(map(re.escape, actuated)))
+  # HRP5P actuates 18 finger joints that no gait moves. Leaving them in dilutes
+  # every per-joint average by 53/35 and pads the observation.
+  # docs/residual-mpc.md#joint_cfg
+  fixed = set(mc_rtc.get_fixed_joints(robot_name))
+  mobile = tuple(name for name in actuated if name not in fixed)
+  joint_cfg = SceneEntityCfg("robot", joint_names=tuple(map(re.escape, mobile)))
 
   actions: dict[str, ActionTermCfg] = {
     mdp.ACTION_NAME: ResidualMpcJointTorqueActionCfg(

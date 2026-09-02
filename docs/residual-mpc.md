@@ -963,6 +963,34 @@ than producing gain — which was its purpose, since it makes `model_999` scorea
 - 2026-09-01 — `0.30 -> 0.15`, set from the iteration-140 peak of the
   `entropy_coef = 0.01` run.
 
+## joint_cfg
+
+**Current:** the 35 joints HRP5P actually moves — its 53 actuated joints minus
+the 18 finger joints `get_fixed_joints` already excludes from the residual. It
+covers the `joint_position` and `joint_velocity` observations and the
+`joint_regularization` reward.
+
+**The fingers were diluting a per-joint average.** `joint_regularization` is a
+mean over its joint set, so with all 53 in the denominator a leg deviation
+carried `35/53` of the weight it should, and the observation carried 18 channels
+that no gait moves. They are `LIDIP`, `LIMP`, `LIPIP`, `LTDIP` and their mirrors
+— index, middle and thumb, three joints each per hand — and the action term
+already treats them as fixed, so nothing was ever driving them.
+
+**It does not restore the paper's denominator, and cannot.** ResidualMPC's robot
+has 18 actuators in total; HRP5P has 35 once the fingers are gone, because it
+carries arms, torso and head the MIT Humanoid does not. Excluding the fingers
+recovers a factor of `1.5`, not `2.9`. Any remaining difference in per-joint
+weight is a property of the robot, not a bug to fix.
+
+**Re-measure if:** the robot changes, or `get_fixed_joints` changes what it
+carves out.
+
+**History:**
+- 2026-09-02 — fingers excluded after external review; the observation narrows
+  by 36 channels and old checkpoints no longer load, which the width check
+  catches on its own.
+
 ## paper_torque_blend
 
 **Current:** eq (23) references the **default joint posture**; the PD fallback
