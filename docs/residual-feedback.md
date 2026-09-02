@@ -161,6 +161,52 @@ one is not.
 - 2026-09-01 — three runs plus a control; the feedback channel halves survival
   and the curriculum is exonerated.
 
+## WRENCH_RESULT
+
+**Current:** wrench feedback is the first residual in this repository measured to
+beat the controller it modifies. `rfl-wrench50-1k` `model_1100`, nominal model,
+`5.5 s` skipped, 64 environments, clustered by environment:
+
+| term | prior | policy | delta | p |
+| --- | ---: | ---: | ---: | ---: |
+| `linear_tracking` | 0.06049 | 0.06307 | `+4.3%` | `1.9e-05` |
+| `torque_l2` | -0.04798 | -0.04713 | `+1.8%` (less torque) | `1.7e-09` |
+| `termination` | -0.00056 | -0.00039 | `-29.7%` | `2.2e-03` |
+| **TOTAL** per-episode | 0.08155 | 0.08520 | **`+4.5%`** | `7.0e-07` |
+| **TOTAL clustered** | | | **`+4.35%`** | **`<1e-5`** |
+
+It tracks better, spends *less* torque, and falls `30%` less often — the inverse
+of every ResidualMPC result, where the residual bought nothing with more torque.
+
+**Against the same protocol on the same day:**
+
+| policy | clustered delta | p |
+| --- | ---: | ---: |
+| ResidualMPC residual | `-2.64%` | `0.003` |
+| wrench feedback | **`+4.35%`** | **`<1e-5`** |
+
+**Why this channel and not the other.** Falsifying joint angles corrupts the
+kinematic state every downstream computation rests on, and halves survival
+(`## RESULT`). Falsifying a foot wrench perturbs a quantity the stabilizer
+already treats as contested and noisy, so the correction enters a loop built to
+absorb disagreement. Ranjbar's formulation does transfer to a balance-critical
+prior — through the right feedback space.
+
+**It needed the right scale and the right columns.** At `5 N` the channel was
+inert and its run was indistinguishable from ResidualMPC; `50 N` is where it
+starts to move the solve (`## feedback_modalities`). The `250`-iteration run also
+understated it: reward per step peaked at iteration `1129`, past where the
+ResidualMPC control peaked (`864`).
+
+**What would make this a claim.** One seed, one checkpoint. A second seed is the
+obvious next step, and `feedback_scale` for the joint channel remains unswept, so
+"proprioceptive feedback is harmful" is established only at `0.02 rad`.
+
+**Re-measure if:** the wrench scale, the disturbance, or the prior changes.
+
+**History:**
+- 2026-09-02 — first measured win for a residual in this repository.
+
 ## feedback_modalities
 
 **Current:** `("joint_position",)` by default. Each entry adds a block to the end

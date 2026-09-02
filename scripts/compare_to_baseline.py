@@ -385,6 +385,17 @@ def main() -> None:
     "so this can run beside a training job, which already holds cpu_count - 2",
   )
   p.add_argument(
+    "--feedback-modalities",
+    default="",
+    help="comma-separated feedback spaces for the residual-feedback task; the "
+    "checkpoint's action width is set by these, so a mismatch fails to load",
+  )
+  p.add_argument(
+    "--no-torque-channel",
+    action="store_true",
+    help="score a feedback-only residual-feedback checkpoint",
+  )
+  p.add_argument(
     "--nominal",
     action="store_true",
     help="evaluate on the true model: drop the startup randomization events and "
@@ -511,6 +522,17 @@ def main() -> None:
   # place* before returning, zeroing both `episode_length_buf` and the reward
   # manager's `_episode_sums`, so the episode being measured is erased before
   # the caller sees `terminated`.
+  names = [n.strip() for n in args.feedback_modalities.split(",") if n.strip()]
+  if names or args.no_torque_channel:
+    action_cfg = cfg.actions["mc_rtc_residual"]
+    if names:
+      action_cfg.feedback_modalities = tuple(names)
+    if args.no_torque_channel:
+      action_cfg.torque_channel = False
+    print(
+      f"[compare] residual-feedback action: {action_cfg.feedback_modalities}, "
+      f"torque_channel={action_cfg.torque_channel}"
+    )
   if args.nominal:
     for name in (
       "randomize_friction",
