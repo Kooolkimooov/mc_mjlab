@@ -155,7 +155,10 @@ def verify_history() -> None:
 
 def verify_blending() -> None:
   """Verify PD fallback, paper residual, lambda zero, scales, and projection."""
-  q_hat = torch.tensor([[1.0, 2.0]])
+  # Deliberately distinct: eq (23) references the default posture while the PD
+  # fallback tracks the controller, and a single tensor cannot catch a swap.
+  controller_q = torch.tensor([[1.0, 2.0]])
+  default_q = torch.tensor([[0.7, 1.9]])
   q = torch.tensor([[0.5, 1.5]])
   qd = torch.tensor([[0.2, -0.1]])
   controller_qd = torch.tensor([[0.3, 0.4]])
@@ -165,7 +168,8 @@ def verify_blending() -> None:
   kd = torch.tensor([[2.0, 4.0]])
   mask = torch.ones_like(action)
   nominal, residual, blended = paper_torque_blend(
-    q_hat,
+    controller_q,
+    default_q,
     q,
     qd,
     controller_qd,
@@ -177,10 +181,13 @@ def verify_blending() -> None:
     mask,
   )
   torch.testing.assert_close(nominal, torch.tensor([[5.2, 7.0]]))
-  torch.testing.assert_close(residual, torch.tensor([[5.6, 6.4]]))
-  torch.testing.assert_close(blended, torch.tensor([[0.56, 0.64]]))
+  # Against the default posture. Referencing the controller target instead --
+  # the bug this replaces -- gives [[5.6, 6.4]].
+  torch.testing.assert_close(residual, torch.tensor([[2.6, 4.4]]))
+  torch.testing.assert_close(blended, torch.tensor([[0.26, 0.44]]))
   _, zero_residual, zero_blended = paper_torque_blend(
-    q_hat,
+    controller_q,
+    default_q,
     q,
     qd,
     controller_qd,

@@ -21,7 +21,8 @@ def advance_action_history(
 
 
 def paper_torque_blend(
-  q_hat: torch.Tensor,
+  controller_q: torch.Tensor,
+  default_q: torch.Tensor,
   q_biased: torch.Tensor,
   qd: torch.Tensor,
   controller_qd: torch.Tensor,
@@ -33,9 +34,12 @@ def paper_torque_blend(
   residual_mask: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
   """Return nominal, residual, and blended-residual torques."""
-  fallback = kp * (q_hat - q_biased) + kd * (controller_qd - qd)
+  # Two different references, and swapping them silently changes the architecture:
+  # the fallback tracks the controller, while eq (23)'s q_hat is the *default*
+  # posture. docs/residual-mpc.md#paper_torque_blend
+  fallback = kp * (controller_q - q_biased) + kd * (controller_qd - qd)
   nominal = torch.where(controller_torque != 0.0, controller_torque, fallback)
-  residual = kp * (joint_action + q_hat - q_biased) - kd * qd
+  residual = kp * (joint_action + default_q - q_biased) - kd * qd
   residual = residual * residual_mask
   blended = blend_factor.unsqueeze(-1) * residual
   return nominal, residual, blended

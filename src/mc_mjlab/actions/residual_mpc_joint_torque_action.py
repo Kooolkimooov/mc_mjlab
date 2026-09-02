@@ -145,6 +145,7 @@ class ResidualMpcJointTorqueAction(McRtcResidualActionBase):
     qd = self._entity.data.joint_vel[:, self._target_ids]
     nominal, residual, blended = paper_torque_blend(
       interpolated_control["q"],
+      self._entity.data.default_joint_pos[:, self._target_ids],
       q_biased,
       qd,
       interpolated_control["alpha"],

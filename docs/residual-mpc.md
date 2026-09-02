@@ -916,6 +916,53 @@ than producing gain — which was its purpose, since it makes `model_999` scorea
 - 2026-09-01 — `0.30 -> 0.15`, set from the iteration-140 peak of the
   `entropy_coef = 0.01` run.
 
+## paper_torque_blend
+
+**Current:** eq (23) references the **default joint posture**; the PD fallback
+references the **controller target**. They are separate arguments, `default_q`
+and `controller_q`, because a single tensor cannot express the difference and
+cannot be tested.
+
+**This was wrong until 2026-09-02, and it changed the architecture.** One `q_hat`
+served both, filled from `interpolated_control["q"]` — the controller's moving
+target. So the implemented residual was
+
+`Kp(a + q_cmd - q) - Kd qd` instead of `Kp(a + q_default - q) - Kd qd`,
+
+differing by `Kp(q_cmd - q_default)`, scaled by lambda in the blend and
+substantial while walking.
+
+**The paper is explicit**, immediately after eq (25): "*a* is the action output
+from the residual policy, **q_hat are default joint positions**". It also
+contrasts the two action spaces directly — eq (22) is "relative to `q_cmd` which
+is non-stationary" while eq (23) "outputs joint setpoints **relative to default
+joint positions**". The implementation had case 1's reference inside case 2's
+equation.
+
+**Why it matters more than a scale error.** With a zero action the buggy residual
+reduces to `Kp(q_cmd - q) - Kd qd`, a second copy of the prior's own tracking
+torque. The paper's version gives a pull toward the default posture, which is
+precisely why lambda exists: "the residual policy will have non-zero torques even
+if the network is zero-initialised. Consequently, we introduce a weighting
+parameter." The bug deleted the effect lambda was introduced to control, and it
+is a plausible cause of a residual that preserves or amplifies its prior rather
+than correcting it.
+
+**Every checkpoint before this is incompatible** with the corrected semantics.
+The measured results recorded elsewhere in this file — including
+`## POWERED_RESULT` — were produced under the wrong equation and say nothing
+about the paper's architecture.
+
+**Not shared with residual_balance.** That task's torque action builds its
+nominal from `interpolated_control["q"]` and adds the residual directly as a
+torque, with no `q_hat` term, so it never had this reference to confuse.
+
+**Re-measure if:** the action space or the default stance changes.
+
+**History:**
+- 2026-09-02 — split into `controller_q` and `default_q` after external review;
+  the contract now uses deliberately different tensors, so a swap fails it.
+
 ## POWERED_RESULT
 
 **Current:** measured properly, the residual is **worse** than its prior on
