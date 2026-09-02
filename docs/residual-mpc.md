@@ -948,7 +948,15 @@ parameter." The bug deleted the effect lambda was introduced to control, and it
 is a plausible cause of a residual that preserves or amplifies its prior rather
 than correcting it.
 
-**Every checkpoint before this is incompatible** with the corrected semantics.
+**Every checkpoint before this is incompatible** with the corrected semantics,
+and `ACTION_SEMANTICS_VERSION` now enforces that rather than trusting a reader to
+remember. `ResidualMpcOnPolicyRunner` stamps it into each checkpoint and refuses
+a mismatch — including on actor-only loads, which is the path
+`compare_to_baseline.py` uses and which no shape check would catch, since the fix
+leaves observations and actions the same width. The strictness lives in a
+ResidualMPC subclass because `ResidualBalanceOnPolicyRunner` only warns on a
+missing manifest, which its own legacy checkpoints rely on.
+
 The measured results recorded elsewhere in this file — including
 `## POWERED_RESULT` — were produced under the wrong equation and say nothing
 about the paper's architecture.
@@ -994,6 +1002,15 @@ robustness to model variation rather than tracking.
 prior, during the `5.5 s` in which the FSM is still standing, and tracks worse
 once the gait exists. Unskipped scoring nets those together into an apparent
 small gain; separating them shows a startup effect and a walking regression.
+
+**This is evidence about the hybrid, not about the paper.** The prior here is a
+kinematic ISMPC walking planner at 500 Hz replanning at 20 Hz, delivered one
+control period late, not the paper's synchronous torque-producing kinodynamic
+whole-body MPC at 100 Hz (`## FIDELITY_LIMITS`). The residual cannot reach the
+footstep plan that sets the speed limit (`## kinematics_cstr`). A negative result
+here says this architecture did not improve *this* controller; it is not a
+replication failure of Jeon et al. It was also measured under the wrong blending
+equation — see `## paper_torque_blend`.
 
 **Re-measure if:** anything in the task or policy changes — and at `--num-envs 64`
 or more, with the clustered test, never at 16.

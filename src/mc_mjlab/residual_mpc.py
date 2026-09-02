@@ -2,6 +2,11 @@
 
 import torch
 
+#: Bumped when the blending equation changes meaning; version 1 referenced the
+#: controller target where eq (23) requires the default posture, so its actions
+#: are not comparable. docs/residual-mpc.md#paper_torque_blend
+ACTION_SEMANTICS_VERSION = 2
+
 
 def paper_joint_action_scale(
   effort_limit: torch.Tensor, kp: torch.Tensor, blend_factor: float
