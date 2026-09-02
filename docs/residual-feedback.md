@@ -408,6 +408,34 @@ misreporting joint positions.
 is a research knob; on a real robot a false state estimate reaching a stabilizer
 is a fall, and the scale is not a safety bound in any certified sense.
 
+**Swept, and there is no usable window.** All twelve joint channels held at `+1`,
+fresh environment per scale, `18 s` scored after a `12 s` settle:
+
+| scale (rad) | `qp` | `vx` | `z_min` | falls | **MPC stability errors** |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| control | -11,265 | 0.2340 | 0.7508 | 4 | **0** |
+| 0.002 | -11,265 | 0.2338 | 0.7508 | 4 | **0** |
+| 0.005 | -11,300 | 0.2346 | 0.7509 | 4 | 3 |
+| 0.01 | -11,313 | 0.2347 | 0.7507 | 4 | 3 |
+| **0.02** (default) | -11,644 | 0.2389 | 0.7505 | 4 | 4 |
+| 0.05 | -10,452 | 0.2333 | **0.5600** | 5 | **18** |
+
+`0.002` is inert to four decimals on every measure. From `0.005` the ISMPC begins
+emitting `MPC result is too far from stability condition`, and by `0.05` it
+collapses eighteen times and minimum root height falls to `0.56 m` — the robot is
+going down. There is no scale at which this channel does something without
+breaking the solver.
+
+**Read the error count, not `qp` or `vx`.** Those barely move from `0.002` to
+`0.02` while the solver is already failing, because `run()` keeps returning true
+after that error (`CLAUDE.md`, mc_rtc gotchas). A collapsed MPC leaves almost no
+trace in the aggregate metrics; height and the error count are the honest signals.
+
+**Caveat on the worst case.** This holds all twelve joints saturated in one
+direction. A trained policy applies a smaller, varied pattern, so the practical
+threshold may sit higher — confirming that needs a training run at `0.005`, which
+is exactly the gap that made the `5 N` wrench result misleading.
+
 **Re-measure if:** the encoder bias randomization changes, or a robot other than
 HRP5P is used — the tolerable offset is a property of the stabilizer's gains.
 
