@@ -99,7 +99,34 @@ training under matched conditions, which is what the four runs share. A paired
 `compare_to_baseline` at 64 environments would be needed to say anything about
 tracking quality.
 
-**Wrench feedback does not harm survival, contrary to what was expected here.**
+**Wrench feedback at a live scale survives best of anything tried.** Re-run at
+`50 N` — the scale that actually reaches the stabilizer — against the earlier
+`5 N` run that measured an inert channel:
+
+| run at iteration ~249 | episode length | `kick_scale` |
+| --- | ---: | ---: |
+| `joint_position` feedback | ~950 | 0.4 |
+| ResidualMPC | 2318 | 1.3 |
+| wrench, `5 N` (inert) | 2340 | 1.3 |
+| **wrench, `50 N` (live)** | **2419** | **2.0** |
+
+The difficulty column carries as much weight as the length: the `50 N` run
+survived *longer* while the curriculum held its kick at the `2.0` ceiling,
+`1.5x` harder than what ResidualMPC was facing. This section previously
+predicted wrench feedback would be worse than joint position; it is better than
+either, and better than no feedback at all.
+
+**So the harm is proprioceptive, not general.** Falsifying joint angles corrupts
+the kinematic state every downstream computation is built on. Falsifying a foot
+wrench perturbs a quantity the stabilizer already treats as noisy and contested,
+and the policy can apparently use that channel productively.
+
+**Not yet a claim about policy quality.** These are training curves under a
+curriculum that moved differently for each arm, so they compare survival, not
+tracking. A paired `compare_to_baseline` at 64 environments with `--nominal` is
+what would settle whether the wrench policy beats its own prior.
+
+**Superseded prediction:**
 A 250-iteration run with `wrench` alone (`torque_channel=False`, no joint
 channel) tracks ResidualMPC rather than the joint-position feedback runs:
 
