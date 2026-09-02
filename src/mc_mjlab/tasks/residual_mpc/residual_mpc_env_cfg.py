@@ -56,6 +56,9 @@ INITIAL_VELOCITY_RANGE = {
 
 #: The FSM is not walking before this. docs/residual-mpc.md#KICK_WARMUP_S
 KICK_WARMUP_S = 8.0
+
+#: One command per episode. docs/residual-mpc.md#resampling_time_range
+EPISODE_LENGTH_S = 30.0
 #: Sized so the bare ISMPC scores about two thirds at the top of the box,
 #: leaving a third for the residual. The paper does not fix sigma.
 #: docs/residual-mpc.md#LINEAR_TRACKING_SIGMA
@@ -138,7 +141,9 @@ def residual_mpc_env_cfg(
   commands: dict[str, CommandTermCfg] = {
     COMMAND_NAME: UniformVelocityCommandCfg(
       entity_name="robot",
-      resampling_time_range=(3.0, 8.0),
+      # Held for the whole episode: the ISMPC needs many gait cycles to
+      # realise a change, so resampling faster trains the transient.
+      resampling_time_range=(EPISODE_LENGTH_S, EPISODE_LENGTH_S),
       rel_standing_envs=0.0 if fixed_twist is not None else 0.1,
       heading_command=False,
       debug_vis=play,
@@ -336,7 +341,7 @@ def residual_mpc_env_cfg(
     events=events,
     metrics=metrics,
     decimation=10,
-    episode_length_s=30.0,
+    episode_length_s=EPISODE_LENGTH_S,
     sim=SimulationCfg(
       njmax=1500,
       nconmax=100,

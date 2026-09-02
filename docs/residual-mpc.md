@@ -133,6 +133,39 @@ episode length change — all four set where the baseline sits against the ceili
 - 2026-08-28 — first seed-42 baseline comparison; no measurable gain over the
   zero-action arm, and the objective is `97.9-99.99%` satisfied without a policy.
 
+## resampling_time_range
+
+**Current:** one command held for the whole episode
+(`EPISODE_LENGTH_S`, `30.0 s`). It was `(3.0, 8.0)`.
+
+**The controller was almost never given time to realise a command.** `## SETTLE_S`
+records that the ISMPC follows a changed reference over many gait cycles, and
+`15 s` is discarded before scoring for that reason. Resampling every `3-8 s`
+therefore replaced the command before it was tracked, so training optimised
+command transients while the envelope calibration in `## COMMAND_RANGES` used
+long held commands. The two measured different things.
+
+**It matches the observed behaviour.** The policy that came out of this protocol
+starts walking sooner than its prior and tracks worse once walking is established
+(`docs/evaluation.md#skip_s`) — which is what optimising transients would produce.
+
+**What an episode now contains:** about `5.5 s` of FSM startup, a settling walk,
+the kick at `KICK_WARMUP_S = 8.0`, then recovery and steady tracking under one
+unchanging command. Command diversity comes from the 128 parallel environments
+rather than from resampling inside an episode.
+
+**Still outstanding.** The startup is inside the scored window, so the policy can
+still earn reward for creeping forward before the gait exists; a pre-roll that
+steps the controller to walking with the residual held at zero and nothing
+scored would remove it at the source, where `--skip-s` only removes it from the
+measurement.
+
+**Re-measure if:** `EPISODE_LENGTH_S` or the controller's settling time changes.
+
+**History:**
+- 2026-09-02 — held for the episode after external review pointed out the
+  conflict with the settling time.
+
 ## SETTLE_S
 
 **Current:** `15 s` discarded before scoring, against a `30 s` default episode.
