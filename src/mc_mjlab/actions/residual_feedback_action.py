@@ -36,16 +36,16 @@ class ResidualFeedbackJointTorqueActionCfg(ResidualMpcJointTorqueActionCfg):
   root_translation_scale: float = 0.0025
   """Metres of root offset at a saturated root_pose translation action."""
 
-  root_rotation_scale: float = 0.005
+  root_rotation_scale: float = 0.02
   """Radians of root tilt at a saturated root_pose rotation action."""
 
   joint_velocity_scale: float = 0.05
   """Rad/s of encoder-velocity offset at a saturated joint_velocity action."""
 
-  wrench_force_scale: float = 5.0
+  wrench_force_scale: float = 50.0
   """Newtons of force offset at a saturated wrench action."""
 
-  wrench_torque_scale: float = 2.0
+  wrench_torque_scale: float = 20.0
   """Newton-metres of moment offset at a saturated wrench action."""
 
   torque_channel: bool = True

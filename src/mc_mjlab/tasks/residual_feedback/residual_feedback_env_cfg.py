@@ -14,7 +14,10 @@ from mc_mjlab.tasks.residual_mpc.residual_mpc_env_cfg import residual_mpc_env_cf
 FEEDBACK_MODALITIES = ("joint_position", "root_pose")
 FEEDBACK_SCALE = 0.02
 ROOT_TRANSLATION_SCALE = 0.0025
-ROOT_ROTATION_SCALE = 0.005
+ROOT_ROTATION_SCALE = 0.02
+JOINT_VELOCITY_SCALE = 0.05
+WRENCH_FORCE_SCALE = 50.0
+WRENCH_TORQUE_SCALE = 20.0
 
 
 def residual_feedback_env_cfg(
@@ -23,6 +26,9 @@ def residual_feedback_env_cfg(
   feedback_scale: float = FEEDBACK_SCALE,
   root_translation_scale: float = ROOT_TRANSLATION_SCALE,
   root_rotation_scale: float = ROOT_ROTATION_SCALE,
+  joint_velocity_scale: float = JOINT_VELOCITY_SCALE,
+  wrench_force_scale: float = WRENCH_FORCE_SCALE,
+  wrench_torque_scale: float = WRENCH_TORQUE_SCALE,
   torque_channel: bool = True,
   **kwargs,
 ) -> ManagerBasedRlEnvCfg:
@@ -37,6 +43,9 @@ def residual_feedback_env_cfg(
     feedback_scale=feedback_scale,
     root_translation_scale=root_translation_scale,
     root_rotation_scale=root_rotation_scale,
+    joint_velocity_scale=joint_velocity_scale,
+    wrench_force_scale=wrench_force_scale,
+    wrench_torque_scale=wrench_torque_scale,
     torque_channel=torque_channel,
   )
   return cfg

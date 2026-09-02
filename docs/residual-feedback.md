@@ -174,7 +174,33 @@ residual's rotation vector, multiplies in the body frame, and renormalises.
 block in either the named-routing or the fallback path, and the IMU columns are
 overwritten afterwards, so the offset is applied last rather than inside a branch.
 
-**Only `joint_position` is a working channel.** Measured with a fresh
+**All three channels work once they reach the right columns.** `root_pose` was
+offsetting the root block, which mc_rtc ignores for orientation; rotating the
+**IMU** instead — measured gravity by `-delta`, so the observer infers `+delta` of
+tilt — makes it live. `wrench` needed a scale above the stabilizer's own noise.
+Fresh environment per condition, each against its own zero control:
+
+| condition | `qp_objective` | `vx` |
+| --- | ---: | ---: |
+| control | -6,149 | +0.1058 |
+| IMU pitch, `0.02 rad` | **-6,774** (`+10%`) | **+0.1245** (`+18%`) |
+| IMU pitch, `0.10 rad` | **-5,550** (`-10%`) | **+0.0955** (`-10%`) |
+| foot `Fz`, `25 N` | -6,148 | +0.1055 |
+| foot `Fz`, **`50 N`** | **-6,663** (`+8%`) | **+0.1200** (`+13%`) |
+
+`planned_step_dx` barely moves in any of these: a false tilt or foot load changes
+how the stabilizer *executes* a step, not the footstep plan, which the velocity
+command sets. Reading only `plan_dx` would have called these inert too.
+
+**Defaults are now these measurements**, not guesses: `root_rotation_scale`
+`0.02`, `wrench_force_scale` `50.0`, `wrench_torque_scale` `20.0`. The earlier
+`0.005` and `5.0` were set from the confounded probe below and were both beneath
+the threshold where anything happens.
+
+**The effect is not monotone.** `0.02 rad` of false tilt speeds the robot up
+`18%`, `0.10 rad` slows it `10%`. Do not extrapolate from one point.
+
+**Superseded: only `joint_position` is a working channel.** Measured with a fresh
 environment per condition and an explicit zero control, `root_pose` and `wrench`
 move nothing:
 

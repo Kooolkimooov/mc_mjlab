@@ -451,12 +451,32 @@ class ControllerIoBinding:
     )
     return out / np.maximum(np.linalg.norm(out, axis=1, keepdims=True), 1.0e-12)
 
+  @staticmethod
+  def _rotate_by_rotvec(vec: np.ndarray, rotvec: np.ndarray) -> np.ndarray:
+    """Rodrigues rotation of row vectors by a per-row rotation vector."""
+    angle = np.linalg.norm(rotvec, axis=1, keepdims=True)
+    axis = rotvec / np.maximum(angle, 1.0e-12)
+    cos, sin = np.cos(angle), np.sin(angle)
+    cross = np.cross(axis, vec)
+    dot = np.sum(axis * vec, axis=1, keepdims=True)
+    return vec * cos + cross * sin + axis * dot * (1.0 - cos)
+
   def _apply_state_feedback_offsets(self, in_np: np.ndarray) -> None:
     """Offset root pose and wrenches after every branch that writes them."""
     if self._wrench_offset_np is not None:
       wo = self.layout.wrench_off
       width = 6 * len(self.layout.wrenches)
       in_np[:, wo : wo + width] += self._wrench_offset_np
+    if self._root_rotation_offset_np is not None and len(self.layout.imu):
+      # mc_rtc's observer takes base tilt from the IMU, not from the root block,
+      # so orientation is falsified by rotating measured gravity the other way.
+      # docs/residual-feedback.md#feedback_modalities
+      io_ = self.layout.imu_off
+      for name, lo in (("gyro", io_), ("accel", io_ + 3)):
+        del name
+        in_np[:, lo : lo + 3] = self._rotate_by_rotvec(
+          in_np[:, lo : lo + 3], -self._root_rotation_offset_np
+        )
     ro = self.layout.root_off
     if self._root_translation_offset_np is not None:
       in_np[:, ro : ro + 3] += self._root_translation_offset_np
