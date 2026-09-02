@@ -228,8 +228,26 @@ was `4.7%` lower at `1100`. An interrupted curriculum appears to train better
 than a monotone one — a finding about `## survival_kick_curriculum`, not about
 wrench feedback.
 
-I earlier wrote that the resume and checkpoint differences were "neither large
-enough to matter". They were the whole effect.
+**And the resume explanation fails too.** Running the identical resume pipeline
+on seed 1 — train `250`, resume to `1249`, score `model_1100`, same `30`-minute
+protocol — gives `-4.66%` (p `<1e-5`), worse than that seed's own clean
+`model_150`. Resuming helped seed 42 and hurt seed 1, so it is not a mechanism.
+
+| run | delta | p |
+| --- | ---: | ---: |
+| seed 42 resumed | **`+4.35%`** | `<1e-5` |
+| seed 42 clean | `+0.37%` | `0.66` |
+| seed 1 resumed | **`-4.66%`** | `<1e-5` |
+| seed 1 clean, `model_150` | `-1.82%` | `0.06` |
+| seed 1 clean, `model_999` | `-7.83%` | `<1e-5` |
+
+**One positive result in eight measurements** of this configuration, spanning
+`-11.8%` to `+4.35%`. The `+4.35%` is best read as seed-42 noise that happened to
+land on a resumed run, not as evidence about resuming or about wrench feedback.
+
+I twice explained that single number with a mechanism — first the architecture,
+then the resume — and both explanations died on the next measurement. The spread
+is simply wider than the effect.
 
 **The lesson is the protocol, not the architecture.** A single paired comparison
 returns `p < 1e-5` on ~1,000 episodes and still says almost nothing, because the
