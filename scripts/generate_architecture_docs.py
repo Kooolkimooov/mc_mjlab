@@ -696,6 +696,8 @@ def heading_anchors(text: str) -> set[str]:
     if line.startswith("#"):
       head = line.lstrip("#").strip()
       found.add(re.sub(r"[^\w\- ]", "", head).strip().lower().replace(" ", "-"))
+      # Linked verbatim so grep finds the heading. docs/README.md
+      found.add(head)
   return found
 
 

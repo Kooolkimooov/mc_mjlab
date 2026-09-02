@@ -47,7 +47,8 @@ COMMAND_NAME = "twist"
 #: docs/residual-mpc.md#COMMAND_RANGES
 COMMAND_RANGES = ((0.15, 0.40), (0.0, 0.0), (0.0, 0.0))
 
-#: Paper-faithful reset disturbance, per axis. docs/residual-mpc.md#INITIAL_VELOCITY_RANGE
+#: Paper-faithful kick bound, sampled inside the norm ball by
+#: `mdp.initial_velocity_kick`. docs/residual-mpc.md#INITIAL_VELOCITY_RANGE
 INITIAL_VELOCITY_RANGE = {
   "x": (-0.5, 0.5),
   "y": (-0.5, 0.5),
@@ -364,7 +365,7 @@ def residual_mpc_env_cfg(
   if pushes and kick_curriculum:
     # Off by default: the paper's disturbance is a fixed distribution, and an
     # adaptive magnitude makes the arms face different difficulty.
-    # docs/residual-mpc.md#kick_curriculum
+    # docs/residual-mpc.md#INITIAL_VELOCITY_RANGE
     cfg.curriculum = {
       "kick_difficulty": CurriculumTermCfg(func=mdp.survival_kick_curriculum)
     }

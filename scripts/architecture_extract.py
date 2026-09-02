@@ -498,6 +498,9 @@ def doc_anchors() -> dict[str, set[str]]:
       if line.startswith("#"):
         text = line.lstrip("#").strip()
         anchors.add(re.sub(r"[^\w\- ]", "", text).strip().lower().replace(" ", "-"))
+        # `## IDENTIFIER` headings are linked verbatim so grep finds them; the
+        # GitHub slug lowercases that away. docs/README.md
+        anchors.add(text)
     found[str(md.resolve())] = anchors
   return found
 
