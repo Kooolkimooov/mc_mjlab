@@ -179,6 +179,33 @@ Across seeds: **`-9.65%`, sd `5.97`, t `-3.61`** (df 4). None positive; the rang
 is `-4.5%` to `-20.0%`. The `+4.35%` recorded below came from a single seed and
 falls outside that entire range.
 
+**Scoring the near-peak checkpoint helps, and changes nothing.** `model_999` is
+past every seed's peak (peaks fell at iterations `134-600`), so it penalises them
+all. Iteration `150` has both the best mean and the best worst-seed across the
+five, and was chosen on that basis rather than per seed, so there is no selection
+freedom:
+
+| seed | `model_999` | `model_150` |
+| --- | ---: | ---: |
+| 1 | `-7.83%` | `-1.82%` |
+| 2 | `-8.64%` | `-11.77%` |
+| 3 | `-4.52%` | `-8.38%` |
+| 4 | `-7.29%` | `-4.27%` |
+| 5 | `-19.97%` | **`-1.13%`** |
+| **mean** | **`-9.65%`** (sd 5.97) | **`-5.48%`** (sd 4.52) |
+
+The gain is `4` points and seed 5's outlier is mostly a late-training artifact
+(`-19.97%` to `-1.13%`), but **all five remain negative** and seeds 2 and 3 stay
+individually significant at `z < -9`. Wrench feedback does not beat the prior at
+either checkpoint.
+
+**Scoring these needs the training commit.** `be58edd` dropped HRP5P's finger
+joints from the observation mid-session, taking it from `124` to `88` wide, which
+retires every checkpoint trained before it — the actor's first layer and
+`obs_normalizer` are both sized by the concatenated width. The `model_150` scores
+above were produced by checking out `fd1973e`, the commit each run records in its
+own `git/` directory.
+
 **Wrench feedback does not beat the ISMPC.** Nor does any other residual
 configuration tested here — torque residual (`-2.64%`,
 `docs/residual-mpc.md#POWERED_RESULT`), joint-position feedback (halves
