@@ -163,6 +163,40 @@ one is not.
 
 ## WRENCH_RESULT
 
+**THE RESULT BELOW DOES NOT REPLICATE.** Five seeds, each scored by the same
+paired protocol on `model_999`, are all significantly *worse* than their own
+prior:
+
+| seed | prior | policy | delta | z |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 0.08053 | 0.07423 | `-7.83%` | `-10.25` |
+| 2 | 0.08204 | 0.07495 | `-8.64%` | `-10.62` |
+| 3 | 0.08436 | 0.08055 | `-4.52%` | `-4.99` |
+| 4 | 0.08301 | 0.07696 | `-7.29%` | `-6.97` |
+| 5 | 0.08515 | 0.06815 | `-19.97%` | `-18.99` |
+
+Across seeds: **`-9.65%`, sd `5.97`, t `-3.61`** (df 4). None positive; the range
+is `-4.5%` to `-20.0%`. The `+4.35%` recorded below came from a single seed and
+falls outside that entire range.
+
+**Wrench feedback does not beat the ISMPC.** Nor does any other residual
+configuration tested here — torque residual (`-2.64%`,
+`docs/residual-mpc.md#POWERED_RESULT`), joint-position feedback (halves
+survival), or this. The seed-to-seed spread is `~6` percentage points, which is
+larger than every effect any single run has claimed all session.
+
+**Two differences from the winning run**, neither large enough to matter: it
+scored `model_1100` from a longer resumed run rather than `model_999`, and ran a
+`30`-minute comparison rather than `20`. Neither plausibly spans `+4.35%` to
+`-9.65%`.
+
+**The lesson is the protocol, not the architecture.** A single paired comparison
+returns `p < 1e-5` on ~1,000 episodes and still says almost nothing, because the
+variance that matters is between *seeds*, not between episodes within a seed.
+Nothing in this repository should be called a win on one seed again.
+
+**Superseded single-seed result:**
+
 **Current:** wrench feedback is the first residual in this repository measured to
 beat the controller it modifies. `rfl-wrench50-1k` `model_1100`, nominal model,
 `5.5 s` skipped, 64 environments, clustered by environment:
