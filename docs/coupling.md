@@ -232,6 +232,29 @@ a later 300 s worker-startup timeout caused by the memory pressure, not the root
 failure. A two-checkpoint same-process live check after the fix left no
 qualification or forkserver worker process behind.
 
+### MC_MJLAB_PROFILE_WORKERS
+
+**Current:** setting `MC_MJLAB_PROFILE_WORKERS=<dir>` accumulates nanosecond
+timings inside each worker and writes one `worker-<pid>.json` at shutdown. The
+phases are controller input marshalling, `controller.run()`, output extraction,
+and the whole multi-environment batch; the file also carries the worst batch.
+Profiling is disabled by default and performs no clock reads on that path.
+
+A five-iteration run on 2026-09-04 used 128 environments and 30 workers and
+measured 1,638,400 controller steps. Of the summed phase time, input marshalling
+was 3.29% (26.5 us/controller), `controller.run()` was 91.66% (738.3
+us/controller), and output extraction was 5.04% (40.6 us/controller). Mean batch
+time ranged from 3.10 to 3.97 ms across workers; the maximum observed batch was
+42.84 ms. The workers with five environments formed the slow tail, while those
+with four were near the lower end.
+
+**Re-measure if:** the controller, worker count, controller frequency, robot, or
+host marshalling changes.
+
+**History:**
+- 2026-09-04 — added after trainer-only profiling could attribute collection
+  waits to workers but could not separate Python binding work from the C++ solve.
+
 ### Controller failure is one episode, not the run
 
 mc_mujoco stops the whole sim when `run()` reports failure. A trainer cannot: the
