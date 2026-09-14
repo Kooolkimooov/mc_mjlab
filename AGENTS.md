@@ -72,7 +72,7 @@ uv run ruff format && uv run ruff check --fix    # format + lint
 uv run ty check                                  # type check (56 pre-existing
                                                  # diagnostics: unresolvable
                                                  # mc_rtc bindings + mujoco stubs)
-python3 .codex/hooks/check_prose.py src scripts # prose budget + docs/ links
+python3 scripts/check_prose.py src scripts       # prose budget + docs/ links
 ```
 
 The deterministic improvement-contract suite does not replace a live controller
@@ -98,7 +98,7 @@ episode length is what it is given an unbounded walk.
 
 # Comments, docstrings and notes
 
-Two hard rules, enforced by `.codex/hooks/check_prose.py` (which also runs as a
+Two hard rules, enforced by `scripts/check_prose.py` (which also runs as a
 PostToolUse hook, so a violation comes back in the same turn):
 
 1. **Every docstring is one line.** What the thing does, never the evidence for

@@ -70,7 +70,7 @@ uv run ty check                                  # type check (91 pre-existing
                                                  # mc_rtc bindings + mujoco stubs)
 uv run pytest                                    # binding tests (testpaths is set)
 cd build && ctest                                # native tests, incl. worker recovery
-python3 .claude/hooks/check_prose.py src scripts # prose budget + docs/ links
+python3 scripts/check_prose.py src scripts       # prose budget + docs/ links
 ```
 
 The deterministic improvement-contract suite does not replace a live controller
@@ -96,7 +96,7 @@ episode length is what it is given an unbounded walk.
 
 # Comments, docstrings and notes
 
-Two hard rules, enforced by `.claude/hooks/check_prose.py` (which also runs as a
+Two hard rules, enforced by `scripts/check_prose.py` (which also runs as a
 PostToolUse hook, so a violation comes back in the same turn):
 
 1. **Every docstring is one line.** What the thing does, never the evidence for

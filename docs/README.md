@@ -84,7 +84,7 @@ bullet instead of rewriting a paragraph:
 Keep the measurements verbatim when moving them. The numbers are the asset; a
 paraphrase that drops the sample size is worth much less than the original.
 
-`.claude/hooks/check_prose.py` enforces the other half of the arrangement — that
+`scripts/check_prose.py` enforces the other half of the arrangement — that
 the code stays under 10% prose with one-line docstrings — and warns about
 headings here whose identifier no longer exists.
 

@@ -22,7 +22,7 @@ repos:
 
       - id: check-prose
         name: check prose budget
-        entry: python3 .claude/hooks/check_prose.py
+        entry: python3 scripts/check_prose.py
         language: system
         types: [python]
         files: ^(src|scripts)/
