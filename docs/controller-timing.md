@@ -49,6 +49,38 @@ reset semantics change.
 - 2026-08-25 — the smoke probe changed step duration and measured
   `max_restore_error_s = 0.000000000` without a controller or worker failure.
 
+## controller_timeout_ms
+
+**Current:** one 60000 ms collect timeout covers both plain and reset-bearing
+steps. It is a liveness check, not a latency budget: a step that has not
+acknowledged by then is treated as dead, and the cost of being generous is only
+a slower wedge detection, while the cost of being tight is a needless worker
+respawn.
+
+Measured on HRP5P / `LogisticController_ismpc`, zero-residual, 16 envs, idle
+box, 300 steps per arm, first 20 steps excluded from the steady-state figures:
+
+| ctrl/worker | step median | step p99 | step max | reset max |
+| ---: | ---: | ---: | ---: | ---: |
+| 2 | 2.51 ms | 3.22 ms | 4.32 ms | 728 ms |
+| 8 | 3.66 ms | 5.48 ms | 6.73 ms | 2812 ms |
+| 16 | 8.18 ms | 10.14 ms | 10.33 ms | 5588 ms |
+
+The two scale ~800x apart per controller: **0.41 ms** per controller for a step
+against **347 ms** for a reset. Resets do not arrive as `Command::Reset` — they
+ride inside a Step through the row's reset flag, which
+`controllers_host.cpp` reads from shared memory — so a single timeout has to
+cover the reset, and 60000 ms is sized for that. Extrapolated, a reset at 136
+controllers per worker needs ~47 s.
+
+Splitting the two was considered and rejected: the manager cannot see reset
+flags (it never maps the input block), so it would need the action to pass a
+per-dispatch hint, and normal steps acknowledge three orders of magnitude
+inside the existing budget regardless.
+
+**Re-measure if:** the robot, the controller, or the QP formulation changes, or
+controllers per worker rises far above 16.
+
 ## probe_step_duration
 
 **Current:** `scripts/probe_step_duration.py` runs all cohorts concurrently from
