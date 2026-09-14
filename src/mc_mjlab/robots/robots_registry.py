@@ -12,7 +12,7 @@ from mc_mjlab.robots.collision_configuration import enable_all_collision_geoms
 from mc_mjlab.robots.HRP5P import hrp5p_constants
 from mc_mjlab.robots.JVRC1 import jvrc1_constants
 from mc_mjlab.robots.RHPS1 import rhps1_constants
-from mc_mjlab.utils.mc_rtc_config import get_main_robot_name
+from utils.mc_rtc_config import get_main_robot_name
 
 
 @dataclass(frozen=True)

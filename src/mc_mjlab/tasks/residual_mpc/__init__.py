@@ -9,7 +9,7 @@ from mc_mjlab.tasks.residual_mpc.residual_mpc_ppo_cfg import residual_mpc_ppo_cf
 from mc_mjlab.tasks.residual_mpc.residual_mpc_runner import (
   ResidualMpcOnPolicyRunner,
 )
-from mc_mjlab.utils.task_naming import get_task_name
+from utils.task_naming import get_task_name
 
 TASK_DIR = Path(__file__).resolve().parent.name
 TASK_ID = get_task_name(TASK_DIR, "joint_torque")

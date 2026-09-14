@@ -8,7 +8,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from mc_mjlab.utils.task_naming import get_task_name
+from utils.task_naming import get_task_name
 
 TASK_DIR = "residual_balance"
 

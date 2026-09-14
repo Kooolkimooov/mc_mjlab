@@ -17,7 +17,7 @@ from mc_mjlab.tasks.residual_balance.residual_balance_ppo_cfg import (
 from mc_mjlab.tasks.residual_balance.residual_balance_runner import (
   ResidualBalanceOnPolicyRunner,
 )
-from mc_mjlab.utils.task_naming import get_task_name
+from utils.task_naming import get_task_name
 
 TASK_DIR = Path(__file__).resolve().parent.name
 POSITION_TASK_ID = get_task_name(TASK_DIR, "position")

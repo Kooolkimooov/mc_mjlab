@@ -35,3 +35,10 @@ def get_controller_name(path: Path) -> str:
       "following lines) is not supported; write `Enabled: [name, ...]`."
     )
   return value
+
+
+class _IterItemsDict(dict):
+  """``setWrenches`` iterates with Python-2 ``.iteritems()``; alias it."""
+
+  def iteritems(self):
+    return iter(self.items())

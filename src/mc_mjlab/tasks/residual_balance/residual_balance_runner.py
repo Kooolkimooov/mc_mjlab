@@ -29,7 +29,7 @@ from mc_mjlab.tasks.residual_balance.training_watchdog import (
   RunnerWatchdogBridge,
   WatchdogStop,
 )
-from mc_mjlab.utils.mc_rtc_config import get_controller_name
+from utils.mc_rtc_config import get_controller_name
 
 
 def _file_record(role: str, path: Path) -> dict[str, str | bool]:
