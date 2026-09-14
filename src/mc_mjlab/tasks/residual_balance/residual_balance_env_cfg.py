@@ -56,7 +56,8 @@ QUALIFICATION_MATCHED_MIXTURES = {
   "hazard": (0.10, 0.15, 0.25, 0.50),
 }
 QUALIFICATION_MATCHED_WEIGHTS = QUALIFICATION_MATCHED_MIXTURES["matched"]
-DCM_STD = 0.10
+#: 1.46x recovery_dcm's own gated median. docs/reward-shaping.md#recovery_dcm
+DCM_STD = 0.06
 FALL_LIMIT_ANGLE = math.radians(45.0)
 TORQUE_MARGIN_WEIGHT = -0.05
 SOLE_VELOCIMETERS = ("left_foot_lin_vel", "right_foot_lin_vel")
