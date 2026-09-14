@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -11,6 +12,63 @@ import torch
 SCHEMA_VERSION = 1
 _ACTIVE_EPSILON = 1.0e-12
 _QUANTILES = (0.01, 0.10, 0.50, 0.90, 0.99)
+#: A kernel target sits here relative to its own gated median; a guard sits far
+#: above its p99 instead. docs/reward-shaping.md#target-placement
+KERNEL_BAND = (1.3, 1.5)
+GUARD_MINIMUM_RATIO = 2.0
+
+
+def kernel_error(score: float, std: float) -> float:
+  """Invert ``exp(-(error/std)**2)`` back to the error that produced it."""
+  if not 0.0 < score <= 1.0 or not std > 0.0:
+    return float("nan")
+  return std * math.sqrt(-math.log(score))
+
+
+def placement_verdict(
+  role: str,
+  target: float,
+  raw: Mapping[str, Any],
+) -> dict[str, Any]:
+  """Judge one reward target against the distribution its own gate admits."""
+  nonzero = float(raw.get("nonzero_fraction", float("nan")))
+  if role == "kernel":
+    measured = kernel_error(float(raw.get("gated_q50", float("nan"))), target)
+    ratio = (
+      target / measured if math.isfinite(measured) and measured > 0.0 else math.nan
+    )
+    low, high = KERNEL_BAND
+    verdict = (
+      "not_measured"
+      if not math.isfinite(ratio)
+      else "pass"
+      if low <= ratio <= high
+      else "saturating"
+      if ratio < low
+      else "floored"
+    )
+  elif role == "guard":
+    measured = float(raw.get("gated_q99", raw.get("q99", float("nan"))))
+    ratio = (
+      target / measured if math.isfinite(measured) and measured > 0.0 else math.nan
+    )
+    verdict = (
+      "not_measured"
+      if not math.isfinite(nonzero)
+      else "pass"
+      if nonzero <= _ACTIVE_EPSILON
+      else "armed"
+    )
+  else:
+    raise ValueError(f"unknown placement role: {role}")
+  return {
+    "role": role,
+    "target": target,
+    "measured": measured,
+    "ratio": ratio,
+    "nonzero_fraction": nonzero,
+    "verdict": verdict,
+  }
 
 
 class RewardAuditShapeError(ValueError):
@@ -80,7 +138,19 @@ class _SampleSeries:
       if finite_count
       else [float("nan")] * len(_QUANTILES)
     )
+    # A gated term's zeros are its off-gate steps, and a target is placed
+    # against what the gate admits. docs/reward-shaping.md#target-placement
+    gated = values[values.abs() > _ACTIVE_EPSILON]
+    gated_quantiles = (
+      torch.quantile(gated, torch.tensor(_QUANTILES)).tolist()
+      if gated.numel()
+      else [float("nan")] * len(_QUANTILES)
+    )
     return {
+      "gated_count": int(gated.numel()),
+      "gated_q50": gated_quantiles[2],
+      "gated_q90": gated_quantiles[3],
+      "gated_q99": gated_quantiles[4],
       "sample_count": self.sample_count,
       "finite_count": finite_count,
       "nonfinite_count": self.nonfinite_count,

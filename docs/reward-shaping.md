@@ -164,6 +164,48 @@ kept as a diagnostic. See `Pruning the agreement rewards` below.
   alternatives, if it is revisited: back to 1.0, or add a
   `recovery_com_velocity` mirroring `recovery_tracking`'s gate.
 
+## Target placement
+
+**Current:** a **kernel** target sits 1.3-1.5x above the median of the
+distribution *its own gate admits*; a **guard** threshold sits far above the
+measured p99 and passes by reading zero. `KERNEL_BAND` and
+`GUARD_MINIMUM_RATIO` in `tasks/residual_balance/reward_audit.py` hold the two
+bands, and `placement_verdict` applies whichever the term declares.
+
+**Why two rules and not one.** Below the measurement a clamped ratio pins at 1.0
+and the gradient is exactly zero; far above it the kernel floors and the gradient
+vanishes again — so a shaping term wants to sit just above where the robot
+actually operates. A guard wants the opposite: `torque_margin`'s `soft_ratio` of
+`0.8` is deliberately ~4x the settled p99 of 0.229 (see below), because it exists
+to read zero and only speak when something has gone wrong. Judging it by the
+kernel band would report a healthy guard as broken.
+
+**Against the term's own gate, not the marginal.** This is the trap worth naming.
+`DCM_STD = 0.10` looks badly placed against nominal walking — median 0.0317 m,
+so 3.2x — but that distribution belongs to `dcm_stability`, which is at weight
+`0.0`. The term that is paid is `recovery_dcm`, evaluated only inside the 2 s
+post-push window, where the corrected error runs **0.033-0.100 m**: against that,
+`0.10` is 1.0-1.9x, in or straddling the band. A target judged against the
+marginal distribution rather than the gated one gets the verdict backwards.
+
+**How it is computed without new machinery.** For a kernel term the raw sample
+*is* `exp(-(error/std)^2)`, so `error = std * sqrt(-ln(raw))` inverts it —
+the same relation `validate_dcm_objective.py` already prints as
+`std = q / sqrt(-log s)`. The audit's existing `q01..q99` and `nonzero_fraction`
+supply both halves. The reported `q50` spans the zeros that off-gate steps
+contribute, so the inversion is only valid while `nonzero_fraction > 0.5`;
+below that `placement_verdict` returns `not_measured` rather than a number.
+
+**Re-measure if:** a kernel's `std`, a guard's threshold, or the gate in front of
+either one changes.
+
+**History:**
+- 2026-09-14 — adopted from the `leo_mjlab` range, which rejected two changes
+  that were the same arithmetic error: a target lowered *onto* the measurement
+  (`clamp(elapsed/target)` 0.52 -> 1.0, traction cut rather than concentrated)
+  and a target left 2.2x above everything the gait did, making it a constant.
+  See [leo-mjlab-review.md](leo-mjlab-review.md).
+
 ## dcm_stability
 
 **Current:** weight `0.0`, `DCM_STD = 0.10`. Nominal DCM remains a metric and
@@ -385,6 +427,26 @@ not a shaping term.
 
 **Current:** `4.0`, with `RECOVERY_TRACKING_STD = DCM_STD = 0.10` and
 `RECOVERY_WINDOW_S = 2.0`. The disturbance-gated half of the payment.
+
+**2026-09-14 — the target is floored against its own gated distribution.**
+Measured by `scripts/audit_rewards.py`, policy zero, 16 envs x 1000 steps,
+`--disturbance finite`: of 16,000 samples the window admits **3,200** (a duty of
+20.0%, matching `recovery_active`), and their median score is **0.8444**.
+Inverting the kernel, `error = std * sqrt(-ln(score))`, the median error the term
+actually sees is **0.0411 m**, so `DCM_STD = 0.10` sits at **2.43x** it — outside
+the 1.3-1.5x band of [target placement](#target-placement), on the floored side:
+the kernel is near its flat top for the errors this term is paid on.
+
+For comparison the same run puts `dcm_stability` at a gated median score of
+0.9155, error 0.0297 m, **3.36x** — but its weight is `0.0` and its measured rate
+is exactly zero, so it is inert and shares the constant without being affected by
+it. A change to `DCM_STD` is therefore confined to this term.
+
+Placing at 1.4x the measurement gives `0.058`; `0.06` gives 1.46x and is in band.
+Note this is not a free move: at `0.06` the median score falls 0.844 -> 0.626, so
+the term's mean payment drops even though its gradient improves. **Untested** —
+it is the pre-registered single hypothesis for the next training run, and nothing
+has changed yet.
 
 **2026-08-17 — the term is now `mdp.recovery_dcm`, not `recovery_tracking`.** The
 gate machinery is unchanged (`age_since_push`, the same window, the same
