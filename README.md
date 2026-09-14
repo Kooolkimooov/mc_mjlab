@@ -68,16 +68,15 @@ selected interpreter's environment.
 
 ### Controller datastore
 
-The action reads numbers out of mc_rtc through its datastore, under public
-aliases the task configures. Which side provides a callback is decided by one
-rule: **a name beginning `mc_mjlab::` comes from this repo's own plugin, and
-every other name must already exist on the controller.**
+An action can read extra numbers out of mc_rtc through its datastore, on top of
+the joint channels every task uses. This is **optional and opt-in**: a task asks
+for entries by listing aliases in `controller_vectors` / `controller_scalars`,
+both empty by default. The zero-residual demo lists nothing and runs with the
+datastore untouched.
 
-`src/mc_rtc_interface/{hpp,cpp}/instance_datastore_plugin.*` is that plugin. It
-is compiled into the native interface — there is nothing to install and no
-controller to patch. `ControllerInstance::finish_reset` registers each prefixed
-name on the controller's datastore, binding it to the namespace function whose
-name is the rest of the entry:
+**The common entries are already implemented.** `instance_datastore_plugin`
+ships four getters compiled into the native interface, so a task can ask for
+them with nothing to install and no controller to patch:
 
 | Entry | Type | Value |
 | --- | --- | --- |
@@ -86,30 +85,29 @@ name is the rest of the entry:
 | `mc_mjlab::control_com_vel` | `Vector3d` | that robot's CoM velocity |
 | `mc_mjlab::support_foot` | `double` | right=0, left=1 |
 
-Registration repeats on **every** controller build, because
-`MCGlobalController::reset()` destroys and rebuilds the controller together with
-its datastore — a registration made once would not survive the first episode
-reset. The getters read `MCController::robot()`, the robot the QP integrates,
-not the canonical output robot, whose `comVelocity`/`comAcceleration` read
-exactly zero.
+That is what residual-balance runs on: it requests `planned_zmp`,
+`control_com` and `control_com_vel`, all served by the plugin. ResidualMPC goes
+further and also asks for `ismpc_walking::t`, `get_ts_target` and
+`qp_objective`, which only that controller can answer.
 
-`support_foot` is the one entry that still needs something from the controller:
-it converts the `std::string` `ismpc_walking::support_foot_name`, which a
-numeric callback cannot carry, using its `Left`/`Right` prefix.
+Which side serves an alias is decided by one rule: **a name beginning
+`mc_mjlab::` comes from the plugin; any other name must already exist on the
+controller.** `controller_vector_callbacks` / `controller_scalar_callbacks` map
+public aliases onto callback names, so the same alias can be repointed at either
+side — `support_foot` resolves to the plugin's getter, while `walking_ref_vel`
+resolves to the controller's `ismpc_walking::get_ref_vel`. The defaults are
+`VECTOR_CALLBACKS` and `SCALAR_CALLBACKS` in `controller_datastore.py`.
 
-Three things are hard errors at controller init rather than silent zeros:
+Adding a getter means adding a function to `instance_datastore_plugin` and
+naming it in that map; `ControllerInstance::finish_reset` then registers it on
+every controller build, which is what makes it survive the rebuild
+`MCGlobalController::reset()` performs at each episode reset. The getters read
+`MCController::robot()`, the robot the QP integrates — not the canonical output
+robot, whose `comVelocity`/`comAcceleration` read exactly zero.
 
-- a `mc_mjlab::` name matching no plugin function,
-- a `mc_mjlab::` name the controller *already* defines — two definitions of one
-  quantity with no way to tell which is live,
-- any configured non-prefixed callback the controller does not provide.
-
-Point an alias at a different callback with `controller_vector_callbacks` /
-`controller_scalar_callbacks` on the action cfg; the defaults are
-`VECTOR_CALLBACKS` and `SCALAR_CALLBACKS` in `controller_datastore.py`. That is
-also how a controller-side entry is reached — `walking_ref_vel` maps to
-`ismpc_walking::get_ref_vel`, carries no prefix, and so must come from the
-controller.
+Nothing fails quietly. A `mc_mjlab::` name matching no plugin function, a
+`mc_mjlab::` name the controller already defines, or any requested non-prefixed
+callback the controller lacks is an error at controller init, not a silent zero.
 
 > [!CAUTION]
 > `planned_zmp` must keep its control-centroid definition. Checkpoints were
@@ -117,10 +115,10 @@ controller.
 > different quantity. Never substitute it, and never let the callback return
 > zero.
 
-Writing back through the datastore needs native per-callback usage flags;
-commands fail loudly when the usage-offset methods or the configured callbacks
-are absent. See [the numeric interface and unsupported callback
-inventory](docs/coupling.md#DatastoreCommands), and
+Writing *back* through the datastore additionally needs native per-callback
+usage flags; commands fail loudly when the usage-offset methods or the
+configured callbacks are absent. See [the numeric interface and unsupported
+callback inventory](docs/coupling.md#DatastoreCommands), and
 [instance_datastore_plugin](docs/coupling.md#instance_datastore_plugin) for the
 live measurements behind each getter.
 
