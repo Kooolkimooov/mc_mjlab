@@ -19,9 +19,12 @@ CSS = Path(__file__).with_name("architecture_page.css")
 ACTIONS = ex.SRC / "mc_mjlab" / "actions"
 ROBOTS = ex.SRC / "mc_mjlab" / "robots"
 TASKS = ex.SRC / "mc_mjlab" / "tasks"
-HOST = ACTIONS / "mc_rtc_controller_host.py"
-POOL = ACTIONS / "mc_rtc_controller_pool.py"
-BINDING = ACTIONS / "mc_rtc_controller_io_binding.py"
+NATIVE = ex.SRC / "mc_rtc_interface"
+HOST = NATIVE / "cpp" / "controllers_host.cpp"
+LAYOUT = NATIVE / "hpp" / "io_layout.hpp"
+PROTOCOL = NATIVE / "hpp" / "ipc_socket.hpp"
+POOL = NATIVE / "cpp" / "controllers_manager.cpp"
+BINDING = ex.SRC / "mc_mjlab" / "controller_io.py"
 ACTION = ACTIONS / "mc_rtc_residual_action.py"
 POSITION = ACTIONS / "mc_rtc_residual_joint_position_actions.py"
 TORQUE = ACTIONS / "mc_rtc_residual_joint_torque_actions.py"
@@ -81,7 +84,7 @@ def task_page(package: Path) -> Page:
   sources = tuple(sorted(package.rglob("*.py")))
   cfg = env_cfg_of(package)
   sections = [
-    block("task_ids", "ast, mc_mjlab.utils", *sources, args=(package,)),
+    block("task_ids", "ast, utils", *sources, args=(package,)),
     block("registration_table", "ast", *sources, args=(package,)),
   ]
   if cfg is not None:
@@ -120,10 +123,10 @@ PAGES: tuple[Page, ...] = (
     "process-topology",
     (
       block("collaboration_diagram", "ast", ACTION, POOL, HOST),
-      block("pipe_protocol", "ast", HOST, POOL),
-      block("io_layout", "ast", HOST, POSITION, TORQUE),
-      block("layout_inputs", "ast", HOST),
-      block("status_column", "griffe, ast", HOST, POOL, BINDING, ACTION),
+      block("pipe_protocol", "C++ declarations", PROTOCOL),
+      block("io_layout", "C++ declarations, ast", LAYOUT, POSITION, TORQUE),
+      block("layout_inputs", "C++ declarations", LAYOUT),
+      block("status_column", "C++ declarations", LAYOUT),
     ),
   ),
   Page(
@@ -262,8 +265,7 @@ def collaboration_diagram() -> str:
   """Methods each class calls on the collaborators it constructs."""
   owners = (
     (ACTION, "McRtcResidualActionBase"),
-    (POOL, "ControllerPool"),
-    (HOST, "ControllerHost"),
+    (BINDING, "ControllerIoBinding"),
   )
   worker_side = {
     name.rsplit(".", 1)[-1]
@@ -286,67 +288,51 @@ def collaboration_diagram() -> str:
 
 
 def pipe_protocol() -> str:
-  """The worker command vocabulary, read from both ends and cross-checked."""
-  protocol = ex.pipe_protocol(HOST, POOL)
-  if protocol["handled"] != protocol["sent"]:
-    raise SystemExit(
-      f"pipe protocol disagrees: worker handles {protocol['handled']}, "
-      f"pool sends {protocol['sent']}"
-    )
-  rows = [(f"`{word}`", "command", "handled and sent") for word in protocol["handled"]]
-  rows += [
-    (f"`{word}`", "reply tag", "sent by the worker") for word in protocol["replies"]
-  ]
-  return table(("Word", "Kind", "Ends"), rows)
+  """Extract the native IPC vocabulary and message declarations."""
+  source = PROTOCOL.read_text()
+  declarations = re.findall(r"(?:enum class|struct)\s+(\w+)\s*\{(.*?)\};", source, re.S)
+  return "\n\n".join(fence("cpp", f"{name} {{{body}}}") for name, body in declarations)
 
 
 def io_layout() -> str:
-  """The offset properties, resolved against each other in dependency order."""
-  columns = ex.io_layout_columns(HOST)
-  out_side = {"status_off", "vector_off", "scalar_command_output_off", "out_width"}
-  ordered = sorted(columns, key=lambda c: (c.name in out_side, columns.index(c)))
-  rows = [
-    (f"`{c.name}`", "output" if c.name in out_side else "input", f"`{c.expr}`")
-    for c in ordered
-  ]
-  modes = [
-    ("position", f"`{ex.class_channels(POSITION)}`"),
-    ("torque", f"`{ex.class_channels(TORQUE)}`"),
-  ]
+  """Extract native offset methods without duplicating their arithmetic."""
+  source = LAYOUT.read_text()
+  rows = []
+  for name, body in re.findall(
+    r"struct (InputLayout|OutputLayout)\s*\{(.*?)(?=\nstruct |\Z)", source, re.S
+  ):
+    for method, expression in re.findall(
+      r"std::size_t (\w+)\(\) const\s*\{\s*return (.*?);\s*\}", body, re.S
+    ):
+      rows.append((name, method, f"`{' '.join(expression.split())}`"))
   return (
-    table(("Offset", "Block", "Expression"), rows)
+    table(("Layout", "Method", "Expression"), rows)
     + "\n\n"
-    + table(("Control mode", "`output_channels`"), modes)
+    + table(
+      ("Control mode", "output_channels"),
+      [
+        ("position", str(ex.class_channels(POSITION))),
+        ("torque", str(ex.class_channels(TORQUE))),
+      ],
+    )
   )
 
 
 def layout_inputs() -> str:
-  """The fields those expressions depend on, with annotation and default."""
-  rows = [
-    (f"`{name}`", f"`{annotation}`", f"`{default}`" if default else "none")
-    for name, annotation, default in ex.layout_inputs(HOST)
-  ]
-  return table(("Field", "Annotation", "Default"), rows)
+  """Extract the native joint, sensor and datastore field declarations."""
+  fields = re.findall(
+    r"std::vector<std::string>\s+\w+;|inline static (?:constexpr|const).*?;",
+    LAYOUT.read_text(),
+  )
+  return fence("cpp", "\n".join(dict.fromkeys(fields)))
 
 
 def status_column() -> str:
-  """The status constants, and every function that names one."""
-  names = ex.module_constants("actions.mc_rtc_controller_host", "STATUS_")
-  values = table(
-    ("Constant", "Value"),
-    [
-      (f"`{name}`", f"`{ex.attribute(f'actions.mc_rtc_controller_host.{name}')}`")
-      for name in names
-    ],
-  )
-  writers = table(
-    ("Function", "Constant"),
-    [
-      (f"`{where}`", f"`{name}`")
-      for where, name in ex.status_writers([HOST, POOL, BINDING, ACTION])
-    ],
-  )
-  return values + "\n\n" + writers
+  """Extract native controller status values in declaration order."""
+  match = re.search(r"enum ControllerStatus\s*\{(.*?)\};", LAYOUT.read_text(), re.S)
+  assert match is not None
+  names = [name.strip() for name in match[1].split(",") if name.strip()]
+  return table(("Status", "Value"), [(name, str(i)) for i, name in enumerate(names)])
 
 
 def step_sequence() -> str:
@@ -411,7 +397,7 @@ def rate_stack() -> str:
 
 def task_ids(package: Path) -> str:
   """Every id this package builds, resolved through the repo's naming helper."""
-  from mc_mjlab.utils.task_naming import get_task_name
+  from utils.task_naming import get_task_name
 
   gates = ex.conditional_imports(package / "__init__.py")
   rows = []
