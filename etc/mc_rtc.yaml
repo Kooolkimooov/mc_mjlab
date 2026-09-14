@@ -10,4 +10,3 @@ GUIServer:
 
 # Disable mc_rtc's per-controller binary log files when lanching a lot of envs
 Log: False
-LogDirectory: /tmp/mc_rtc_logs
