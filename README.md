@@ -66,23 +66,69 @@ project's: `cmake -S src/mc_rtc_interface -B <dir>` then
 `cmake --install <dir> --prefix <prefix>`, which otherwise defaults to the
 selected interpreter's environment.
 
-Residual tasks require a controller-side numeric datastore adapter for
-`mc_mjlab::planned_zmp`, `mc_mjlab::control_com`, `mc_mjlab::control_com_vel`,
-and, when selected, `mc_mjlab::support_foot` (right=0, left=1). Configure
-`controller_vector_callbacks` / `controller_scalar_callbacks` to override aliases.
-Missing callbacks cause initialization errors. The ZMP callback must retain the
-control-centroid definition used by checkpoints.
+### Controller datastore
 
-Datastore commands additionally require native per-callback usage flags.
-Commands fail clearly if the usage-offset methods or configured callbacks are
-absent. See [the numeric interface and unsupported callback
-inventory](docs/coupling.md#DatastoreCommands).
+The action reads numbers out of mc_rtc through its datastore, under public
+aliases the task configures. Which side provides a callback is decided by one
+rule: **a name beginning `mc_mjlab::` comes from this repo's own plugin, and
+every other name must already exist on the controller.**
 
-After installing those dependencies, run `cd build && ctest` (which covers the
-native tests and the deterministic action contracts) and the live walking checks
-(`uv run python scripts/verify_native_action_live.py --mode position`, then
-`--mode torque`). A live zero-residual demo does not validate adapter or worker
-recovery behavior. Checkpoint contract validation remains enforced.
+`src/mc_rtc_interface/{hpp,cpp}/instance_datastore_plugin.*` is that plugin. It
+is compiled into the native interface — there is nothing to install and no
+controller to patch. `ControllerInstance::finish_reset` registers each prefixed
+name on the controller's datastore, binding it to the namespace function whose
+name is the rest of the entry:
+
+| Entry | Type | Value |
+| --- | --- | --- |
+| `mc_mjlab::planned_zmp` | `Vector3d` | control-centroid ZMP of the QP's own solution |
+| `mc_mjlab::control_com` | `Vector3d` | CoM of the robot the QP integrates |
+| `mc_mjlab::control_com_vel` | `Vector3d` | that robot's CoM velocity |
+| `mc_mjlab::support_foot` | `double` | right=0, left=1 |
+
+Registration repeats on **every** controller build, because
+`MCGlobalController::reset()` destroys and rebuilds the controller together with
+its datastore — a registration made once would not survive the first episode
+reset. The getters read `MCController::robot()`, the robot the QP integrates,
+not the canonical output robot, whose `comVelocity`/`comAcceleration` read
+exactly zero.
+
+`support_foot` is the one entry that still needs something from the controller:
+it converts the `std::string` `ismpc_walking::support_foot_name`, which a
+numeric callback cannot carry, using its `Left`/`Right` prefix.
+
+Three things are hard errors at controller init rather than silent zeros:
+
+- a `mc_mjlab::` name matching no plugin function,
+- a `mc_mjlab::` name the controller *already* defines — two definitions of one
+  quantity with no way to tell which is live,
+- any configured non-prefixed callback the controller does not provide.
+
+Point an alias at a different callback with `controller_vector_callbacks` /
+`controller_scalar_callbacks` on the action cfg; the defaults are
+`VECTOR_CALLBACKS` and `SCALAR_CALLBACKS` in `controller_datastore.py`. That is
+also how a controller-side entry is reached — `walking_ref_vel` maps to
+`ismpc_walking::get_ref_vel`, carries no prefix, and so must come from the
+controller.
+
+> [!CAUTION]
+> `planned_zmp` must keep its control-centroid definition. Checkpoints were
+> trained against it, and ISMPC's delay-compensated reachable `zmp_target` is a
+> different quantity. Never substitute it, and never let the callback return
+> zero.
+
+Writing back through the datastore needs native per-callback usage flags;
+commands fail loudly when the usage-offset methods or the configured callbacks
+are absent. See [the numeric interface and unsupported callback
+inventory](docs/coupling.md#DatastoreCommands), and
+[instance_datastore_plugin](docs/coupling.md#instance_datastore_plugin) for the
+live measurements behind each getter.
+
+To check the adapter end to end, run `cd build && ctest` for the native tests
+and deterministic contracts, then the live walking checks (`uv run python
+scripts/verify_native_action_live.py --mode position`, then `--mode torque`). A
+zero-residual demo exercises neither the adapter nor worker recovery, so it is
+not a substitute. Checkpoint contract validation remains enforced either way.
 
 ### mjlab dependency
 
