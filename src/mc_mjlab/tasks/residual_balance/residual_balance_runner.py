@@ -10,6 +10,7 @@ from typing import Any
 from mjlab.rl import RslRlVecEnvWrapper
 
 from mc_mjlab.rl.runner import McRtcResidualOnPolicyRunner
+from mc_mjlab.tasks.residual_balance import qualification_sidecar
 from mc_mjlab.tasks.residual_balance.achievement_curriculum import (
   AchievementCurriculumBridge,
 )
@@ -80,6 +81,20 @@ class ResidualBalanceOnPolicyRunner(McRtcResidualOnPolicyRunner):
       raise
     else:
       self._watchdog.completed()
+
+  def load(
+    self,
+    path: str,
+    load_cfg: dict | None = None,
+    strict: bool = True,
+    map_location: str | None = None,
+  ) -> dict:
+    """Reject a full resume from a checkpoint no sweep has qualified."""
+    infos = super().load(path, load_cfg, strict, map_location)
+    # A checkpoint taken mid-transient contaminates everything resumed from it.
+    # docs/hard-constraints.md#c4-the-only-valid-resume-point-is-a-checkpoint-whose-sweep-exists
+    qualification_sidecar.enforce(path, full_resume=load_cfg is None)
+    return infos
 
   def _log_with_diagnostics(self, log: Callable[..., Any]) -> Callable[..., Any]:
     """Wrap the logger so every iteration also records the PPO diagnostics."""
