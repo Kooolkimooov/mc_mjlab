@@ -46,7 +46,7 @@ Always use `uv run`, never plain python.
 uv sync                                          # after choosing the mjlab source
 scripts/demos/run_test_mc_rtc.sh                 # viser viewer (1 env)
 uv run list-envs                                 # task ids (ours + mjlab's)
-# Ids are Mc-Mjlab-<Residual-Balance|Zero-Residual>-<Enabled>-<MainRobot>-<Position|Torque>,
+# Ids are Mc-Mjlab-<task dir>-<Enabled>-<MainRobot>-<control suffix>,
 # built by utils/task_naming.py, which reads Enabled/MainRobot from
 # etc/mc_rtc.yaml and then `.title().replace("_", "-")`s the whole string -- so
 # LogisticController_ismpc/HRP5P become Logisticcontroller-Ismpc/Hrp5P, not the
@@ -65,9 +65,11 @@ uv run python scripts/verify_improvement_contracts.py
 # Regenerate docs/architecture/ from the source; --check fails on drift.
 uv run python scripts/generate_architecture_docs.py
 uv run ruff format && uv run ruff check --fix    # format + lint
-uv run ty check                                  # type check (56 pre-existing
+uv run ty check                                  # type check (91 pre-existing
                                                  # diagnostics: unresolvable
                                                  # mc_rtc bindings + mujoco stubs)
+uv run pytest                                    # binding tests (testpaths is set)
+cd build && ctest                                # native tests, incl. worker recovery
 python3 .claude/hooks/check_prose.py src scripts # prose budget + docs/ links
 ```
 
@@ -78,9 +80,11 @@ robot is falling.
 
 For a *walking* controller (`LogisticController_ismpc`), height alone is not
 enough: a robot standing still holds a perfect z. Check that it is walking, by
-base displacement or by the controller's own joint-velocity reference
-(`action_term.controller_reference("alpha")`, ≈0.4 rad/s median while walking
-against ≈0.003 standing). The installed config now walks indefinitely:
+base displacement (the reliable check: ~0.88 m over 12 s at
+`targetCmdVel: [0.1, 0, 0]`). Under the native path `action_term.controller_reference("alpha")`
+reads ~0 -- the canonical output robot's `mbc.alpha` is not populated the way the
+pre-migration host reported it, so the old "≈0.4 rad/s median" heuristic no
+longer holds; use displacement. The installed config now walks indefinitely:
 `Logistic::FSMMoveBoxTableToLeftShelf` begins with `Walking::WalkCmdVelImpl`
 (`targetCmdVel: [0.1, 0, 0]`, `timeout: 1000.0`) and the 1 m `Logistic::GoToTable`
 path is commented out. That override lives in the *installed workspace* file
@@ -174,27 +178,31 @@ From mjlab down to mc_rtc:
   `mc_rtc_residual_joint_torque_actions.py` →
   `McRtcResidualJointTorqueAction(Cfg)` (adds channel `tau` → effort targets,
   residual on torque).
-- `actions/mc_rtc_controller_pool.py` — `ControllerPool` owns the worker
-  processes (forkserver; spawn is slower and fork is unsafe), their pipes and
-  two shared-memory blocks for batched I/O (layout in `IoLayout`). A worker
-  that dies or wedges mid-run is quarantined, not fatal: killed, respawned
-  (controllers rebuilt, envs re-init on their next reset) and its envs
-  reported failed via the status column.
-- `actions/mc_rtc_controller_io_binding.py` — `ControllerIoBinding` resolves
-  model addresses and sensor routing at init, builds the `IoLayout`, and
-  fills the shared input block each step.
-- `actions/mc_rtc_controller_host.py` — `ControllerHost` (one per worker) holds per-env
-  `MCGlobalController`s and marshals encoder/root/IMU/wrench inputs and
-  position/velocity outputs through the shared blocks. Controllers live in
-  worker processes because construction (~570 ms, ~70 MB each, serial-only)
-  and Cython marshalling are GIL-bound; only the patched binding's `run()`
-  releases the GIL. Env count is memory-bound in practice. Beside the
-  per-joint `output_channels` it can publish whole-controller 3-vectors
-  (`VECTOR_OUTPUTS` → the action cfg's `controller_vectors`, read back with
-  `controller_vector(name)`), which is how `mdp.zmp_tracking` gets the
-  controller's planned ZMP; those are not interpolated across substeps. Paired
-  scalar datastore probes capture a live baseline inside each worker, publish
-  applied and baseline values, and restore it exactly when inactive.
+- `mc_mjlab/controller_io.py` — simulation-side reference-order scatter/gather,
+  biased encoders, measured effort, local root coordinates, wxyz-to-xyzw
+  conversion and named sensors. Use native layout offset methods throughout.
+- `mc_mjlab/controller_datastore.py` — numeric output aliases and independently
+  gated setters. Relative commands capture collected baselines, restore once on
+  deactivation, and wait one control period after reset for fresh getters.
+- `mc_rtc_interface/cpp/` — native `ControllersManager`, worker, `ControllersHost`
+  and `ControllerInstance`. The action owns the manager and two shared-memory
+  blocks; close the manager before unlinking memory, including startup failure.
+  `collect()` returns failed rows, so the action tracks pending dispatch itself.
+  Reset flags are separate from episode failure latches. The action dispatches
+  whole batches; environment decimation must be divisible by `frameskip`.
+- `mc_rtc_interface/hpp/io_layout.hpp` and `ipc_socket.hpp` define the layout and
+  protocol. Root input is ten values (position, xyzw quaternion, linear velocity);
+  every body sensor, including FloatingBase, has its own gyro/acceleration slot.
+  Public `alpha` maps to native `qd`. Python retains `utils/shared_memory.py`.
+- Native worker recovery kills and reaps a failed generation during collection,
+  then starts its replacement from the episode reset on a fresh endpoint. Its
+  rows truncate, then the next reset-bearing step initializes the bound
+  replacement. Missing usage methods and callbacks must raise. The numeric
+  adapter is no longer missing: `mc_rtc_interface/cpp/instance_datastore_plugin.cpp` provides
+  every `mc_mjlab::`-prefixed layout entry from a function of the same name,
+  registered on the controller's datastore at each build. Never replace its
+  control-centroid ZMP or return zero. See `docs/coupling.md` for the supported
+  numeric callback contract and the plugin's prefix rule.
 - `tasks/` — follows mjlab's own task layout, which is why this repo ships no
   train/play scripts: mjlab's console scripts drive it and tyro generates the
   `--env.*` / `--agent.*` overrides from the cfg dataclasses. `tasks/__init__.py`
@@ -205,9 +213,10 @@ From mjlab down to mc_rtc:
   sub-*packages* are walked, so a task added as a bare module never registers;
   and `register_mjlab_task` takes built cfgs, so `import mjlab` now builds this
   repo's env cfgs — without a sourced mc_rtc workspace mjlab's loader reports
-  that as a `[WARN]` plus traceback rather than failing. Only six supported ids
-  register by default; `MC_MJLAB_REGISTER_ARCHIVED_TASKS=1` restores ten
-  historical residual ablations for old-checkpoint compatibility.
+  that as a `[WARN]` plus traceback rather than failing. Only ten supported ids
+  register by default (six residual-balance, two zero-residual, one each for
+  residual_mpc and residual_feedback); `MC_MJLAB_REGISTER_ARCHIVED_TASKS=1`
+  restores ten historical residual ablations for old-checkpoint compatibility.
 - `tasks/residual_balance/residual_balance_runner.py` — snapshots external base
   controller inputs into the run directory and every checkpoint, and validates
   them on load. Its effective-training manifest records live resolved manager
@@ -237,7 +246,7 @@ From mjlab down to mc_rtc:
 Cross-cutting invariants:
 
 - mc_rtc vectors are indexed by the robot module's `ref_joint_order()`
-  (may include joints mjlab does not simulate or actuate); the host expands
+  (may include joints mjlab does not simulate or actuate); Python scatters/gathers
   to/from it, filling unsimulated slots with the default stance.
 - `PDgains_sim.dat` (one `kp kd` row per refJointOrder joint) overwrites the
   actuator configs' armature-derived default gains at action-term init.
@@ -278,8 +287,8 @@ Cross-cutting invariants:
   has collapsed (observed in training: worker unresponsive, no output, no
   crash), and `run()` can keep returning True after `[error] MPC result is
   too far from stability condition, stopping` — so neither "run() returned
-  false" nor "reset() returns" can be relied on for a fallen robot. The
-  pool's timeout + worker quarantine is the containment; do not remove it.
+  false" nor "reset() returns" can be relied on for a fallen robot. Native
+  timeout and manager respawning are the required containment.
 - `Robot.jointIndexByName` on a missing joint throws a C++ `std::out_of_range`
   that terminates the process uncatchably — always probe `hasJoint` first
   (the host's `joint_index` helper does).
@@ -290,7 +299,7 @@ Cross-cutting invariants:
   its `comVelocity`/`comAcceleration` (and `bodyVelB`/`bodyAccB`) read exactly
   **zero** — silently wrong rather than absent. That is right for the joint
   channels (canonical = what you send to the actuators, as mc_mujoco does), and
-  wrong for anything dynamic: `VECTOR_OUTPUTS` readers take
+  wrong for anything dynamic: The external adapter callbacks must take
   `controller().robot()` instead, the robot the QP integrates.
 - `MCGlobalController::reset()` does `controllers.erase(...)` + `AddController(...)`:
   it **destroys and rebuilds** the controller. No handle into it survives an env
@@ -305,19 +314,15 @@ Cross-cutting invariants:
   checkpoint compatibility: it is the QP-commanded ZMP, while ismpc's reachable
   `zmp_target` differs by delay compensation before the stabilizer builds its
   CoM-acceleration target.
-- mc_rtc's terminal logging is hardwired C++ spdlog; silencing requires
-  fd-level redirection (`suppress_mc_rtc_output`), not `sys.stdout` swaps.
-  The cfg's `console_output` picks "none" (silence all, the default),
-  "single" (env 0 only, in a dedicated worker) or "all"; both tasks' play
-  variants override it to "single". `play` exposes no `--env.*` overrides
-  (only `train` does), so the escape hatch for a run that is already going is
-  `MC_MJLAB_WORKER_LOG_DIR=<dir>`, which redirects each worker's output to a
-  file there whatever the cfg says.
+- mc_rtc terminal output is C++ spdlog. Native per-row log flags implement
+  `console_output="none"`, `"single"` (environment zero), or `"all"`; play uses
+  `"single"`. `controller_timeout_ms` defaults to 60000. Native workers own
+  fd redirection; Python no longer redirects or captures worker output.
 - The residual itself is printed during `play`: the action cfg's
   `print_residual_every` (residual_balance's play variant sets 10, i.e. 5 Hz)
   writes one `[residual]` line per interval with env 0's per-joint residual in
-  rad or Nm, `*` marking a joint at its clip, and the vector norm last. Same
-  escape hatch as above — `MC_MJLAB_PRINT_RESIDUAL=<n>` retunes the interval,
+  rad or Nm, `*` marking a joint at its clip, and the vector norm last. The
+  print override is `MC_MJLAB_PRINT_RESIDUAL=<n>` retunes the interval,
   0 silences it. The viewers cannot show this themselves: they only surface
   *reward* and *metrics* manager terms, never actions.
 - A controller *worker* dying is not a controller failure: the status column

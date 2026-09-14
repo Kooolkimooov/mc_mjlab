@@ -14,7 +14,12 @@ src/mc_mjlab/
   tasks/__init__.py           # imports every task sub-package (mjlab.tasks entry point)
   tasks/mdp.py                # the tasks' MDP terms: rewards, observations, events, metrics
   tasks/residual_balance/     # the RL task: __init__ registers the ids, env cfg + PPO cfg alongside
+  tasks/residual_mpc/         # paper-style task: residual on the MPC's own inputs
+  tasks/residual_feedback/    # residual on the controller's feedback rather than its output
   tasks/zero_residual/        # the demo task: mc_rtc alone, RL residual left at zero
+  recovery_authority.py       # recovery detector and authority gating
+  residual_mpc.py             # MPC-side residual plumbing
+  residual_safety.py          # residual clipping and feasibility guards
   controller_io.py            # simulation joints, root and sensors in native layout
   controller_datastore.py     # numeric aliases, gated commands and baselines
 src/mc_rtc_interface/
@@ -165,19 +170,21 @@ the ids — which is the point, since it also changes what a checkpoint is valid
 against. It is title-cased with `_` turned into `-`, so it is not the yaml's
 spelling: `LogisticController_ismpc` on `HRP5P` reads
 `Logisticcontroller-Ismpc-Hrp5P`. Use `list-envs` rather than assembling one;
-these are for the config as committed (`MainRobot: JVRC1`, `Enabled: Posture`):
+these are for the config as committed (`MainRobot: HRP5P`,
+`Enabled: LogisticController_ismpc`):
 
 ```sh
 uv run list-envs   # this repo's ids, plus mjlab's
-uv run train Mc-Mjlab-Residual-Balance-Posture-Jvrc1-Position
-uv run play  Mc-Mjlab-Residual-Balance-Posture-Jvrc1-Position \
+uv run train Mc-Mjlab-Residual-Balance-Logisticcontroller-Ismpc-Hrp5P-Position
+uv run play  Mc-Mjlab-Residual-Balance-Logisticcontroller-Ismpc-Hrp5P-Position \
   --checkpoint-file <path/to/model_*.pt>
 ```
 
-The default mc_mjlab surface is six tasks: zero-residual position/torque,
-residual position/torque, residual position-ankle, and the ankle achievement
-curriculum. Ten completed ablations are hidden so `import mjlab` does not build
-them. To play an old velocity, sagittal, hardware, frozen/gradual, robust,
+The default mc_mjlab surface is ten tasks: zero-residual position/torque,
+residual-balance position/torque, residual-balance position-ankle, the ankle
+achievement curriculum, the two matched-impulse ankle variants, and the
+residual-mpc and residual-feedback joint-torque tasks. Ten completed ablations
+are hidden so `import mjlab` does not build them. To play an old velocity, sagittal, hardware, frozen/gradual, robust,
 history, or GRU checkpoint under its original id:
 
 ```sh
@@ -264,6 +271,8 @@ defaults low on both, to leave room for a training job.
 | --- | --- |
 | `MC_MJLAB_CONTROL` | `position` (default) or `torque`, for the demo |
 | `MC_MJLAB_PRINT_RESIDUAL` | Steps between `[residual]` printouts during `play`; `0` silences |
+| `MC_MJLAB_REGISTER_ARCHIVED_TASKS` | `1` also registers the ten archived ablation ids |
+| `MC_MJLAB_PUSH_DEBUG` | Positive float: scale pushes, cap warm-up at 1 s, print `[push]` lines |
 
 ### External paths
 
