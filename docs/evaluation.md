@@ -34,6 +34,8 @@ unit and zero-weight-call semantics in
 
 ## compare_to_baseline.py
 
+### --task
+
 **`--task <id>` scores any registered task.** Without it the script builds a
 residual-balance cfg from its own flags, which is how every measurement before
 2026-08-28 was taken and is still the flexible path for that task. With it, the

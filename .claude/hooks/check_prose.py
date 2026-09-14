@@ -96,7 +96,9 @@ def check(paths: list[Path], link_targets: dict[str, set[str]]) -> list[str]:
       )
 
     for target, anchor in LINK.findall(path.read_text()):
-      if anchor not in link_targets.get(target, set()):
+      # Case-insensitive: a heading is the identifier it documents, so a
+      # CONST_CASE one anchors lowercased while the link keeps the spelling.
+      if anchor.lower() not in link_targets.get(target, set()):
         problems.append(f"{rel}: dead link docs/{target}#{anchor}")
   return problems
 
