@@ -45,13 +45,13 @@ Training and playing use mjlab's own `train`/`play` scripts — see
 
 ### Native controller interface
 
-`src/mc_rtc_interface` builds itself — there is no manual cmake step. The
-build backend is scikit-build-core, so `uv sync` configures and builds it into
+`src/mc_rtc_interface` builds itself — there is no manual cmake step. The build
+backend is scikit-build-core, so `uv sync` configures and builds it into
 `build/`, and `editable.rebuild` means any later `uv run` rebuilds and
-reinstalls it on import when a source file has changed. The actions own a
-native `ControllersManager` and two shared-memory blocks;
-`controller_timeout_ms` defaults to 60000. `console_output` selects no rows,
-environment zero (`single`), or every row (`all`).
+reinstalls it on import when a source file has changed. The actions own a native
+`ControllersManager` and two shared-memory blocks; `controller_timeout_ms`
+defaults to 60000. `console_output` selects no rows, environment zero
+(`single`), or every row (`all`).
 
 The extension and its worker load out of `build/install/platlib`, which the
 editable install points at — they are not copied into `.venv`. That persistent
@@ -79,17 +79,17 @@ does not exist yet is added to `instance_datastore_plugin`.
 ships four getters compiled into the native interface, so a task can ask for
 them with nothing to install and no controller to patch:
 
-| Entry | Type | Value |
-| --- | --- | --- |
-| `mc_mjlab::planned_zmp` | `Vector3d` | control-centroid ZMP of the QP's own solution |
-| `mc_mjlab::control_com` | `Vector3d` | CoM of the robot the QP integrates |
-| `mc_mjlab::control_com_vel` | `Vector3d` | that robot's CoM velocity |
-| `mc_mjlab::support_foot` | `double` | right=0, left=1 |
+| Entry                       | Type       | Value                                         |
+| --------------------------- | ---------- | --------------------------------------------- |
+| `mc_mjlab::planned_zmp`     | `Vector3d` | control-centroid ZMP of the QP's own solution |
+| `mc_mjlab::control_com`     | `Vector3d` | CoM of the robot the QP integrates            |
+| `mc_mjlab::control_com_vel` | `Vector3d` | that robot's CoM velocity                     |
+| `mc_mjlab::support_foot`    | `double`   | right=0, left=1                               |
 
-That is what residual-balance runs on: it requests `planned_zmp`,
-`control_com` and `control_com_vel`, all served by the plugin. ResidualMPC goes
-further and also asks for `ismpc_walking::t`, `get_ts_target` and
-`qp_objective`, which only that controller can answer.
+That is what residual-balance runs on: it requests `planned_zmp`, `control_com`
+and `control_com_vel`, all served by the plugin. ResidualMPC goes further and
+also asks for `ismpc_walking::t`, `get_ts_target` and `qp_objective`, which only
+that controller can answer.
 
 Which side serves an alias is decided by one rule: **a name beginning
 `mc_mjlab::` comes from the plugin; any other name must already exist on the
@@ -110,24 +110,24 @@ Nothing fails quietly. A `mc_mjlab::` name matching no plugin function, a
 `mc_mjlab::` name the controller already defines, or any requested non-prefixed
 callback the controller lacks is an error at controller init, not a silent zero.
 
-> [!CAUTION]
-> `planned_zmp` must keep its control-centroid definition. Checkpoints were
-> trained against it, and ISMPC's delay-compensated reachable `zmp_target` is a
-> different quantity. Never substitute it, and never let the callback return
-> zero.
+> [!CAUTION] `planned_zmp` must keep its control-centroid definition.
+> Checkpoints were trained against it, and ISMPC's delay-compensated reachable
+> `zmp_target` is a different quantity. Never substitute it, and never let the
+> callback return zero.
 
-Writing *back* through the datastore additionally needs native per-callback
+Writing _back_ through the datastore additionally needs native per-callback
 usage flags; commands fail loudly when the usage-offset methods or the
-configured callbacks are absent. See [the numeric interface and unsupported
-callback inventory](docs/coupling.md#DatastoreCommands), and
-[instance_datastore_plugin](docs/coupling.md#instance_datastore_plugin) for the
-live measurements behind each getter.
+configured callbacks are absent. See
+[the numeric interface and unsupported callback inventory](docs/coupling.md#DatastoreCommands),
+and [instance_datastore_plugin](docs/coupling.md#instance_datastore_plugin) for
+the live measurements behind each getter.
 
 To check the adapter end to end, run `cd build && ctest` for the native tests
-and deterministic contracts, then the live walking checks (`uv run python
-scripts/verify_native_action_live.py --mode position`, then `--mode torque`). A
-zero-residual demo exercises neither the adapter nor worker recovery, so it is
-not a substitute. Checkpoint contract validation remains enforced either way.
+and deterministic contracts, then the live walking checks
+(`uv run python scripts/verify_native_action_live.py --mode position`, then
+`--mode torque`). A zero-residual demo exercises neither the adapter nor worker
+recovery, so it is not a substitute. Checkpoint contract validation remains
+enforced either way.
 
 ### mjlab dependency
 
@@ -161,8 +161,7 @@ uv sync
 
 Refer to the superbuild tutorial
 
-> [!CAUTION] 
-> The mc_rtc Python bindings and controller libraries come from the
+> [!CAUTION] The mc_rtc Python bindings and controller libraries come from the
 > sourced workspace (`PYTHONPATH`/`LD_LIBRARY_PATH`); run from a shell that has
 > it sourced. The workspace's bindings must be built for the same interpreter as
 > this package's venv (`requires-python` pins it): a version mismatch fails at
@@ -192,11 +191,11 @@ only the unconditional autoload is affected.
 
 ## Running the demo
 
-The demo runs the controller specified in `etc/mc_rtc.yaml` with the RL
-residual left at zero, so the robot tracks raw mc_rtc output — a healthy run
-holds a steady root height. It is a registered task (`Mc-Mjlab-Zero-Residual-*`)
-driven by mjlab's `play --agent zero`; the script only resolves the id and
-opens the viewer.
+The demo runs the controller specified in `etc/mc_rtc.yaml` with the RL residual
+left at zero, so the robot tracks raw mc_rtc output — a healthy run holds a
+steady root height. It is a registered task (`Mc-Mjlab-Zero-Residual-*`) driven
+by mjlab's `play --agent zero`; the script only resolves the id and opens the
+viewer.
 
 ```sh
 scripts/demos/run_test_mc_rtc.sh                    # viser viewer, 1 env
@@ -205,11 +204,10 @@ scripts/demos/run_test_mc_rtc.sh --viewer native    # native viewer instead
 MC_MJLAB_CONTROL=torque scripts/demos/run_test_mc_rtc.sh   # torque control mode
 ```
 
-> [!NOTE]
-> `Mc-Mjlab-Zero-Residual-*` is a play task; `train` on it is not supported.
-> It has no reward to optimise, and it is built for a zero action — a policy
-> sampling every 2 ms with nothing to terminate a wrecked robot overruns the
-> contact budget and faults in the physics. Train the balance task instead.
+> [!NOTE] `Mc-Mjlab-Zero-Residual-*` is a play task; `train` on it is not
+> supported. It has no reward to optimise, and it is built for a zero action — a
+> policy sampling every 2 ms with nothing to terminate a wrecked robot overruns
+> the contact budget and faults in the physics. Train the balance task instead.
 
 ## Training and playing
 
@@ -231,12 +229,11 @@ uv run play  Mc-Mjlab-Residual-Balance-Logisticcontroller-Ismpc-Hrp5P-Position \
   --checkpoint-file <path/to/model_*.pt>
 ```
 
-The default mc_mjlab surface is ten tasks: zero-residual position/torque,
-residual-balance position/torque, residual-balance position-ankle, the ankle
-achievement curriculum, the two matched-impulse ankle variants, and the
-residual-mpc and residual-feedback joint-torque tasks. Ten completed ablations
-are hidden so `import mjlab` does not build them. To play an old velocity, sagittal, hardware, frozen/gradual, robust,
-history, or GRU checkpoint under its original id:
+The default mc_mjlab surface is ten tasks. One of them, the achievement-gated
+ankle curriculum, advances only from held-out qualification reports — see
+[docs/difficulty.md](docs/difficulty.md#achievement_finite_impulse_curriculum)
+for how to drive it. Ten completed ablations are hidden so `import mjlab` does
+not build them. To play an old checkpoint under its original id:
 
 ```sh
 MC_MJLAB_REGISTER_ARCHIVED_TASKS=1 uv run list-envs
@@ -260,37 +257,6 @@ optional qualification regressions. A stop is honored only at an iteration
 boundary and only after a recoverable checkpoint has been acknowledged. See
 [docs/training-watchdog.md](docs/training-watchdog.md) for thresholds and
 artifacts.
-
-### Achievement-gated curriculum
-
-The `Position-Ankle-Curriculum-Achievement` task advances only from held-out
-qualification reports. Find its full controller/robot-specific id with
-`uv run list-envs`, then train it normally. The run publishes its current stage
-under `<run>/curriculum/qualification_request.json`.
-
-Evaluate one of that run's checkpoints against the requested stage:
-
-```sh
-run_dir=/absolute/path/to/the/run
-checkpoint="$run_dir/model_100.pt"
-stage=$(jq -r .stage "$run_dir/curriculum/qualification_request.json")
-uv run python scripts/qualify_checkpoints.py "$checkpoint" \
-  --achievement-stage "$stage" --out-dir "$run_dir/curriculum"
-```
-
-Achievement mode defaults to seeds 42 and 43, all four qualification scenarios,
-and ankle authority. A second distinct passing report advances the stage; three
-valid failing reports roll it back. Use a later checkpoint or different seeds
-when replacing the report. The exact stage-passing checkpoint is retained under
-`<run>/curriculum/`, and the complete hysteresis state is embedded in subsequent
-training checkpoints. See [docs/difficulty.md](docs/difficulty.md) for the
-mixtures and resume semantics.
-
-> [!TIP] 
-> To add a task, drop a package under `src/mc_mjlab/tasks/` whose
-> `__init__.py` calls `register_mjlab_task`; the walk picks it up with no
-> wiring. It has to be a directory — a bare module beside `tasks/__init__.py` is
-> never imported and would silently never register.
 
 ### Did it beat the controller?
 
@@ -318,12 +284,12 @@ defaults low on both, to leave room for a training job.
 
 ### Environment variables
 
-| Variable | Effect |
-| --- | --- |
-| `MC_MJLAB_CONTROL` | `position` (default) or `torque`, for the demo |
-| `MC_MJLAB_PRINT_RESIDUAL` | Steps between `[residual]` printouts during `play`; `0` silences |
-| `MC_MJLAB_REGISTER_ARCHIVED_TASKS` | `1` also registers the ten archived ablation ids |
-| `MC_MJLAB_PUSH_DEBUG` | Positive float: scale pushes, cap warm-up at 1 s, print `[push]` lines |
+| Variable                           | Effect                                                                 |
+| ---------------------------------- | ---------------------------------------------------------------------- |
+| `MC_MJLAB_CONTROL`                 | `position` (default) or `torque`, for the demo                         |
+| `MC_MJLAB_PRINT_RESIDUAL`          | Steps between `[residual]` printouts during `play`; `0` silences       |
+| `MC_MJLAB_REGISTER_ARCHIVED_TASKS` | `1` also registers the ten archived ablation ids                       |
+| `MC_MJLAB_PUSH_DEBUG`              | Positive float: scale pushes, cap warm-up at 1 s, print `[push]` lines |
 
 ### External paths
 

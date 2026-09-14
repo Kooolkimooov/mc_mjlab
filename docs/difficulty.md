@@ -343,6 +343,27 @@ finite-impulse scenarios. Their robust guards use `[0.30, 0.35]`,
 physics randomization. Promotion still uses the unchanged safety, nominal,
 recovery, and hazard gates in `qualify_checkpoints.py`.
 
+### Driving the loop
+
+The run publishes the stage it wants evidence for under
+`<run>/curriculum/qualification_request.json`; read it back to the qualifier
+rather than passing a stage by hand:
+
+```sh
+run_dir=/absolute/path/to/the/run
+checkpoint="$run_dir/model_100.pt"
+stage=$(jq -r .stage "$run_dir/curriculum/qualification_request.json")
+uv run python scripts/qualify_checkpoints.py "$checkpoint" \
+  --achievement-stage "$stage" --out-dir "$run_dir/curriculum"
+```
+
+Achievement mode defaults to seeds 42 and 43, all four qualification scenarios,
+and ankle authority. A second distinct passing report advances the stage; three
+valid failing reports roll it back. Use a later checkpoint or different seeds
+when replacing the report. The exact stage-passing checkpoint is retained under
+`<run>/curriculum/`, and the complete hysteresis state is embedded in subsequent
+training checkpoints.
+
 **Re-measure if:** the promotion gates, paired-sample variance, required seed
 count, stage magnitudes, or checkpoint cadence changes.
 
