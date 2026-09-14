@@ -1,0 +1,35 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types_or: [python, pyi]
+
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+
+      - id: clang-format
+        name: clang-format
+        entry: clang-format -i
+        language: system
+        types_or: [c++, c]
+
+      - id: check-prose
+        name: check prose budget
+        entry: python3 .claude/hooks/check_prose.py
+        language: system
+        types: [python]
+        files: ^(src|scripts)/
+
+      - id: ctest
+        name: ctest (C++ and python)
+        entry: cmake --build build --target check
+        language: system
+        types_or: [python, c++, c, cmake]
+        pass_filenames: false
