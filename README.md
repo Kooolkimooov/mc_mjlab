@@ -18,6 +18,11 @@ src/mc_mjlab/
   tasks/mdp.py                # the tasks' MDP terms: rewards, observations, events, metrics
   tasks/residual_balance/     # the RL task: __init__ registers the ids, env cfg + PPO cfg alongside
   tasks/zero_residual/        # the demo task: mc_rtc alone, RL residual left at zero
+src/mc_rtc_interface/
+  cpp/                        # native manager, worker, host and controller instance
+  hpp/io_layout.hpp           # authoritative shared-memory offsets
+  hpp/ipc_socket.hpp          # worker protocol and memory descriptions
+  bindings/module.cpp        # Python ControllersManager bindings
 src/utils/                    # task ids, config, PD gains and shared memory
 docs/                         # why the numbers are what they are (see docs/README.md)
 etc/
@@ -33,6 +38,41 @@ Training and playing use mjlab's own `train`/`play` scripts — see
 [Training and playing](#training-and-playing).
 
 ## Setup
+
+### Native controller interface
+
+Build and install `src/mc_rtc_interface` for the same interpreter as `uv run`.
+The actions own a native `ControllersManager` and two shared-memory blocks;
+`controller_timeout_ms` defaults to 60000. `console_output` selects no rows,
+environment zero (`single`), or every row (`all`).
+
+```sh
+cmake -S src/mc_rtc_interface -B build
+cmake --build build
+cmake --install build
+```
+
+The default install prefix is the selected Python interpreter's environment.
+`cmake --install build --prefix <prefix>` installs the extension and its worker
+under that prefix instead.
+
+Residual tasks require a controller-side numeric datastore adapter for
+`mc_mjlab::planned_zmp`, `mc_mjlab::control_com`, `mc_mjlab::control_com_vel`,
+and, when selected, `mc_mjlab::support_foot` (right=0, left=1). Configure
+`controller_vector_callbacks` / `controller_scalar_callbacks` to override aliases.
+Missing callbacks cause initialization errors. The ZMP callback must retain the
+control-centroid definition used by checkpoints.
+
+Datastore commands additionally require native per-callback usage flags.
+Commands fail clearly if the usage-offset methods or configured callbacks are
+absent. See [the numeric interface and unsupported callback
+inventory](docs/coupling.md#DatastoreCommands).
+
+After installing those dependencies, run `uv run python
+scripts/verify_native_action_contracts.py`, native CTest, and the live walking
+checks (`uv run python scripts/verify_native_action_live.py --mode position`,
+then `--mode torque`). A live zero-residual demo does not validate adapter or
+worker recovery behavior. Checkpoint contract validation remains enforced.
 
 ### mjlab dependency
 

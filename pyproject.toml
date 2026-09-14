@@ -1,6 +1,8 @@
 [build-system]
-requires = ["uv_build>=0.8.19,<0.9.0"]
-build-backend = "uv_build"
+# scikit-build-core, not uv_build: `uv sync` must configure and build
+# src/mc_rtc_interface, whose extension module the package imports natively.
+requires = ["scikit-build-core>=0.11", "nanobind>=3.0.1"]
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "mc-mjlab"
@@ -18,6 +20,7 @@ dependencies = [
     "mjlab",
     # Imported directly by this package; versions are constrained by mjlab.
     "mujoco",
+    "nanobind>=3.0.1",
     "torch",
 ]
 
@@ -31,16 +34,47 @@ dev = [
     "griffe>=2.2.0",
     "grimp>=3.15",
     "markdown>=3.10",
+    # Builds and tests src/mc_rtc_interface: nanobind is found through
+    # `python -m nanobind --cmake_dir`, so it must live in this interpreter.
+    "nanobind>=3.0.1",
+    # The build backend itself: builds run unisolated (see [tool.uv] below),
+    # so it has to be present here rather than in an ephemeral build env.
+    "scikit-build-core>=0.11",
+    "pytest>=8.0",
 ]
+
+[tool.scikit-build]
+cmake.source-dir = "src/mc_rtc_interface"
+# A persistent build dir is what makes both entry points share one tree: uv
+# sync configures it, `cmake --build build` reuses it, and neither rebuild
+# path works without it.
+build-dir = "build"
+# Stale .cpp edits rebuild on import; uv sync alone never sees them.
+editable.rebuild = true
+minimum-version = "build-system.requires"
+
+[tool.scikit-build.wheel]
+packages = ["src/mc_mjlab"]
 
 [tool.uv]
 # This package is developed on a single Linux/CUDA box; resolve for it only.
 required-environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
+# CMake caches the interpreter path it configured with. An isolated build env
+# lives under ~/.cache/uv/builds-v0/ and is deleted afterwards, so every later
+# reconfigure of build/ -- including the import-time rebuild -- fails on a
+# missing interpreter. Building against .venv keeps that path alive, and the
+# mc_rtc bindings are interpreter-specific anyway.
+no-build-isolation-package = ["mc-mjlab"]
 
 [project.entry-points."mjlab.tasks"]
 mc_mjlab = "mc_mjlab.tasks"
+
+[tool.pytest.ini_options]
+# Without it a bare `uv run pytest` walks .venv and collects torch's own test
+# modules, which error out at import.
+testpaths = ["src/mc_rtc_interface/tests"]
 
 [tool.ruff]
 src = ["src"]
