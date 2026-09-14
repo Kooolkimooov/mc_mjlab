@@ -84,13 +84,19 @@ def verify_parity_with_residual_mpc() -> None:
 
 
 def verify_curriculum_present() -> None:
-  """Both tasks carry the kick curriculum, and neither carries it without a kick."""
+  """The kick curriculum needs both its opt-in and a kick to apply."""
   for builder in (residual_mpc_env_cfg, residual_feedback_env_cfg):
-    with_push = builder(num_envs=2, num_workers=1)
-    assert "kick_difficulty" in (with_push.curriculum or {}), (
-      f"{builder.__name__} must adapt kick difficulty"
+    opted_in = builder(num_envs=2, num_workers=1, kick_curriculum=True)
+    assert "kick_difficulty" in (opted_in.curriculum or {}), (
+      f"{builder.__name__} must adapt kick difficulty when asked to"
     )
-    without = builder(num_envs=2, num_workers=1, pushes=False)
+    # Off by default: an adaptive magnitude makes the arms face different
+    # difficulty. docs/residual-mpc.md#INITIAL_VELOCITY_RANGE
+    default = builder(num_envs=2, num_workers=1)
+    assert not (default.curriculum or {}), (
+      f"{builder.__name__} must leave the kick distribution fixed by default"
+    )
+    without = builder(num_envs=2, num_workers=1, kick_curriculum=True, pushes=False)
     assert not (without.curriculum or {}), (
       f"{builder.__name__} must not curriculum a kick it does not apply"
     )
