@@ -11,6 +11,7 @@ from pathlib import Path
 from mjlab.rl import MjlabOnPolicyRunner
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
+from mc_mjlab.tasks.residual_balance import qualification_sidecar
 from mc_mjlab.tasks.residual_balance.achievement_curriculum import (
   AchievementCurriculumBridge,
 )
@@ -228,6 +229,9 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
         self._effective_manifest,
         full_resume=load_cfg is None,
       )
+    # A checkpoint taken mid-transient contaminates everything resumed from it.
+    # docs/hard-constraints.md#c4-the-only-valid-resume-point-is-a-checkpoint-whose-sweep-exists
+    qualification_sidecar.enforce(path, full_resume=load_cfg is None)
     if load_cfg is None:
       synchronize_resumed_curriculum(self.env, checkpoint_infos)
       self._achievement.restore(checkpoint_infos.get(self.ACHIEVEMENT_KEY))
