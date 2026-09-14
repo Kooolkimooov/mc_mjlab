@@ -516,7 +516,7 @@ How the two sides of the comparison are built.
 
 The **controller side** is `planned_zmp`: the centroidal ZMP of the QP's own
 solution, i.e. the ZMP the motion mc_rtc commands this period implies (see
-`mc_rtc_controller_host._planned_zmp`).
+`mdp.planned_zmp_offset` and `coupling.md`'s `planned_zmp` section).
 
 The **sim side** is the centre of pressure of the foot wrenches, summed and moved
 onto the ground plane exactly as `mc_rbdyn::zmp` does —

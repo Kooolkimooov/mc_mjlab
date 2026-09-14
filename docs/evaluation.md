@@ -467,9 +467,10 @@ below remains necessary for checkpoints created before this runner existed.
 
 - **Prepend to `PYTHONPATH`, never replace it.** The mc_rtc bindings arrive on it
   from the sourced workspace; clobbering it fails at `import mc_rbdyn`.
-- **Copy `etc/mc_rtc.yaml` into the worktree.** It is untracked, so the worktree
-  gets the *committed* `MainRobot`, and a different robot means a different joint
-  count and a `size mismatch` that looks exactly like a stale-checkpoint error.
+- **Copy the live `etc/mc_rtc.yaml` into the worktree.** It is tracked, so the
+  worktree gets that commit's `MainRobot`, not the one you are running; a
+  different robot means a different joint count and a `size mismatch` that looks
+  exactly like a stale-checkpoint error.
 
 ## validate_dcm_objective.py
 

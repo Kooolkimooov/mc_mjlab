@@ -1221,7 +1221,7 @@ kinematic rectangle explains a `0.106 m` step.
 
 **`StepRecoveryState` is not it.** Four `double` getters added to
 `ismpc_walking` — `step_recovery`, `step_velocity_x`, `walking`, `stopped`,
-doubles because `_read_scalar_output` rejects `bool` by design — read in-sim
+doubles because `read_scalar_output` rejects `bool` by design — read in-sim
 while commanding `0.6 m/s`:
 
 | t | recov | step_vx | walk | stop | ref_vx | meas_vx |
@@ -1270,17 +1270,18 @@ latches to `true` at line 565 on the recovery path that also clears `Stop`. A
 controller stuck in that state would plan for zero velocity regardless of the
 command, which matches a constant slow gait that ignores every input. It is not
 exposed as a scalar getter, and the neighbouring `robot_walking`, `stop_phase`
-and `double_support` getters return `bool`, which `_read_scalar_output` rejects
+and `double_support` getters return `bool`, which `read_scalar_output` rejects
 by design — so confirming it needs either a new getter or widening that reader.
 
 Measured speed of `0.085 m/s` at `ts` near `1.25 s` implies a step of about
 `0.106 m`, which matches `FootManager.deltaTransLimit[0] = 0.1` closely enough to
 be the next suspect, with `kinematics_cstr` behind it.
 
-**The worker path is still broken.** In-process
-(`use_worker_processes=False`) builds and runs; with worker processes the pool
-still fails during `configure` with an empty payload. Training uses workers, so
-the task keeps the installed default and the constants stay unwired.
+**The worker path was still broken at the time of writing.** In-process
+execution built and ran; the legacy Python pool failed during `configure` with an
+empty payload. Training used workers, so the task kept the installed default and
+the constants stayed unwired. The Python pool and its `use_worker_processes`
+switch were removed in the native migration; re-evaluate against native workers.
 
 **Re-measure if:** the plugin is rebuilt from clean, or the configure failure is
 resolved.
