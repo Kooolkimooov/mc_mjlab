@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -9,6 +10,8 @@ import torch
 from evaluation.reward_audit import (
   RewardAuditRecorder,
   RewardAuditShapeError,
+  kernel_error,
+  placement_verdict,
 )
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.managers.reward_manager import RewardManager, RewardTermCfg
@@ -81,3 +84,47 @@ def test_reward_audit() -> None:
     pass
   else:
     raise AssertionError("reward audit accepted a broadcastable (num_envs, 1) term")
+
+
+def test_target_placement() -> None:
+  """Check the kernel inversion, the band verdicts, and that a guard is exempt."""
+  # Round-trip: the kernel's own output inverts back to the error behind it.
+  for std in (0.05, 0.10, 0.25):
+    for error in (0.01, 0.033, 0.10):
+      score = math.exp(-((error / std) ** 2))
+      assert math.isclose(kernel_error(score, std), error, rel_tol=1e-9)
+  assert math.isnan(kernel_error(0.0, 0.10))
+  assert math.isnan(kernel_error(1.5, 0.10))
+  assert math.isnan(kernel_error(0.5, 0.0))
+
+  def raw(q50: float, nonzero: float = 0.9, q99: float = 0.0) -> dict:
+    return {
+      "q50": q50,
+      "q99": q99,
+      "gated_q50": q50,
+      "gated_q99": q99,
+      "nonzero_fraction": nonzero,
+    }
+
+  # A target 1.4x the gated median is the band's centre.
+  target = 0.10
+  in_band = math.exp(-((target / 1.4 / target) ** 2))
+  assert placement_verdict("kernel", target, raw(in_band))["verdict"] == "pass"
+  # Below the measurement the ratio pins and the gradient dies.
+  assert placement_verdict("kernel", target, raw(0.05))["verdict"] == "saturating"
+  # Far above it the kernel floors and the gradient dies the other way.
+  assert placement_verdict("kernel", target, raw(0.99))["verdict"] == "floored"
+
+  # The gated quantile is what is judged, so a sparse gate is still measurable.
+  sparse = placement_verdict("kernel", target, raw(in_band, nonzero=0.2))
+  assert sparse["verdict"] == "pass"
+  # A term with no admitted sample at all is not measurable.
+  empty = placement_verdict("kernel", target, raw(float("nan"), nonzero=0.0))
+  assert empty["verdict"] == "not_measured" and math.isnan(empty["ratio"])
+
+  # A guard passes by reading zero, and the kernel band must not judge it.
+  quiet = placement_verdict("guard", 0.8, raw(0.0, nonzero=0.0, q99=0.229))
+  assert quiet["verdict"] == "pass"
+  assert quiet["ratio"] > 3.0
+  armed = placement_verdict("guard", 0.8, raw(0.5, nonzero=0.3, q99=0.58))
+  assert armed["verdict"] == "armed"

@@ -25,10 +25,11 @@ from evaluation.rollout import (
   reset_done,
 )
 from evaluation.scenarios import DISTURBANCE_WARMUP_S
-from mjlab.envs import ManagerBasedRlEnvCfg
+from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 from mjlab.rl import RslRlVecEnvWrapper
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
+from mc_mjlab.tasks.residual_balance import qualification_sidecar
 from mc_mjlab.tasks.residual_balance.curriculum_stages import (
   ACHIEVEMENT_STAGES,
   MINIMUM_QUALIFICATION_SEEDS,
@@ -49,6 +50,28 @@ from mc_mjlab.tasks.residual_balance.residual_balance_runner import (
 
 SCENARIOS = ("nominal", "current_kick", "finite_impulse", "robust")
 #: Must stay in step with the env cfg's own authority-set choices.
+#: Every metric a criterion reads. Checked before a rollout, so a missing one
+#: cannot reach a gate as a default. docs/hard-constraints.md#c6-a-criterion-with-no-measurement-is-not-measured
+REQUIRED_METRICS = (
+  "com_velocity_error",
+  "dcm_error",
+  "executed_residual_l2",
+  "foot_slip",
+  "gate_mean",
+  "max_effort_ratio",
+  "near_bound_fraction",
+  "projection_fraction",
+  "recovery_active",
+  "recovery_dcm_error",
+  "zmp_error",
+  "zmp_grounded",
+)
+REQUIRED_TERMINATIONS = (
+  "collapsed",
+  "controller_failed",
+  "controller_worker_failed",
+  "fell_over",
+)
 
 
 def resolve_checkpoints(inputs: list[str]) -> list[Path]:
@@ -93,6 +116,17 @@ def scenario_cfg(
   return cfg
 
 
+def verify_inventory(env: ManagerBasedRlEnv) -> None:
+  """Raise unless every metric and termination a criterion reads is configured."""
+  missing_metrics = set(REQUIRED_METRICS) - set(env.metrics_manager.active_terms)
+  missing_terms = set(REQUIRED_TERMINATIONS) - set(env.termination_manager.active_terms)
+  if missing_metrics or missing_terms:
+    raise KeyError(
+      "qualification needs metrics "
+      f"{sorted(missing_metrics)} and terminations {sorted(missing_terms)}"
+    )
+
+
 def run_checkpoint(
   checkpoint: Path, scenario: str, seed: int, args: argparse.Namespace
 ) -> tuple[list[QualificationEpisode], list[StratumRecord]]:
@@ -121,6 +155,7 @@ def run_checkpoint(
         f"unexpected residual action type: {type(residual_term).__name__}"
       )
 
+    verify_inventory(env)
     recovery_s = float(
       env.reward_manager.get_term_cfg("recovery_dcm").params["window_s"]
     )
@@ -396,11 +431,17 @@ def main() -> None:
       "stratified": by_stratum,
       "promotion": gate,
     }
-    print(
-      f"[qualify]   {'PASS' if gate['eligible'] else 'FAIL'}: "
-      + ("all gates" if gate["eligible"] else "; ".join(gate["reasons"])),
-      flush=True,
-    )
+    if gate["eligible"]:
+      verdict = "PASS: all gates"
+    elif gate["not_measured"]:
+      failed = [c for c in gate["criteria"] if c["verdict"] == "fail"]
+      verdict = (
+        f"NOT MEASURED ({len(gate['not_measured'])}), "
+        f"FAIL ({len(failed)}): " + "; ".join(gate["reasons"])
+      )
+    else:
+      verdict = "FAIL: " + "; ".join(gate["reasons"])
+    print(f"[qualify]   {verdict}", flush=True)
   eligible = [
     (values["promotion"]["rank"], checkpoint)
     for checkpoint, values in summaries.items()
@@ -438,6 +479,8 @@ def main() -> None:
     "selected": selected,
     "selection_rule": "safety and nominal gates, then recovery/hazard/residual",
   }
+  for checkpoint, values in summaries.items():
+    qualification_sidecar.write(checkpoint, values["promotion"], report["config"])
   write_outputs(episodes, strata, report, args.out_dir)
   print(f"[qualify] selected: {selected or 'none'}")
   print(
