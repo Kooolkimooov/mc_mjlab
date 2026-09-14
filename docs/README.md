@@ -35,7 +35,7 @@ are *deciding* something, not when you are reading the line that implements it.
 | [residual-feedback.md](residual-feedback.md) | residual on the controller's own feedback rather than its output, and why the torque channel competes with it |
 | [controller-timing.md](controller-timing.md) | datastore inventory, generic scalar transport, and step-duration screen |
 | [controller-profiling.md](controller-profiling.md) | native training CPU profile: QP preparation, kinematics, integration costs and OpenMP barriers |
-| [evaluation.md](evaluation.md) | how the measurement scripts avoid biasing a result |
+| [evaluation.md](evaluation.md) | how the measurement scripts avoid biasing a result, and what each contract suite covers |
 | [training-watchdog.md](training-watchdog.md) | attach protocol, escalation thresholds, qualification baseline, and machine-readable verdicts |
 | [coupling.md](coupling.md) | action term, pool and host: interpolation, dispatch lag, reset ordering |
 | [process-workers.md](process-workers.md) | native process backend, IPC ownership and worker recovery contract |

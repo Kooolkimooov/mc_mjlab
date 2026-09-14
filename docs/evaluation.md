@@ -589,6 +589,53 @@ nominal mean authority at most 5%, at least 80% recovery samples above 5%
 authority in the first 2 s, and fewer than 1% above 5% after 2 s. The live check
 then drives nonzero action to assert exact inactive residual zeroing.
 
+## Deterministic contract suites
+
+Three scripts assert the Python side of the action without starting a
+controller: `verify_native_action_contracts.py` (reference-order scatter and
+gather, quaternion conversion, sensor routing, datastore commands, dispatch
+pipeline), `verify_residual_mpc_contracts.py` (bridge and blending) and
+`verify_residual_feedback_contracts.py` (modality widths, parity with
+ResidualMPC, kick-curriculum gating). The native tests under
+`src/mc_rtc_interface/tests/` cover the other side of the boundary; these cover
+the mjlab side, and the two do not overlap.
+
+All three run under `ctest` as `contract_*`, about 4 s each, so a stale
+assertion fails at commit time rather than months later.
+
+```sh
+cd build && ctest -R '^contract_'
+```
+
+**History:** `verify_residual_feedback_contracts.py` asserted a
+`kick_difficulty` curriculum that `e797db2` had already made opt-in, and failed
+undetected until 2026-09-14 because nothing ran it.
+
+## sweep_velocity_envelope.py
+
+Maps which velocity commands a ResidualMPC arm can actually track, over a grid
+of `--vx`/`--vy`/`--wz` ranges, optionally scoring a checkpoint alongside the
+MPC prior. This is the tool behind the ISMPC envelope sections in
+[residual-mpc.md](residual-mpc.md); re-run it rather than re-deriving those
+numbers by hand.
+
+```sh
+uv run python scripts/sweep_velocity_envelope.py --vx 0.0:1.0:6 --num-envs 8
+```
+
+**Re-measure if:** the step box, the command ranges or the planner's cruise
+speed move.
+
+## verify_residual_mpc_live.py
+
+Runs the paired `lambda=0` / `lambda=0.1` ResidualMPC controller smoke. Distinct
+from `verify_native_action_live.py`, which measures zero-residual walking
+through both native action modes and says nothing about blending.
+
+```sh
+uv run python scripts/verify_residual_mpc_live.py --steps 500
+```
+
 ## skip_s
 
 **Current:** `--skip-s` discards a leading window of every episode before

@@ -256,6 +256,18 @@ set_tests_properties(
   TIMEOUT 120
 )
 
+# The Python side of the action: reference-order scatter/gather, datastore
+# commands and task cfg wiring, none of which the native tests above reach.
+foreach(contract native_action residual_mpc residual_feedback)
+  add_test(
+    NAME "contract_${contract}"
+    COMMAND "${UV_EXECUTABLE}" run --project "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+      python
+      "${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/verify_${contract}_contracts.py"
+  )
+  set_tests_properties("contract_${contract}" PROPERTIES TIMEOUT 300)
+endforeach()
+
 # Never attach ctest to the default target under scikit-build: the `python`
 # test shells out to `uv run` on this same project, which deadlocks against
 # the outer uv invocation driving the build. `--target check` still runs it.
