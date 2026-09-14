@@ -3,15 +3,10 @@
 
 from __future__ import annotations
 
-import numpy as np
 import torch
+from verify_native_action_contracts import verify_datastore_commands, verify_layout
 
 import mc_mjlab.tasks  # noqa: F401
-from mc_mjlab.actions.mc_rtc_controller_host import (
-  ControllerHost,
-  IoLayout,
-  _read_scalar_output,
-)
 from mc_mjlab.residual_mpc import (
   advance_action_history,
   contact_phases,
@@ -19,117 +14,6 @@ from mc_mjlab.residual_mpc import (
   paper_torque_blend,
 )
 from mc_mjlab.residual_safety import project_residual
-
-
-class _Vector:
-  """Minimal Eigen Vector3 stand-in for datastore command tests."""
-
-  def __init__(self, x: float, y: float, z: float):
-    self._values = (x, y, z)
-
-  def x(self) -> float:
-    return self._values[0]
-
-  def y(self) -> float:
-    return self._values[1]
-
-  def z(self) -> float:
-    return self._values[2]
-
-
-class _Datastore:
-  """Small callable datastore with vector getter/setter pairs."""
-
-  def __init__(self):
-    self.values = {
-      "get_delta": _Vector(1.0, 2.0, 3.0),
-      "get_absolute": _Vector(4.0, 5.0, 6.0),
-      "ismpc_walking::support_foot_name": "LeftFootCenter",
-    }
-
-  def call(self, name: str, value=None):
-    if value is None:
-      return self.values[name]
-    self.values[name.removeprefix("set_").join(("get_", ""))] = value
-
-
-class _Control:
-  """Controller wrapper exposing the fake datastore."""
-
-  def __init__(self, datastore: _Datastore):
-    self._datastore = datastore
-
-  def controller(self):
-    return self
-
-  def datastore(self) -> _Datastore:
-    return self._datastore
-
-
-def verify_layout() -> None:
-  """Verify scalar output columns do not overlap status or command telemetry."""
-  layout = IoLayout(
-    num_targets=2,
-    named_routing=True,
-    has_floating_base_sensor=True,
-    use_reset=True,
-    feed_accel_fallback=False,
-    output_channels=("q", "alpha", "tau"),
-    output_vectors=("planned_zmp",),
-    output_scalars=("objective", "time", "duration", "support"),
-    datastore_scalar_commands=(("get", "set"),),
-  )
-  assert layout.status_off == 6
-  assert layout.vector_off == 7
-  assert layout.scalar_output_off == 10
-  assert layout.scalar_command_output_off == 14
-  assert layout.out_width == 16
-
-
-def verify_datastore_commands() -> None:
-  """Verify baseline-relative delta and absolute vector commands side by side."""
-  layout = IoLayout(
-    num_targets=1,
-    named_routing=False,
-    has_floating_base_sensor=False,
-    use_reset=False,
-    feed_accel_fallback=False,
-    datastore_vector_commands=(
-      ("get_delta", "set_delta"),
-      ("get_absolute", "set_absolute"),
-    ),
-    datastore_vector_command_is_absolute=(False, True),
-  )
-  datastore = _Datastore()
-  host = object.__new__(ControllerHost)
-  host._layout = layout
-  host._command_baselines = [[None, None]]
-  host._scalar_command_baselines = [[]]
-  host._vector_command_is_absolute = (False, True)
-  row = np.zeros(layout.in_width)
-  row[layout.command_off : layout.command_off + 8] = (
-    1.0,
-    0.5,
-    -0.5,
-    1.0,
-    1.0,
-    -1.0,
-    -2.0,
-    -3.0,
-  )
-  host._apply_datastore_commands(_Control(datastore), 0, row)
-  delta = datastore.values["get_delta"]
-  absolute = datastore.values["get_absolute"]
-  assert isinstance(delta, _Vector)
-  assert isinstance(absolute, _Vector)
-  assert (delta.x(), delta.y(), delta.z()) == (1.5, 1.5, 4.0)
-  assert (absolute.x(), absolute.y(), absolute.z()) == (-1.0, -2.0, -3.0)
-  row[layout.command_off] = 0.0
-  host._apply_datastore_commands(_Control(datastore), 0, row)
-  restored = datastore.values["get_delta"]
-  assert isinstance(restored, _Vector)
-  assert (restored.x(), restored.y(), restored.z()) == (1.0, 2.0, 3.0)
-  assert _read_scalar_output(datastore, "ismpc_walking::support_foot_name") == 1.0
 
 
 def verify_phases() -> None:

@@ -10,14 +10,13 @@ src/mc_mjlab/
   actions/mc_rtc_residual_joint_position_actions.py  # McRtcResidualJointPositionAction(Cfg)
   actions/mc_rtc_residual_joint_torque_actions.py    # McRtcResidualJointTorqueAction(Cfg)
   actions/mc_rtc_residual_action.py        # residual action base (interpolation, async dispatch)
-  actions/mc_rtc_controller_pool.py        # worker processes, pipes, shared-memory blocks
-  actions/mc_rtc_controller_io_binding.py  # sim <-> mc_rtc I/O wiring (IoLayout, input assembly)
-  actions/mc_rtc_controller_host.py        # worker-side per-env controller host
   robots/                     # constants (assets are dynamically symlinked from mc_rtc install path)
   tasks/__init__.py           # imports every task sub-package (mjlab.tasks entry point)
   tasks/mdp.py                # the tasks' MDP terms: rewards, observations, events, metrics
   tasks/residual_balance/     # the RL task: __init__ registers the ids, env cfg + PPO cfg alongside
   tasks/zero_residual/        # the demo task: mc_rtc alone, RL residual left at zero
+  controller_io.py            # simulation joints, root and sensors in native layout
+  controller_datastore.py     # numeric aliases, gated commands and baselines
 src/mc_rtc_interface/
   cpp/                        # native manager, worker, host and controller instance
   hpp/io_layout.hpp           # authoritative shared-memory offsets
@@ -265,7 +264,6 @@ defaults low on both, to leave room for a training job.
 | --- | --- |
 | `MC_MJLAB_CONTROL` | `position` (default) or `torque`, for the demo |
 | `MC_MJLAB_PRINT_RESIDUAL` | Steps between `[residual]` printouts during `play`; `0` silences |
-| `MC_MJLAB_WORKER_LOG_DIR` | Send each worker's output to a file there, plus `faulthandler`. The only way to see it under `console_output: none`, which redirects the fds. |
 
 ### External paths
 

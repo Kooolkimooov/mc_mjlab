@@ -3,24 +3,29 @@
 from __future__ import annotations
 
 import abc
-import math
 import os
-import sys
-from dataclasses import dataclass
+import weakref
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
+import numpy as np
 import torch
 from mjlab.envs.mdp.actions.actions import BaseAction, BaseActionCfg
 from mjlab.utils.lab_api.string import resolve_matching_names
 
-from mc_mjlab.actions.mc_rtc_controller_host import STATUS_OK, HostMetadata
-from mc_mjlab.actions.mc_rtc_controller_io_binding import (
-  ControllerIoBinding,
-  apply_reference_pd_gains,
+import mc_rtc_interface as native
+from mc_mjlab.controller_datastore import (
+  SCALAR_CALLBACKS,
+  VECTOR_CALLBACKS,
+  DatastoreCommands,
+  output_columns,
+  read_outputs,
 )
-from mc_mjlab.actions.mc_rtc_controller_pool import ControllerPool
+from mc_mjlab.controller_io import ControllerIoBinding
 from mc_mjlab.recovery_authority import RecoveryAuthority
 from mc_mjlab.robots import mc_rtc_robot_configuration as mc_rtc
+from utils.pd_gains import apply_reference_pd_gains
+from utils.shared_memory import create_shm, row_window
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -46,69 +51,47 @@ class McRtcResidualActionCfg(BaseActionCfg):
   """Physics substeps per controller step (e.g. 5ms control / 1ms physics -> 5)."""
 
   num_workers: int | None = None
-  """Worker process count; ``None`` = ``min(num_envs, cpu_count - 2)``.
-
-  With ``use_worker_processes=False``: thread count of the in-process pool."""
-
-  use_worker_processes: bool = True
-  """When False, host controllers in-process (serial or threaded) -- mainly for
-  debugging, since only ``run()`` releases the GIL."""
+  """Worker process count; ``None`` = ``min(num_envs, cpu_count - 2)``."""
 
   pd_gains_path: str | None = None
-  """Optional mc_mujoco ``PDgains_sim.dat`` (one ``kp kd`` row per refJointOrder
-  joint) overriding the entity's PD gains. Without the real gains a walking
-  controller's trajectory is not tracked and the robot falls."""
+  """Optional reference-order mc_mujoco PD gains overriding entity defaults."""
 
   residual_actuator_names: tuple[str, ...] | None = None
-  """Actuator names (regex) receiving the RL residual; ``None`` = all controlled
-  joints. Non-matched joints track the raw mc_rtc output."""
+  """Actuator regexes receiving residuals; ``None`` selects all controlled joints."""
 
   controller_vectors: tuple[str, ...] = ()
-  """Whole-controller 3-vectors to read off every controller step, named after
-  ``mc_rtc_controller_host.VECTOR_OUTPUTS`` (e.g. ``"planned_zmp"``). Unlike the
-  joint channels these are not per-joint and are not interpolated across
-  substeps; mdp terms read the latest value through ``controller_vector``."""
+  """Vector aliases collected each period without substep interpolation."""
+
+  controller_vector_callbacks: dict[str, str] = field(
+    default_factory=lambda: dict(VECTOR_CALLBACKS)
+  )
+  """Public vector aliases mapped to native Vector3d getter callbacks."""
+
+  controller_scalar_callbacks: dict[str, str] = field(
+    default_factory=lambda: dict(SCALAR_CALLBACKS)
+  )
+  """Public scalar aliases mapped to native double getter callbacks."""
+
+  controller_timeout_ms: int = 60000
+  """Native collection timeout, in milliseconds."""
 
   controller_scalars: tuple[str, ...] = ()
   """Read-only datastore callbacks collected after each controller step."""
 
-  use_controller_reset: bool = True
-  """Reset via ``MCGlobalController.reset()`` (mc_mujoco parity). Requires the
-  locally patched mc_rtc (stock fsm::Controller segfaults on destruction, see
-  the GUI/StateBuilder fix). When False, resets re-run ``init()``, which raises
-  for plugins that register datastore entries."""
-
   print_residual_every: int = 0
-  """Policy steps between printing env 0's residual to the terminal; 0 disables.
-
-  For watching a `play` session: what the policy is actually adding to the
-  controller, per joint, in the control channel's own unit, with a ``*`` on any
-  joint sitting at its clip. Both tasks' play variants switch it on -- `play`
-  exposes no `--env.*` overrides, so the cfg is the only place it can be set --
-  and ``MC_MJLAB_PRINT_RESIDUAL=<n>`` overrides the interval (0 to silence) for
-  a run already going, like ``MC_MJLAB_WORKER_LOG_DIR`` does for worker logs."""
+  """Policy steps between printing env 0's residual to the terminal; 0 disables."""
 
   console_output: Literal["none", "single", "all"] = "none"
-  """mc_rtc terminal output: "none" silences every controller, "single" lets
-  only env 0's controller print (it gets a dedicated worker process), "all"
-  suppresses nothing. Workers are silenced by an fd redirect at startup (no
-  per-step cost) and their error replies still carry the captured mc_rtc
-  output. In-process hosting falls back to per-call fd guards; a threaded
-  in-process pool honors "single" only at construction/reset."""
+  """Native row logging: none, environment zero (single), or all."""
 
   recovery_detector_path: str | None = None
-  """Calibration JSON for recovery-conditioned authority; ``None`` gives full
-  authority for compatibility and detector calibration runs."""
+  """Calibration JSON for recovery authority; ``None`` grants full authority."""
 
   walking_reference_velocity_scale: tuple[float, float, float] | None = None
-  """Maximum recovery-gated ``(vx, vy, yaw_rate)`` delta sent through the
-  walking controller's datastore; ``None`` preserves the existing action space."""
+  """Maximum recovery-gated walking velocity delta, or None to disable."""
 
   walking_velocity_command_name: str | None = None
-  """Command-manager term sent as an absolute ISMPC ``set_ref_vel`` target.
-
-  This adds no policy dimensions and is mutually exclusive with the recovery-delta
-  ``walking_reference_velocity_scale`` mode."""
+  """Command-manager term sent as an absolute ISMPC ``set_ref_vel`` target."""
 
   walking_reference_velocity_slew_rate: tuple[float, float, float] = (
     2.0,
@@ -121,18 +104,16 @@ class McRtcResidualActionCfg(BaseActionCfg):
   """Probe-only paired scalar getter/setters; values are baseline-relative."""
 
   datastore_scalar_holds: tuple[float, ...] = ()
-  """Constant baseline-relative offset held on each paired scalar for the whole
-  run. Empty leaves them probe-driven; otherwise one value per command pair."""
+  """Constant offsets held across episodes, one per scalar command pair."""
 
 
 class McRtcResidualActionBase(BaseAction):
-  """mc_rtc residual action base: steps controllers via a pool, adds RL residual."""
+  """mc_rtc residual action base: steps controllers via a native manager, adds RL residual."""
 
   cfg: McRtcResidualActionCfg
 
   output_channels: tuple[str, ...] = ()
-  """Controller output channels consumed, in output-block order (must match what
-  the host writes to ``out_np``). Set by the subclass."""
+  """Public joint output channels; native qd is exposed as alpha."""
 
   residual_unit: str = ""
   """Unit the residual is expressed in, for the printout. Set by the subclass."""
@@ -149,50 +130,125 @@ class McRtcResidualActionBase(BaseAction):
     self._setup_datastore_scalar_commands(cfg)
     self._setup_residual_printing(cfg)
 
-    self._steps_since_run = torch.zeros(
-      self.num_envs, dtype=torch.long, device=self.device
-    )
+    # Every env shares one dispatch phase (nothing resets this per env), so a
+    # host int keeps the substep loop free of device synchronisation.
+    self._substep = 0
 
-    # Controller transport: workers (or the in-process host), pipes and the
-    # shared I/O blocks. The spawn is non-blocking so controller construction
-    # overlaps the metadata wait.
-    self._pool = ControllerPool(
-      cfg.mc_rtc_config_path,
-      self.num_envs,
-      self._target_names,
-      num_workers=cfg.num_workers,
-      use_worker_processes=cfg.use_worker_processes,
-      console_output=cfg.console_output,
-    )
-    metadata = self._pool.await_ready()
-    self._check_initial_pose_agreement(metadata)
-
-    # Sim <-> mc_rtc input wiring (model introspection, IoLayout, per-step fill).
+    if cfg.frameskip <= 0 or env.cfg.decimation % cfg.frameskip:
+      raise ValueError("environment decimation must be divisible by positive frameskip")
+    if cfg.controller_timeout_ms < 0:
+      raise ValueError("controller_timeout_ms must be nonnegative")
     self._io = ControllerIoBinding(
-      self._env,
+      env,
       self._entity,
       self._target_names,
       self._target_ids,
-      metadata,
-      cfg.use_controller_reset,
+      cfg.mc_rtc_robot_name,
       self.output_channels,
-      cfg.controller_vectors,
-      cfg.controller_scalars,
-      self._datastore_vector_commands,
-      self._datastore_vector_command_is_absolute,
-      self._datastore_scalar_commands,
+      cfg.entity_name,
     )
-    # refJointOrder is only known now, so the gain override is applied here.
+    self._vector_aliases = {
+      name: cfg.controller_vector_callbacks.get(name, name)
+      for name in cfg.controller_vectors
+    }
+    self._scalar_aliases = {
+      name: cfg.controller_scalar_callbacks.get(name, name)
+      for name in cfg.controller_scalars
+    }
+    self._io.layout.output.datastore_vector3 = list(
+      dict.fromkeys(self._vector_aliases.values())
+    )
+    self._io.layout.output.datastore_scalar = list(
+      dict.fromkeys(self._scalar_aliases.values())
+    )
+    self._vector_commands = DatastoreCommands(
+      self._io.layout,
+      self.num_envs,
+      self._datastore_vector_commands,
+      "vector3",
+      self._datastore_vector_command_is_absolute,
+    )
+    self._scalar_commands = DatastoreCommands(
+      self._io.layout,
+      self.num_envs,
+      self._datastore_scalar_commands,
+      "scalar",
+    )
+    # After the command pairs appended their own getters to the layout.
+    self._vector_columns = output_columns(
+      self._io.layout, self._vector_aliases, "vector3"
+    )
+    self._scalar_columns = output_columns(
+      self._io.layout, self._scalar_aliases, "scalar"
+    )
     if cfg.pd_gains_path is not None:
       apply_reference_pd_gains(
-        self._entity, metadata.ref_joint_order, self._target_names, cfg.pd_gains_path
+        self._entity,
+        self._io.layout.input.joint_order,
+        self._target_names,
+        cfg.pd_gains_path,
       )
+    self._manager = None
+    self._finalizer = None
+    self._input_memory = self._output_memory = None
+    self._pending_dispatch = False
+    self._pending_reset = np.zeros(self.num_envs, dtype=bool)
+    self._dispatch_resets = np.zeros(self.num_envs, dtype=bool)
+    try:
+      self._input_memory = create_shm((self.num_envs, self._io.layout.input_size))
+      self._output_memory = create_shm((self.num_envs, self._io.layout.output_size))
+      self._in_np = self._input_memory.arr
+      self._out_np = self._output_memory.arr
+      self._io.fill_controller_input(self._in_np)
+      if cfg.console_output not in ("none", "single", "all"):
+        raise ValueError(f"invalid console_output: {cfg.console_output!r}")
+      configuration = native.WorkerStartMessage(
+        self._io.layout,
+        native.SharedMemoryDescription(
+          *row_window(self._input_memory, 0, self.num_envs)
+        ),
+        native.SharedMemoryDescription(
+          *row_window(self._output_memory, 0, self.num_envs)
+        ),
+      )
+      workers = (
+        cfg.num_workers
+        if cfg.num_workers is not None
+        else min(self.num_envs, max(1, (os.cpu_count() or 1) - 2))
+      )
+      self._manager = native.ControllersManager(
+        cfg.mc_rtc_config_path,
+        self.num_envs,
+        workers,
+        configuration,
+        cfg.controller_timeout_ms,
+      )
+      self._finalizer = weakref.finalize(
+        self,
+        self._release_controller,
+        self._manager,
+        self._input_memory,
+        self._output_memory,
+      )
+      self._manager.dispatch(native.Command.Initialize)
+      failed = self._manager.collect()
+      status = self._out_np[:, self._io.layout.output.status_offset()]
+      if failed or np.any(status != int(native.OutputLayout.Status.OK)):
+        raise RuntimeError(
+          "native controller initialization failed; verify configured numeric "
+          "datastore callbacks and the mc_mjlab controller adapter "
+          f"(vectors={list(self._io.layout.output.datastore_vector3)}, "
+          f"scalars={list(self._io.layout.output.datastore_scalar)})"
+        )
+      self._vector_commands.collect(self._out_np, list(range(self.num_envs)))
+      self._scalar_commands.collect(self._out_np, list(range(self.num_envs)))
+      self._finish_initialization(env, cfg)
+    except BaseException:
+      self.close()
+      raise
 
-    self._pool.configure(self._io.layout)
-    # Aliases of the pool's shared blocks; filled/read directly on the hot path.
-    self._in_np = self._pool.in_np
-    self._out_np = self._pool.out_np
-
+  def _finish_initialization(self, env, cfg):
+    """Allocate simulation buffers while native resources remain guarded."""
     self._alloc_interpolation_buffers()
     self._recovery_authority = (
       RecoveryAuthority(env, self, cfg.recovery_detector_path)
@@ -204,37 +260,29 @@ class McRtcResidualActionBase(BaseAction):
       self._previous_gate.zero_()
       self._actor_update_gate.zero_()
 
-  # ---- Construction helpers. ----
-
-  # Tolerances for the initial-pose agreement check. Position is generous
-  # because a centimetre of disagreement is harmless; heading is tight because
-  # it is not -- see the measurements quoted below.
-  _POSE_TOL_M = 0.05
-  _YAW_TOL_RAD = 0.10
-
-  def _check_initial_pose_agreement(self, metadata: HostMetadata) -> None:
-    """One line if the controller's assumed start pose differs from the sim's."""
-    if metadata.assumed_base_pose is None:
-      return
-    ax, ay, az, ayaw = metadata.assumed_base_pose
-    init = self._entity.cfg.init_state
-    sx, sy, sz = (float(v) for v in init.pos)
-    w, x, y, z = (float(v) for v in init.rot)
-    syaw = math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
-    dyaw = abs(math.atan2(math.sin(syaw - ayaw), math.cos(syaw - ayaw)))
-    dpos = math.dist((sx, sy, sz), (ax, ay, az))
-    if dpos > self._POSE_TOL_M or dyaw > self._YAW_TOL_RAD:
-      print(
-        f"[mc_rtc] controller config starts at yaw={ayaw:+.3f}, sim resets to "
-        f"yaw={syaw:+.3f} ({dpos:.3f} m, {dyaw:.3f} rad apart); reconciled per "
-        f"episode by the reset teleport.",
-        file=sys.stderr,
-        flush=True,
-      )
+  @staticmethod
+  def _release_controller(manager, input_memory, output_memory):
+    """Release workers before the memory they may still be accessing."""
+    manager.close()
+    input_memory.unlink()
+    output_memory.unlink()
 
   def close(self) -> None:
-    """Stop controller workers and release their shared memory."""
-    self._pool.close()
+    """Stop the manager before releasing either shared-memory block."""
+    if self._finalizer is not None:
+      self._finalizer()
+      self._finalizer = None
+      self._input_memory = self._output_memory = None
+    elif self._manager is not None:
+      self._manager.close()
+    self._manager = None
+    self._io.release_views()
+    self._in_np = self._out_np = None
+    for name in ("_input_memory", "_output_memory"):
+      memory = getattr(self, name, None)
+      if memory is not None:
+        memory.unlink()
+        setattr(self, name, None)
 
   def _setup_residual(self, cfg: McRtcResidualActionCfg) -> None:
     """Slice scale/offset/clip down to the residual actuator subset."""
@@ -451,10 +499,6 @@ class McRtcResidualActionBase(BaseAction):
 
   def _alloc_interpolation_buffers(self) -> None:
     """Per-channel ramp endpoints plus the one-period-behind staging buffer."""
-    assert self._io.layout.output_channels == self.output_channels, (
-      f"shared block carries {self._io.layout.output_channels}, "
-      f"but this action consumes {self.output_channels}"
-    )
     self._previous_control = {
       c: torch.zeros(self.num_envs, self._num_targets, device=self.device)
       for c in self.output_channels
@@ -464,6 +508,16 @@ class McRtcResidualActionBase(BaseAction):
       for c in self.output_channels
     }
     self._staged_control = {
+      c: torch.zeros(self.num_envs, self._num_targets, device=self.device)
+      for c in self.output_channels
+    }
+    # Reused every substep: allocating the blend and the masked swap in the loop
+    # would churn the caching allocator for no reason.
+    self._interpolated = {
+      c: torch.zeros(self.num_envs, self._num_targets, device=self.device)
+      for c in self.output_channels
+    }
+    self._swap_scratch = {
       c: torch.zeros(self.num_envs, self._num_targets, device=self.device)
       for c in self.output_channels
     }
@@ -496,43 +550,61 @@ class McRtcResidualActionBase(BaseAction):
       self.num_envs, dtype=torch.bool, device=self.device
     )
 
-  # ---- Pipeline. ----
-
   def _collect_controller_output(self) -> None:
     """Await the outstanding async step (if any) and stage its outputs."""
-    env_indices = self._pool.collect()
-    if env_indices is None:
+    if not self._pending_dispatch:
       return
-    new_output = self._io.read_controller_output(self._out_np, env_indices)
-    env_indices_t = torch.tensor(env_indices, device=self.device, dtype=torch.long)
-    for c in self.output_channels:
-      self._staged_control[c][env_indices_t] = new_output[c]
-    self._has_staged_control[env_indices_t] = True
-    if self._controller_vectors:
-      new_vectors = self._io.read_controller_vectors(self._out_np, env_indices)
-      for v, values in new_vectors.items():
-        self._controller_vectors[v][env_indices_t] = values
-    if self._controller_scalars:
-      new_readonly_scalars = self._io.read_controller_scalars(self._out_np, env_indices)
-      for name, values in new_readonly_scalars.items():
-        self._controller_scalars[name][env_indices_t] = values
-      new_scalars = self._io.read_datastore_scalar_commands(self._out_np, env_indices)
-      for name, values in new_scalars.items():
-        self._controller_scalars[name][env_indices_t] = values
-      new_baselines = self._io.read_datastore_scalar_baselines(
-        self._out_np, env_indices
-      )
-      for name, values in new_baselines.items():
-        self._controller_scalar_baselines[name][env_indices_t] = values
-    # Latch (not assign): the flags must survive until this env is reset, even
-    # though the substeps in between keep collecting.
-    qp_failed, worker_failed = self._io.read_controller_failed(
-      self._out_np, env_indices
-    )
-    self.controller_failed[env_indices_t] |= qp_failed
-    self.controller_worker_failed[env_indices_t] |= worker_failed
+    assert self._manager is not None and self._out_np is not None
+    failed = self._manager.collect()
+    self._pending_dispatch = False
+    # Merge the worker failures into the block itself, so the single upload
+    # below carries the final status and no mask has to cross separately.
+    status_column = self._out_np[:, self._io.layout.output.status_offset()]
+    status_column[failed] = int(native.OutputLayout.Status.WORKER_FAILED)
+    status = status_column.copy()
+    worker_failed = status == int(native.OutputLayout.Status.WORKER_FAILED)
+    self._pending_reset[self._dispatch_resets & ~worker_failed] = False
+    self._pending_reset[worker_failed] = True
+    failed_indices = np.flatnonzero(worker_failed).tolist()
+    self._vector_commands.reset(failed_indices)
+    self._scalar_commands.reset(failed_indices)
+    env_indices = np.flatnonzero(status == int(native.OutputLayout.Status.OK)).tolist()
 
-  # ---- Introspection (the task's mdp terms read the reference through this). ----
+    block = self._io.upload_controller_output(self._out_np)
+    status_t = block[:, self._io.layout.output.status_offset()]
+    ok = status_t == int(native.OutputLayout.Status.OK)
+    self.controller_failed |= status_t == int(native.OutputLayout.Status.QP_FAILED)
+    self.controller_worker_failed |= status_t == int(
+      native.OutputLayout.Status.WORKER_FAILED
+    )
+    # Every status is OK, QP_FAILED or WORKER_FAILED: fresh output means OK.
+    self._has_staged_control.copy_(ok)
+    fresh = ok.unsqueeze(-1)
+    for channel, values in self._io.read_controller_output(block).items():
+      staged = self._staged_control[channel]
+      staged.copy_(torch.where(fresh, values, staged))
+    for kind, columns, destination in (
+      ("vector3", self._vector_columns, self._controller_vectors),
+      ("scalar", self._scalar_columns, self._controller_scalars),
+    ):
+      mask = fresh if kind == "vector3" else ok
+      for name, value in read_outputs(block, columns, kind).items():
+        destination[name].copy_(torch.where(mask, value, destination[name]))
+    self._vector_commands.collect(self._out_np, env_indices)
+    self._scalar_commands.collect(self._out_np, env_indices)
+    if self._datastore_scalar_commands:
+      # Command state is host-side numpy, so these rows still have to be uploaded.
+      rows_t = torch.as_tensor(env_indices, device=self.device, dtype=torch.long)
+      for i, (getter, _) in enumerate(self._datastore_scalar_commands):
+        for destination, source in (
+          (self._controller_scalars, self._scalar_commands.latest),
+          (self._controller_scalar_baselines, self._scalar_commands.baseline),
+        ):
+          destination[getter][rows_t] = torch.tensor(
+            source[env_indices, i, 0],
+            device=self.device,
+            dtype=torch.get_default_dtype(),
+          )
 
   def controller_reference(self, channel: str) -> torch.Tensor:
     """Latest raw controller output for ``channel``, residual excluded."""
@@ -709,8 +781,6 @@ class McRtcResidualActionBase(BaseAction):
       limit = limit[:, self._residual_ids]
     return effort / limit.clamp_min(torch.finfo(effort.dtype).eps)
 
-  # ---- Subclass hooks. ----
-
   @abc.abstractmethod
   def _seed_interpolation(self, env_ids: torch.Tensor) -> None:
     """Seed the interpolation endpoints for the given (reset) envs."""
@@ -722,8 +792,6 @@ class McRtcResidualActionBase(BaseAction):
   ) -> tuple[torch.Tensor, torch.Tensor]:
     """Write targets and return full-width executed residual and projection mask."""
     raise NotImplementedError
-
-  # ---- ActionTerm API. ----
 
   def process_actions(self, actions: torch.Tensor) -> None:
     self._previous_executed_physical.copy_(self._executed_physical)
@@ -773,10 +841,6 @@ class McRtcResidualActionBase(BaseAction):
   def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
     super().reset(env_ids=env_ids)
 
-    # A step may be in flight from the last apply_actions; drain it before the
-    # I/O binding overwrites the input block or the pool sends reset commands
-    # (the workers must be done reading it). Outputs for envs not being reset are
-    # staged in `staged_control` and still applied at their next period start.
     self._collect_controller_output()
 
     if env_ids is None:
@@ -807,9 +871,10 @@ class McRtcResidualActionBase(BaseAction):
     else:
       env_indices = env_ids.tolist()
 
-    self._io.reset_controller_input(self._in_np)
-    self._pool.reset_envs(env_indices)
-    self._steps_since_run[env_indices] = 0
+    self._manager.respawn(env_indices)
+    self._pending_reset[env_indices] = True
+    self._vector_commands.reset(env_indices)
+    self._scalar_commands.reset(env_indices)
 
     # Seed interpolation (subclass-specific rest value per channel) and discard
     # any staged output for the reset envs; they restart from that seed.
@@ -822,65 +887,65 @@ class McRtcResidualActionBase(BaseAction):
       values[env_indices_t] = 0.0
     for values in self._controller_scalar_baselines.values():
       values[env_indices_t] = 0.0
-    # The pool has re-initialized these controllers, so clear the latches too.
+    # Episode latches clear now; the queued native reset still has to complete.
     self.controller_failed[env_indices_t] = False
     self.controller_worker_failed[env_indices_t] = False
-    self._out_np[env_indices, self._io.layout.status_off] = STATUS_OK
 
   def apply_actions(self) -> None:
-    substep_in_period = self._steps_since_run % self.cfg.frameskip
-    run_envs = substep_in_period == 0
+    assert self._manager is not None
+    assert self._in_np is not None and self._out_np is not None
+    substep_in_period = self._substep % self.cfg.frameskip
 
-    run_indices = run_envs.nonzero(as_tuple=False).squeeze(-1).tolist()
-    if isinstance(run_indices, int):
-      run_indices = [run_indices]
-
-    if run_indices:
+    if substep_in_period == 0:
       # Collect the previous period's dispatch (it solved while the intervening
       # sim substeps ran) before reusing the shared I/O blocks.
       self._collect_controller_output()
 
-      run_indices_t = torch.tensor(run_indices, device=self.device, dtype=torch.long)
-      # Promote freshly collected outputs to `next` (previous<-next, next<-staged)
-      # at each env's period start, keeping the ramp continuous one period
-      # behind. Envs without a collected output yet (startup, just reset) hold
-      # their seeded value.
-      fresh = self._has_staged_control[run_indices_t]
-      if bool(fresh.any()):
-        fresh_indices_t = run_indices_t[fresh]
-        for c in self.output_channels:
-          self._previous_control[c][fresh_indices_t] = self._next_control[c][
-            fresh_indices_t
-          ]
-          self._next_control[c][fresh_indices_t] = self._staged_control[c][
-            fresh_indices_t
-          ]
-        self._has_staged_control[fresh_indices_t] = False
+      # Masked, not indexed: a boolean gather's data-dependent shape would sync.
+      fresh = self._has_staged_control.unsqueeze(-1)
+      for c in self.output_channels:
+        scratch = self._swap_scratch[c]
+        torch.where(
+          fresh, self._next_control[c], self._previous_control[c], out=scratch
+        )
+        self._previous_control[c].copy_(scratch)
+        torch.where(fresh, self._staged_control[c], self._next_control[c], out=scratch)
+        self._next_control[c].copy_(scratch)
+      self._has_staged_control.zero_()
 
       # Sample the current state and dispatch this period's solve without
       # blocking; it overlaps the next `frameskip` substeps of sim.
       self._io.fill_controller_input(self._in_np)
-      self._io.write_datastore_vector_commands(
+      self._vector_commands.write(
         self._in_np,
         self._walking_reference_active,
         self._walking_reference_executed,
       )
-      self._io.write_datastore_scalar_commands(
+      self._scalar_commands.write(
         self._in_np,
         self._datastore_scalar_active,
         self._datastore_scalar_delta,
       )
-      self._pool.dispatch_controller_step(run_indices)
+      self._dispatch_resets[:] = self._pending_reset
+      self._in_np[:, self._io.layout.input.reset_offset()] = self._dispatch_resets
+      # An unserviced row must never look like a fresh successful result.
+      self._out_np[:, self._io.layout.output.status_offset()] = int(
+        native.OutputLayout.Status.WORKER_FAILED
+      )
+      self._manager.dispatch(native.Command.Step)
+      self._pending_dispatch = True
 
     # coef=1 on the last substep gives the full new target, matching mc_mujoco.
-    interpolation_coef = (
-      (substep_in_period + 1).float() / self.cfg.frameskip
-    ).unsqueeze(-1)
-    interpolated_control = {
-      c: self._previous_control[c]
-      + interpolation_coef * (self._next_control[c] - self._previous_control[c])
-      for c in self.output_channels
-    }
+    interpolation_coef = (substep_in_period + 1) / self.cfg.frameskip
+    interpolated_control = {}
+    for c in self.output_channels:
+      torch.lerp(
+        self._previous_control[c],
+        self._next_control[c],
+        interpolation_coef,
+        out=self._interpolated[c],
+      )
+      interpolated_control[c] = self._interpolated[c]
 
     # Peak-held across the decimation window: what sizes an actuator is the worst
     # instant, and apply_actions runs before sim.step so this trails by a substep.
@@ -890,7 +955,7 @@ class McRtcResidualActionBase(BaseAction):
       out=self._torque_peak,
     )
 
-    self._steps_since_run += 1
+    self._substep += 1
 
     residual = self._processed_actions * self._last_gate.unsqueeze(-1)
 

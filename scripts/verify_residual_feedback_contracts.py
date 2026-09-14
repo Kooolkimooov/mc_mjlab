@@ -4,14 +4,15 @@
 from __future__ import annotations
 
 import numpy as np
+import torch
 
 import mc_mjlab.tasks  # noqa: F401
-from mc_mjlab.actions.mc_rtc_controller_io_binding import ControllerIoBinding
 from mc_mjlab.actions.residual_feedback_action import (
   ROOT_POSE_DIM,
   SUPPORTED_MODALITIES,
   ResidualFeedbackJointTorqueActionCfg,
 )
+from mc_mjlab.controller_io import ControllerIoBinding
 from mc_mjlab.tasks.residual_feedback.residual_feedback_env_cfg import (
   residual_feedback_env_cfg,
 )
@@ -21,17 +22,26 @@ from mc_mjlab.tasks.residual_mpc.residual_mpc_env_cfg import residual_mpc_env_cf
 
 def verify_rotation_composition() -> None:
   """A composed rotation stays a unit quaternion; adding one would not."""
-  compose = ControllerIoBinding._compose_small_rotation
-  quat = np.tile(np.array([[1.0, 0.0, 0.0, 0.0]]), (3, 1))
-  out = compose(quat, np.zeros((3, 3)))
-  assert np.allclose(out, quat), "a zero rotation must leave the quaternion alone"
-  out = compose(quat, np.tile(np.array([[0.0, 0.02, 0.0]]), (3, 1)))
+
+  def compose(quat, rotvec):
+    return ControllerIoBinding._compose_small_rotation(
+      quat, torch.tensor(rotvec, dtype=torch.float64).expand(3, 3)
+    ).numpy()
+
+  quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]], dtype=torch.float64).expand(3, 4)
+  out = compose(quat, [[0.0, 0.0, 0.0]])
+  assert np.allclose(out, quat.numpy()), (
+    "a zero rotation must leave the quaternion alone"
+  )
+  out = compose(quat, [[0.0, 0.02, 0.0]])
   norms = np.linalg.norm(out, axis=1)
   assert np.allclose(norms, 1.0), f"composition must stay normalized, got {norms}"
-  assert not np.allclose(out, quat), "a non-zero rotation must change the quaternion"
+  assert not np.allclose(out, quat.numpy()), (
+    "a non-zero rotation must change the quaternion"
+  )
   # Opposite rotations must land either side of the identity, not both above it.
-  plus = compose(quat, np.tile(np.array([[0.0, 0.05, 0.0]]), (3, 1)))
-  minus = compose(quat, np.tile(np.array([[0.0, -0.05, 0.0]]), (3, 1)))
+  plus = compose(quat, [[0.0, 0.05, 0.0]])
+  minus = compose(quat, [[0.0, -0.05, 0.0]])
   assert plus[0, 2] * minus[0, 2] < 0.0, "sign of the rotation must be respected"
 
 

@@ -76,7 +76,7 @@ class ResidualFeedbackJointTorqueAction(ResidualMpcJointTorqueAction):
     super().__init__(cfg, env)
     ids = self._residual_ids
     joint_dim = self._num_targets if ids is None else int(ids.numel())
-    wrench_dim = 6 * len(self._io.layout.wrenches)
+    wrench_dim = 6 * len(self._io.layout.input.force_sensors)
     self._modality_dims = {
       "joint_position": joint_dim,
       "joint_velocity": joint_dim,
@@ -101,7 +101,7 @@ class ResidualFeedbackJointTorqueAction(ResidualMpcJointTorqueAction):
     # sixes. docs/residual-feedback.md#feedback_modalities
     self._wrench_scale = torch.tensor(
       ([cfg.wrench_force_scale] * 3 + [cfg.wrench_torque_scale] * 3)
-      * len(self._io.layout.wrenches),
+      * len(self._io.layout.input.force_sensors),
       device=self.device,
     )
     print(
