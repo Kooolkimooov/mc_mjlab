@@ -45,20 +45,26 @@ Training and playing use mjlab's own `train`/`play` scripts — see
 
 ### Native controller interface
 
-Build and install `src/mc_rtc_interface` for the same interpreter as `uv run`.
-The actions own a native `ControllersManager` and two shared-memory blocks;
+`src/mc_rtc_interface` builds itself — there is no manual cmake step. The
+build backend is scikit-build-core, so `uv sync` configures and builds it into
+`build/`, and `editable.rebuild` means any later `uv run` rebuilds and
+reinstalls it on import when a source file has changed. The actions own a
+native `ControllersManager` and two shared-memory blocks;
 `controller_timeout_ms` defaults to 60000. `console_output` selects no rows,
 environment zero (`single`), or every row (`all`).
 
+The extension and its worker load out of `build/install/platlib`, which the
+editable install points at — they are not copied into `.venv`. That persistent
+`build/` is also what makes the native tests runnable directly:
+
 ```sh
-cmake -S src/mc_rtc_interface -B build
-cmake --build build
-cmake --install build
+cd build && ctest            # native tests plus the deterministic contracts
 ```
 
-The default install prefix is the selected Python interpreter's environment.
-`cmake --install build --prefix <prefix>` installs the extension and its worker
-under that prefix instead.
+Configuring by hand is only for building against a prefix other than this
+project's: `cmake -S src/mc_rtc_interface -B <dir>` then
+`cmake --install <dir> --prefix <prefix>`, which otherwise defaults to the
+selected interpreter's environment.
 
 Residual tasks require a controller-side numeric datastore adapter for
 `mc_mjlab::planned_zmp`, `mc_mjlab::control_com`, `mc_mjlab::control_com_vel`,
@@ -72,11 +78,11 @@ Commands fail clearly if the usage-offset methods or configured callbacks are
 absent. See [the numeric interface and unsupported callback
 inventory](docs/coupling.md#DatastoreCommands).
 
-After installing those dependencies, run `uv run python
-scripts/verify_native_action_contracts.py`, native CTest, and the live walking
-checks (`uv run python scripts/verify_native_action_live.py --mode position`,
-then `--mode torque`). A live zero-residual demo does not validate adapter or
-worker recovery behavior. Checkpoint contract validation remains enforced.
+After installing those dependencies, run `cd build && ctest` (which covers the
+native tests and the deterministic action contracts) and the live walking checks
+(`uv run python scripts/verify_native_action_live.py --mode position`, then
+`--mode torque`). A live zero-residual demo does not validate adapter or worker
+recovery behavior. Checkpoint contract validation remains enforced.
 
 ### mjlab dependency
 
@@ -164,7 +170,7 @@ MC_MJLAB_CONTROL=torque scripts/demos/run_test_mc_rtc.sh   # torque control mode
 
 Use existing `train` and `play` scripts:
 
-A task id is `Mc-Mjlab-<task dir>-<Enabled>-<MainRobot>-<Position|Torque>`, the
+A task id is `Mc-Mjlab-<task dir>-<Enabled>-<MainRobot>-<control suffix>`, the
 controller and robot read from `etc/mc_rtc.yaml`, so editing that file changes
 the ids — which is the point, since it also changes what a checkpoint is valid
 against. It is title-cased with `_` turned into `-`, so it is not the yaml's

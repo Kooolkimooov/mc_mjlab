@@ -50,7 +50,7 @@ a training process owned only by an agent exec session.
 uv sync                                          # after choosing the mjlab source
 scripts/demos/run_test_mc_rtc.sh                 # viser viewer (1 env)
 uv run list-envs                                 # task ids (ours + mjlab's)
-# Ids are Mc-Mjlab-<Residual-Balance|Zero-Residual>-<Enabled>-<MainRobot>-<Position|Torque>,
+# Ids are Mc-Mjlab-<task dir>-<Enabled>-<MainRobot>-<control suffix>,
 # built by utils/task_naming.py, which reads Enabled/MainRobot from
 # etc/mc_rtc.yaml and then `.title().replace("_", "-")`s the whole string -- so
 # LogisticController_ismpc/HRP5P become Logisticcontroller-Ismpc/Hrp5P, not the
@@ -69,9 +69,11 @@ uv run python scripts/verify_improvement_contracts.py
 # Regenerate docs/architecture/ from the source; --check fails on drift.
 uv run python scripts/generate_architecture_docs.py
 uv run ruff format && uv run ruff check --fix    # format + lint
-uv run ty check                                  # type check (56 pre-existing
+uv run ty check                                  # type check (91 pre-existing
                                                  # diagnostics: unresolvable
                                                  # mc_rtc bindings + mujoco stubs)
+uv run pytest                                    # binding tests (testpaths is set)
+cd build && ctest                                # native tests, incl. worker recovery
 python3 scripts/check_prose.py src scripts       # prose budget + docs/ links
 ```
 
@@ -221,9 +223,10 @@ From mjlab down to mc_rtc:
   sub-*packages* are walked, so a task added as a bare module never registers;
   and `register_mjlab_task` takes built cfgs, so `import mjlab` now builds this
   repo's env cfgs — without a sourced mc_rtc workspace mjlab's loader reports
-  that as a `[WARN]` plus traceback rather than failing. Only six supported ids
-  register by default; `MC_MJLAB_REGISTER_ARCHIVED_TASKS=1` restores ten
-  historical residual ablations for old-checkpoint compatibility.
+  that as a `[WARN]` plus traceback rather than failing. Only ten supported ids
+  register by default (six residual-balance, two zero-residual, one each for
+  residual_mpc and residual_feedback); `MC_MJLAB_REGISTER_ARCHIVED_TASKS=1`
+  restores ten historical residual ablations for old-checkpoint compatibility.
 - `tasks/residual_balance/residual_balance_runner.py` — snapshots external base
   controller inputs into the run directory and every checkpoint, and validates
   them on load. Its effective-training manifest records live resolved manager
