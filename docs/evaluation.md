@@ -223,6 +223,77 @@ and arm; wall time never decides which episodes enter the result. The robust
 scenario is invalid for promotion if more than 5% of its baseline episodes fail
 before the first disturbance.
 
+### Unmeasured is not a verdict
+
+A criterion whose metric is missing must report **NOT MEASURED**, never PASS and
+never FAIL. Three defects made that untrue here, all of them silent:
+
+- `_episode_value` defaulted a missing `recovery_dcm_error` to `0.0` and divided
+  it by `recovery_active`, so an absent metric scored as a *perfect* recovery —
+  the one gate that was otherwise NaN-safe. Missing terminations defaulted to
+  `0`, so an absent `controller_worker_failed` read as "no worker failed".
+- Every numeric gate in `promotion()` compared a float directly, and NaN
+  comparisons are all `False`, so a criterion whose metric was entirely missing
+  passed six gates without a word.
+- `if not base:` guards conflated "no baseline sample" with "a baseline of
+  exactly zero", skipping the gate in both cases.
+
+The fix is in two layers. `REQUIRED_METRICS` and `REQUIRED_TERMINATIONS` are
+checked against the built managers **before** the rollout starts, following
+`StratifiedDiagnostics.__init__`'s precedent, so a metric named by a criterion
+cannot be absent from an episode at all; the lookups behind them are then strict
+rather than defaulted, stating the invariant twice. On top of that every gate
+returns a `Criterion` carrying `pass`, `fail` or `not_measured`, decided by
+testing the inputs for finiteness before comparing them.
+
+`NOT MEASURED` blocks promotion — `eligible` requires every criterion to have
+passed — but is reported separately from `FAIL`, and anything choosing the next
+target must test `verdict == "fail"` rather than "did not pass". The distinction
+is the point: a failing criterion describes the policy, an unmeasured one
+describes the harness.
+
+**On floats, deliberately:** NaN stays the marker for *no sample*
+(`qualification_strata._safe_ratio` already returns it for a zero denominator)
+and `inf` stays a genuine unbounded bound (`_cluster_stats` gives a single
+cluster `sem = inf`, and its comment records why a NaN bound was wrong there).
+Neither is a verdict. The bug was never the choice of sentinel; it was reading
+one float and emitting a verdict in the same comparison.
+
+### GROUNDED_FRACTION_MARGIN
+
+**Current:** `0.01` — **provisional, not measured.** The gate fails a checkpoint
+whose grounded fraction sits more than one percentage point below the paired
+baseline arm's, judged on the upper bound of the paired difference.
+
+**Why the gate exists.** Every contact-gated term shares one escape: unload the
+feet and the term stops being evaluated. Locally `foot_slip` (`-1.0`) is a cost
+avoided that way, while `dcm_stability` and `recovery_dcm` are bonuses forfeited
+by it, so at today's weights the escape loses 4.0/s to save at most 1.0/s and is
+unprofitable. That is a fact about today's weights, not a property of the design,
+which is why the instrument exists before it is needed.
+
+It is read against the **paired zero-residual arm** on the same disturbance
+schedule rather than against an absolute floor. That is what separates flight the
+ismpc gait itself produces from flight the policy chose: whatever the gait does
+appears in both arms and subtracts out, so no threshold argument about swing
+phases is needed. Note also that `_ZmpSensors.measured_offset` sums vertical
+force over *both* foot sensors before the 20 N test, so normal single support
+still reads grounded and only genuine flight does not.
+
+**Re-measure if:** the residual's authority grows, the base controller's gait
+changes, or the 20 N contact threshold moves.
+
+**History:**
+- 2026-09-14 — added, then measured. `scripts/audit_rewards.py`, policy zero,
+  16 envs x 1000 steps, `--disturbance finite`: `zmp_grounded` reads **100.0%**
+  over n=16,000 with no spread. The robot never leaves the ground under a zero
+  residual, which is what the summed-over-both-feet 20 N predicate should give
+  for a walking gait. So **the escape does not occur at this authority**, the
+  margin is untested against any real spread, and this gate is a tripwire rather
+  than a discriminating criterion today. It costs nothing and will fire if the
+  residual ever gains enough authority to lift the robot; it must be re-sized
+  from a fresh policy-zero spread before it is read as a tight bound.
+
 ### qualification_strata.csv
 
 The qualifier also writes `qualification_strata.csv` and

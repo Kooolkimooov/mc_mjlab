@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
+import os
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -45,6 +47,7 @@ from mc_mjlab.tasks.mdp import (
 from mc_mjlab.tasks.mdp import (
   recovery_authority_coverage as mdp_recovery_authority_coverage,
 )
+from mc_mjlab.tasks.residual_balance import qualification_sidecar
 from mc_mjlab.tasks.residual_balance.achievement_curriculum import (
   AchievementCurriculumBridge,
   AchievementState,
@@ -86,6 +89,8 @@ from mc_mjlab.tasks.residual_balance.residual_balance_ppo_cfg import (
 from mc_mjlab.tasks.residual_balance.reward_audit import (
   RewardAuditRecorder,
   RewardAuditShapeError,
+  kernel_error,
+  placement_verdict,
 )
 from mc_mjlab.tasks.residual_balance.training_watchdog import (
   HealthObservation,
@@ -621,6 +626,11 @@ def _recovery_summary(mean: float, sem: float, clusters: float) -> dict:
       "max_effort_ratio": {"policy": 0.5},
       "projection_fraction": {"policy": 0.0},
       "near_bound_fraction": {"policy": 0.0},
+      "grounded_fraction": {
+        "baseline": 0.98,
+        "policy": 0.98,
+        "paired": {"mean": 0.0, "sem": 0.001, "ci_high": 0.002, "clusters": 16.0},
+      },
       "residual_rms": {"policy": 0.01},
     }
   }
@@ -636,7 +646,12 @@ def _paired_episode(seed: int, env_id: int, arm: str, recovery: float) -> Episod
     pair=0,
     arm=arm,
     length=100,
-    terminations={"controller_worker_failed": 0},
+    terminations={
+      "controller_worker_failed": 0,
+      "fell_over": 0,
+      "collapsed": 0,
+      "controller_failed": 0,
+    },
     rewards={},
     metrics={
       "recovery_dcm_error": recovery,
@@ -651,6 +666,7 @@ def _paired_episode(seed: int, env_id: int, arm: str, recovery: float) -> Episod
       "max_effort_ratio": 0.5,
       "gate_mean": 0.02,
       "executed_residual_l2": 1.0e-4,
+      "zmp_grounded": 0.98,
     },
   )
 
@@ -908,6 +924,185 @@ def verify_qualifier_power() -> None:
   assert any("below 5%" in reason for reason in small["reasons"])
   resolved = promotion(_recovery_summary(-0.01010, 0.003, 32.0))
   assert not any("recovery DCM" in reason for reason in resolved["reasons"])
+
+
+def _nominal_summary() -> dict:
+  """Build a passing nominal-scenario summary for the gates that read it."""
+  clean = {
+    "baseline": 0.03,
+    "policy": 0.03,
+    "paired": {"mean": 0.0, "sem": 0.0001, "ci_high": 0.0002, "clusters": 16.0},
+  }
+  return {
+    "nominal": {
+      "hazard": {"baseline": 0.10, "policy": 0.05},
+      "worker_failure": {"baseline": 0.0, "policy": 0.0},
+      "max_effort_ratio": {"policy": 0.5},
+      "projection_fraction": {"policy": 0.0},
+      "near_bound_fraction": {"policy": 0.0},
+      "grounded_fraction": {
+        "baseline": 0.98,
+        "policy": 0.98,
+        "paired": {"mean": 0.0, "sem": 0.001, "ci_high": 0.002, "clusters": 16.0},
+      },
+      "gate_duty": {"policy": 0.02},
+      "com_velocity_error": dict(clean, baseline=0.1),
+      "zmp_error": dict(clean),
+      "foot_slip": dict(clean),
+      "residual_rms": {"policy": 0.01},
+    }
+  }
+
+
+@contextlib.contextmanager
+def _expect_error(fragment: str):
+  """Assert the block raises a RuntimeError naming ``fragment``."""
+  try:
+    yield
+  except RuntimeError as error:
+    assert fragment in str(error), f"{fragment!r} not in {error}"
+  else:
+    raise AssertionError(f"expected a RuntimeError naming {fragment!r}")
+
+
+def verify_qualifier_not_measured() -> None:
+  """Check a criterion with no measurement reports NOT MEASURED, never PASS."""
+  healthy = promotion(_recovery_summary(-0.01010, 0.003, 32.0))
+  assert healthy["eligible"] and not healthy["not_measured"]
+  assert all(item["verdict"] == "pass" for item in healthy["criteria"])
+
+  # Every gate, one at a time: an absent measurement must block promotion and
+  # must not be reported as a policy failure.
+  gates = (
+    ("max_effort_ratio", "policy"),
+    ("projection_fraction", "policy"),
+    ("near_bound_fraction", "policy"),
+    ("worker_failure", "baseline"),
+  )
+  for name, arm in gates:
+    summary = _recovery_summary(-0.01010, 0.003, 32.0)
+    summary["finite_impulse"][name][arm] = float("nan")
+    verdict = promotion(summary)
+    assert not verdict["eligible"], name
+    assert name in verdict["not_measured"], name
+    record = next(
+      item
+      for item in verdict["criteria"]
+      if item["name"] == name and item["verdict"] == "not_measured"
+    )
+    assert "not measured" in record["detail"], name
+
+  # The defect that mattered most: an absent recovery metric used to divide a
+  # zero default and score as a perfect recovery.
+  missing = _recovery_summary(-0.01010, 0.003, 32.0)
+  missing["finite_impulse"]["recovery_dcm_error"]["paired"]["mean"] = float("nan")
+  verdict = promotion(missing)
+  assert not verdict["eligible"]
+  assert "recovery_dcm_error" in verdict["not_measured"]
+
+  # A relative gate whose baseline is zero has no measurable ratio. It used to
+  # `continue` past the gate in silence; it now says so.
+  nominal = _nominal_summary()
+  assert promotion(nominal)["eligible"]
+  zero_base = _nominal_summary()
+  zero_base["nominal"]["zmp_error"]["baseline"] = 0.0
+  verdict = promotion(zero_base)
+  assert not verdict["eligible"]
+  assert "zmp_error" in verdict["not_measured"]
+
+  # A zero baseline hazard with no policy hazard still ranks as a ratio of 1.0,
+  # which is the pre-existing verdict and must not have moved.
+  hazard_free = _nominal_summary()
+  hazard_free["nominal"]["hazard"] = {"baseline": 0.0, "policy": 0.0}
+  assert promotion(hazard_free)["hazard_ratio"] == 1.0
+
+  # The contact-gate escape: less time grounded than the paired baseline arm.
+  escaped = _recovery_summary(-0.01010, 0.003, 32.0)
+  escaped["finite_impulse"]["grounded_fraction"]["paired"]["ci_high"] = -0.05
+  verdict = promotion(escaped)
+  assert not verdict["eligible"]
+  assert any("grounded fraction" in reason for reason in verdict["reasons"])
+  assert "grounded_fraction" not in verdict["not_measured"]
+
+
+def verify_qualification_sidecar() -> None:
+  """Check a full resume refuses a checkpoint no sweep has qualified."""
+  with tempfile.TemporaryDirectory() as directory:
+    checkpoint = Path(directory) / "model_100.pt"
+    checkpoint.write_bytes(b"policy")
+    passing = {"eligible": True, "reasons": [], "not_measured": []}
+
+    # No verdict beside it: actor-only warns, a full resume refuses.
+    qualification_sidecar.enforce(checkpoint, full_resume=False)
+    with _expect_error("sweep it first"):
+      qualification_sidecar.enforce(checkpoint, full_resume=True)
+
+    qualification_sidecar.write(checkpoint, passing, {"seeds": [42]})
+    qualification_sidecar.enforce(checkpoint, full_resume=True)
+
+    # A verdict written for different bytes is not a verdict about this file.
+    checkpoint.write_bytes(b"a different policy")
+    with _expect_error("different bytes"):
+      qualification_sidecar.enforce(checkpoint, full_resume=True)
+
+    failing = {
+      "eligible": False,
+      "reasons": ["nominal: authority duty exceeds 5%"],
+      "not_measured": ["foot_slip"],
+    }
+    qualification_sidecar.write(checkpoint, failing, {"seeds": [42]})
+    with _expect_error("1 criteria not measured"):
+      qualification_sidecar.enforce(checkpoint, full_resume=True)
+
+    os.environ[qualification_sidecar.ALLOW_UNQUALIFIED_ENV] = "1"
+    try:
+      qualification_sidecar.enforce(checkpoint, full_resume=True)
+    finally:
+      del os.environ[qualification_sidecar.ALLOW_UNQUALIFIED_ENV]
+
+
+def verify_target_placement() -> None:
+  """Check the kernel inversion, the band verdicts, and that a guard is exempt."""
+  # Round-trip: the kernel's own output inverts back to the error behind it.
+  for std in (0.05, 0.10, 0.25):
+    for error in (0.01, 0.033, 0.10):
+      score = math.exp(-((error / std) ** 2))
+      assert math.isclose(kernel_error(score, std), error, rel_tol=1e-9)
+  assert math.isnan(kernel_error(0.0, 0.10))
+  assert math.isnan(kernel_error(1.5, 0.10))
+  assert math.isnan(kernel_error(0.5, 0.0))
+
+  def raw(q50: float, nonzero: float = 0.9, q99: float = 0.0) -> dict:
+    return {
+      "q50": q50,
+      "q99": q99,
+      "gated_q50": q50,
+      "gated_q99": q99,
+      "nonzero_fraction": nonzero,
+    }
+
+  # A target 1.4x the gated median is the band's centre.
+  target = 0.10
+  in_band = math.exp(-((target / 1.4 / target) ** 2))
+  assert placement_verdict("kernel", target, raw(in_band))["verdict"] == "pass"
+  # Below the measurement the ratio pins and the gradient dies.
+  assert placement_verdict("kernel", target, raw(0.05))["verdict"] == "saturating"
+  # Far above it the kernel floors and the gradient dies the other way.
+  assert placement_verdict("kernel", target, raw(0.99))["verdict"] == "floored"
+
+  # The gated quantile is what is judged, so a sparse gate is still measurable.
+  sparse = placement_verdict("kernel", target, raw(in_band, nonzero=0.2))
+  assert sparse["verdict"] == "pass"
+  # A term with no admitted sample at all is not measurable.
+  empty = placement_verdict("kernel", target, raw(float("nan"), nonzero=0.0))
+  assert empty["verdict"] == "not_measured" and math.isnan(empty["ratio"])
+
+  # A guard passes by reading zero, and the kernel band must not judge it.
+  quiet = placement_verdict("guard", 0.8, raw(0.0, nonzero=0.0, q99=0.229))
+  assert quiet["verdict"] == "pass"
+  assert quiet["ratio"] > 3.0
+  armed = placement_verdict("guard", 0.8, raw(0.5, nonzero=0.3, q99=0.58))
+  assert armed["verdict"] == "armed"
 
 
 def verify_stratified_impulse() -> None:
@@ -1375,6 +1570,9 @@ def main() -> None:
   verify_log_ratio_cannot_overflow()
   verify_source_hash_is_audit_only()
   verify_qualifier_power()
+  verify_qualifier_not_measured()
+  verify_qualification_sidecar()
+  verify_target_placement()
   verify_paired_clustering()
   verify_stratified_impulse()
   verify_achievement_curriculum()
