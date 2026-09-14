@@ -71,6 +71,7 @@ from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   QUALIFICATION_MATCHED_BANDS,
   QUALIFICATION_MATCHED_MIXTURES,
   QUALIFICATION_MATCHED_WEIGHTS,
+  RECOVERY_DETECTOR_PATH,
   TORQUE_MARGIN_WEIGHT,
   _make_env_cfg,
   residual_balance_position_achievement_curriculum_env_cfg,
@@ -446,8 +447,7 @@ def verify_projection() -> None:
 
 def verify_recovery_detector() -> None:
   """Check monotonic scoring, sensor onset, bounded duration, and exact cutoff."""
-  path = Path(__file__).parents[1] / "etc" / "recovery_detector.json"
-  calibration = RecoveryCalibration.from_json(path)
+  calibration = RecoveryCalibration.from_json(RECOVERY_DETECTOR_PATH)
   centers = torch.tensor(calibration.centers)
   scales = torch.tensor(calibration.scales)
   nominal = centers.unsqueeze(0)
