@@ -442,11 +442,23 @@ For comparison the same run puts `dcm_stability` at a gated median score of
 is exactly zero, so it is inert and shares the constant without being affected by
 it. A change to `DCM_STD` is therefore confined to this term.
 
-Placing at 1.4x the measurement gives `0.058`; `0.06` gives 1.46x and is in band.
-Note this is not a free move: at `0.06` the median score falls 0.844 -> 0.626, so
-the term's mean payment drops even though its gradient improves. **Untested** —
-it is the pre-registered single hypothesis for the next training run, and nothing
-has changed yet.
+**Changed to `0.06`** — 1.46x the measurement, in band. This is not a free move:
+the median score falls 0.844 -> 0.626, so the term's mean payment drops even as
+its gradient improves, and the weight of `4.0` is deliberately left alone so the
+arm tests one thing.
+
+**Pre-registered before the run** (see
+[hard-constraints.md](hard-constraints.md#decision-journal)):
+
+- **Confirm** — paired `recovery_dcm_error` gain improves against the
+  zero-residual arm on `finite_impulse`, with the hazard ratio not worse.
+- **Null** — the gain is statistically indistinguishable from the `0.10` arm.
+  The kernel was not the binding constraint; revert and record it.
+- **Refute** — the gain regresses, or hazard rises. A tighter kernel made the
+  post-push state harder to be paid for at all; revert.
+
+Judged across mid-run checkpoints, never the last one
+([evaluation.md#never-score-the-last-checkpoint](evaluation.md#never-score-the-last-checkpoint)).
 
 **2026-08-17 — the term is now `mdp.recovery_dcm`, not `recovery_tracking`.** The
 gate machinery is unchanged (`_age_since_push`, the same window, the same
