@@ -182,6 +182,18 @@ int main(int argc, char **argv)
         check_closed(wedged_close, {});
     }
 
+    // Teardown is broadcast, so a wedged pool costs one budget, not one each:
+    // the per-worker version of this took ~3.1 s x workers.
+    const auto wedged_close_pool = directory("wedged_close_pool");
+    {
+        ControllersManager manager(wedged_close_pool.string(), 6, 6, {});
+        manager.dispatch(Command::Step);
+        const auto start = std::chrono::steady_clock::now();
+        manager.close();
+        assert(std::chrono::steady_clock::now() - start < 5s);
+        check_closed(wedged_close_pool, {});
+    }
+
     const auto hang_once = directory("hang_once");
     {
         ControllersManager manager(hang_once.string(), 3, 2, {}, 200);

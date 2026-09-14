@@ -47,6 +47,7 @@ class ControllersManager
         WorkerStartMessage build_worker_configuration(size_t first_controller_index, size_t num_controllers) const;
         Worker             spawn_worker(size_t first_controller_index, size_t num_controllers, size_t generation);
         void               await_worker_start(Worker &worker);
+        int                worker_start_timeout_ms() const;
         void               retire_worker(Worker &worker);
         void               respawn_workers(const std::vector<size_t> &worker_indices);
 };

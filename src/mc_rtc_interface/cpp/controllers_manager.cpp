@@ -29,6 +29,25 @@ namespace
         return std::filesystem::absolute(info.dli_fname).parent_path() / "mc_rtc_interface_worker";
 #endif
     }
+
+    // Teardown budget, paid once for the whole pool rather than per worker.
+    constexpr int dispatch_send_timeout_ms = 1000;
+    constexpr int stop_send_timeout_ms     = 100;
+    constexpr int stop_reply_timeout_ms    = 1000;
+    constexpr int stop_exit_timeout_ms     = 1000;
+
+    // Worker startup: measured 0.475 s per controller plus ~1.35 s fixed, so
+    // this is ~20x headroom. docs/process-workers.md#worker_start_timeout_ms
+    constexpr std::size_t worker_start_base_ms           = 60000;
+    constexpr std::size_t worker_start_per_controller_ms = 10000;
+    constexpr std::size_t worker_start_cap_ms            = 600000;
+
+    int remaining_ms(std::chrono::steady_clock::time_point deadline)
+    {
+        const auto left =
+            std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
+        return left <= 0 ? 0 : static_cast<int>(left);
+    }
 } // namespace
 
 ControllersManager::ControllersManager(
@@ -91,35 +110,53 @@ void ControllersManager::close() noexcept
     if (m_closed) return;
     m_closed = true;
 
+    // Broadcast, then wait once. Per-worker round trips made teardown cost
+    // O(workers): 30 workers x 3.1 s was a 93 s Ctrl-C.
+    const auto stoppable = [](const Worker &worker)
+    { return worker.status == WorkerStatus::Completed || worker.status == WorkerStatus::Working; };
+
     for (auto &worker : m_workers)
     {
-        bool exited = false;
+        if (!stoppable(worker)) continue;
         try
         {
-            if (worker.status == WorkerStatus::Completed || worker.status == WorkerStatus::Working)
-            {
-                // Drain the outstanding operation before expecting the Stop reply.
-                if (worker.status == WorkerStatus::Working) worker.socket->receive<Reply>(1000);
-                worker.socket->send(Command::Stop, 100);
-                worker.socket->receive<Reply>(1000);
-
-                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-                while (worker.child.running())
-                {
-                    if (std::chrono::steady_clock::now() >= deadline) break;
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                }
-                exited = !worker.child.running();
-            }
+            worker.socket->send(Command::Stop, stop_send_timeout_ms);
         }
         catch (...)
         {}
-        if (!exited)
+    }
+
+    const auto acknowledged = std::chrono::steady_clock::now() + std::chrono::milliseconds(stop_reply_timeout_ms);
+    for (auto &worker : m_workers)
+    {
+        if (!stoppable(worker)) continue;
+        try
         {
-            boost::system::error_code error;
-            const bool                running = worker.child.running(error);
-            if (!error && running) worker.child.terminate(error);
+            worker.socket->receive<Reply>(remaining_ms(acknowledged));
         }
+        catch (...)
+        {}
+    }
+
+    const auto exited  = std::chrono::steady_clock::now() + std::chrono::milliseconds(stop_exit_timeout_ms);
+    const auto running = [&]
+    {
+        return std::any_of(
+            m_workers.begin(),
+            m_workers.end(),
+            [](Worker &worker)
+            {
+                boost::system::error_code error;
+                return worker.child.running(error) && !error;
+            });
+    };
+    while (std::chrono::steady_clock::now() < exited && running())
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+    for (auto &worker : m_workers)
+    {
+        boost::system::error_code error;
+        if (worker.child.running(error) && !error) worker.child.terminate(error);
         worker.socket.reset();
     }
     m_workers.clear();
@@ -136,7 +173,7 @@ void ControllersManager::dispatch(Command command)
         if (worker.status != WorkerStatus::Completed) continue;
         try
         {
-            worker.socket->send(command);
+            worker.socket->send(command, dispatch_send_timeout_ms);
             worker.status = WorkerStatus::Working;
             worker.error.clear();
         }
@@ -314,12 +351,19 @@ ControllersManager::Worker
     return worker;
 }
 
+int ControllersManager::worker_start_timeout_ms() const
+{
+    const auto per_worker = m_num_controllers / m_num_workers;
+    const auto budget     = worker_start_base_ms + worker_start_per_controller_ms * per_worker;
+    return static_cast<int>(std::min(budget, worker_start_cap_ms));
+}
+
 void ControllersManager::await_worker_start(Worker &worker)
 {
     Reply reply;
     try
     {
-        reply = worker.socket->receive<Reply>(60000 * m_num_controllers / m_num_workers);
+        reply = worker.socket->receive<Reply>(worker_start_timeout_ms());
     }
     catch (const std::exception &error)
     {
