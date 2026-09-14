@@ -103,7 +103,8 @@ than a knob turned until something passes.
 
 **Two verdicts no mixture repairs.** `nominal: authority duty exceeds 5%` is a
 detector verdict, not a difficulty one: the `nominal` scenario applies no push,
-so duty there is whatever `etc/recovery_detector.json` fires on an undisturbed
+so duty there is whatever `tasks/residual_balance/recovery_detector.json` fires
+on an undisturbed
 gait, and reweighting the training mixture cannot move it. The repair is
 recalibration, and `recovery_authority_coverage` is the reading that says whether
 the same calibration has also lost recall where it matters. The seed's `gate_mean`

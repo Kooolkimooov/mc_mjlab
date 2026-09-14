@@ -717,7 +717,8 @@ more. Two very different situations produce it: the detector may have lost recal
 on `0.40-0.60 m/s` impulses it was never calibrated against, or recoveries may
 simply be short relative to the two-second scored window. The first is a defect
 that caps how much any policy can help, and it is repaired by recalibrating
-`etc/recovery_detector.json`; the second is the objective working as intended.
+`tasks/residual_balance/recovery_detector.json`; the second is the objective
+working as intended.
 No existing metric separates them.
 
 The shipped calibration's own provenance records `push_velocity 0.4` with the

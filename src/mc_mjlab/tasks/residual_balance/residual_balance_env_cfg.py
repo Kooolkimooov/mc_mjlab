@@ -25,7 +25,7 @@ from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.terrains import TerrainEntityCfg
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 
-from mc_mjlab import MC_RTC_YAML_PATH, REPO_ROOT
+from mc_mjlab import MC_RTC_YAML_PATH
 from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionActionCfg,
 )
@@ -57,7 +57,7 @@ FALL_LIMIT_ANGLE = math.radians(45.0)
 TORQUE_MARGIN_WEIGHT = -0.05
 SOLE_VELOCIMETERS = ("left_foot_lin_vel", "right_foot_lin_vel")
 CONTROLLER_HISTORY = 20
-RECOVERY_DETECTOR_PATH = REPO_ROOT / "etc" / "recovery_detector.json"
+RECOVERY_DETECTOR_PATH = Path(__file__).resolve().parent / "recovery_detector.json"
 AUTHORITY_SETS = ("uniform", "ankle", "sagittal", "hardware")
 WALKING_REFERENCE_SCALE = (0.20, 0.15, 0.30)
 

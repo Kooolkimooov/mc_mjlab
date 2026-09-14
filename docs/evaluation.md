@@ -574,7 +574,8 @@ profile itself and the caveat that the recorded numbers predate these fixes.
 Fits the deployable residual-authority detector from dedicated zero-disturbance
 and fixed-energy disturbed cohorts, with even environments used for fitting and
 odd environments held out. A failed held-out gate still writes a temporary JSON
-when fitting succeeds, but it must not replace `etc/recovery_detector.json`.
+when fitting succeeds, but it must not replace
+`tasks/residual_balance/recovery_detector.json`.
 
 ```sh
 uv run python scripts/calibrate_recovery_detector.py \

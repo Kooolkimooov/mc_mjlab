@@ -219,7 +219,8 @@ refJointOrder ordering.
 
 ## recovery_detector_path
 
-**Current:** `etc/recovery_detector.json`. Residual authority is zero until a
+**Current:** `tasks/residual_balance/recovery_detector.json`. Residual authority
+is zero until a
 deployable sensor detector opens it. Its monotonic magnitude score is the maximum
 normalized command-relative DCM error, base angular speed, tilt, and total
 foot-load deviation. A calibrated rise in base angular speed starts a smooth,

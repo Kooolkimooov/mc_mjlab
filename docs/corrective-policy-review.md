@@ -57,7 +57,8 @@ the controller.
 **Current:** source-file and runtime-module hashes are folded into
 `training_sha256`, so a comment-only source edit or dependency rebuild can block
 full resume with no override. At the same time, the action-defining contents of
-`etc/recovery_detector.json` are absent from controller provenance; only its path
+`tasks/residual_balance/recovery_detector.json` are absent from controller
+provenance; only its path
 appears in the environment config. The enforced identity is therefore stricter
 on incidental source bytes than on an external file that controls action
 authority.
@@ -68,7 +69,8 @@ existing checkpoints still load; see
 [evaluation.md](evaluation.md#source_drift). It was not deferred in the end
 because it stopped a same-day checkpoint from being evaluated at all.
 
-Still deferred: content-hashing `etc/recovery_detector.json` into controller
+Still deferred: content-hashing
+`tasks/residual_balance/recovery_detector.json` into controller
 provenance. That file decides when the policy may act, and the 2026-08-27
 stratified read showed its duty rising `31.8%` between pushes under a policy it
 was never calibrated against, so it is now load-bearing evidence rather than a
