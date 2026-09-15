@@ -16,8 +16,10 @@ from mjlab.utils.lab_api.string import resolve_matching_names
 import mc_rtc_interface as native
 from mc_mjlab.controller_datastore import (
   DatastoreCommands,
+  input_columns,
   output_columns,
   read_outputs,
+  write_inputs,
 )
 from mc_mjlab.recovery_authority import RecoveryAuthority
 from mc_mjlab.robots import mc_rtc_robot_configuration as mc_rtc
@@ -52,13 +54,13 @@ class McRtcResidualActionCfg(BaseActionCfg):
   """Actuator regexes receiving residuals; ``None`` selects all controlled joints."""
 
   datastore_scalar_inputs: tuple[str, ...] = ()
-  """Read-only datastore callbacks collected after each controller step."""
+  """Native double setters written every control period. docs/coupling.md"""
 
   datastore_scalar_outputs: tuple[str, ...] = ()
   """Native double getter callbacks collected after each controller step."""
 
   datastore_vectors_inputs: tuple[str, ...] = ()
-  """Vector aliases collected each period without substep interpolation."""
+  """Native Vector3d setters written every control period. docs/coupling.md"""
 
   datastore_vectors_outputs: tuple[str, ...] = ()
   """Native Vector3d getters collected each period, without interpolation."""
@@ -158,6 +160,15 @@ class McRtcResidualActionBase(BaseAction):
       dict.fromkeys(cfg.datastore_vectors_outputs)
     )
 
+    # Declared before the command pairs, which append their setters after these.
+    self._io.layout.input.datastore_scalar = list(
+      dict.fromkeys(cfg.datastore_scalar_inputs)
+    )
+
+    self._io.layout.input.datastore_vector3 = list(
+      dict.fromkeys(cfg.datastore_vectors_inputs)
+    )
+
     self._datastore_vector_input_commands = DatastoreCommands(
       self._io.layout,
       self.num_envs,
@@ -181,6 +192,8 @@ class McRtcResidualActionBase(BaseAction):
     self._datastore_scalar_output_columns = output_columns(
       self._io.layout, cfg.datastore_scalar_outputs, "scalar"
     )
+
+    self._setup_datastore_inputs(cfg)
 
     if cfg.pd_gains_path is not None:
       apply_reference_pd_gains(
@@ -389,6 +402,73 @@ class McRtcResidualActionBase(BaseAction):
     self._datastore_vector_input_values = torch.zeros(
       self.num_envs, 0, device=self.device
     )
+
+  def _setup_datastore_inputs(self, cfg: McRtcResidualActionCfg) -> None:
+    """Resolve the unconditionally fed setter columns and their value buffers."""
+    self._datastore_scalar_input_columns = input_columns(
+      self._io.layout, dict.fromkeys(cfg.datastore_scalar_inputs), "scalar"
+    )
+    self._datastore_vector_input_columns = input_columns(
+      self._io.layout, dict.fromkeys(cfg.datastore_vectors_inputs), "vector3"
+    )
+    # Every declared setter is written each period from the first step on, so a
+    # task that declares one owns its value from then on. docs/coupling.md
+    self._datastore_scalar_input_feed = torch.zeros(
+      self.num_envs, len(self._datastore_scalar_input_columns), device=self.device
+    )
+    self._datastore_vector_input_feed = torch.zeros(
+      self.num_envs, len(self._datastore_vector_input_columns), 3, device=self.device
+    )
+
+  def _datastore_input_index(
+    self, columns: dict[str, int], setter: str, kind: str
+  ) -> int:
+    """Position of one configured setter in its input value buffer."""
+    try:
+      return list(columns).index(setter)
+    except ValueError:
+      raise KeyError(
+        f"datastore {kind} input {setter!r} is not configured; add it to the "
+        f"action term's `datastore_{kind}_inputs` (have: {sorted(columns)})"
+      ) from None
+
+  def datastore_scalar_input(self, setter: str) -> torch.Tensor:
+    """Value currently fed to one configured scalar datastore setter."""
+    index = self._datastore_input_index(
+      self._datastore_scalar_input_columns, setter, "scalar"
+    )
+    return self._datastore_scalar_input_feed[:, index]
+
+  def datastore_vector_input(self, setter: str) -> torch.Tensor:
+    """Value currently fed to one configured vector datastore setter."""
+    index = self._datastore_input_index(
+      self._datastore_vector_input_columns, setter, "vectors"
+    )
+    return self._datastore_vector_input_feed[:, index]
+
+  def set_datastore_scalar_input(self, setter: str, values: torch.Tensor) -> None:
+    """Feed one scalar datastore setter; the value holds until set again."""
+    index = self._datastore_input_index(
+      self._datastore_scalar_input_columns, setter, "scalar"
+    )
+    if tuple(values.shape) != (self.num_envs,):
+      raise ValueError(
+        f"datastore scalar input shape {tuple(values.shape)}, "
+        f"expected {(self.num_envs,)}"
+      )
+    self._datastore_scalar_input_feed[:, index].copy_(values)
+
+  def set_datastore_vector_input(self, setter: str, values: torch.Tensor) -> None:
+    """Feed one vector datastore setter; the value holds until set again."""
+    index = self._datastore_input_index(
+      self._datastore_vector_input_columns, setter, "vectors"
+    )
+    if tuple(values.shape) != (self.num_envs, 3):
+      raise ValueError(
+        f"datastore vector input shape {tuple(values.shape)}, "
+        f"expected {(self.num_envs, 3)}"
+      )
+    self._datastore_vector_input_feed[:, index].copy_(values)
 
   def _setup_datastore_scalar_input_commands(self, cfg: McRtcResidualActionCfg) -> None:
     """Allocate probe-controlled scalar datastore deltas without policy actions."""
@@ -834,6 +914,18 @@ class McRtcResidualActionBase(BaseAction):
     # Sample the current state and dispatch this period's solve without
     # blocking; it overlaps the next `frameskip` substeps of sim.
     self._io.fill_controller_input(self._in_np)
+    write_inputs(
+      self._in_np,
+      self._datastore_scalar_input_columns,
+      self._datastore_scalar_input_feed,
+      "scalar",
+    )
+    write_inputs(
+      self._in_np,
+      self._datastore_vector_input_columns,
+      self._datastore_vector_input_feed,
+      "vector3",
+    )
     self._datastore_vector_input_commands.write(
       self._in_np,
       self._datastore_vector_input_active,

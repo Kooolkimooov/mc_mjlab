@@ -88,6 +88,39 @@ configuration changes.
 **History:** the old Python pool implemented kill/respawn quarantine. Its retained
 measurements and failure evidence are in [the historical notes](coupling-history.md).
 
+## datastore_scalar_inputs
+
+**Current:** `datastore_scalar_inputs` and `datastore_vectors_inputs` name
+`double` and `Eigen::Vector3d` datastore *setters*. They are the unconditional
+counterpart of the gated [DatastoreCommands](#datastorecommands) pairs: the
+native step writes every declared input column into the controller's datastore
+before `run()`, on every control period, with no usage flag, no baseline and no
+restore — which is why they work on the current native interface, while the
+gated pairs still need usage flags it does not expose.
+
+The action term owns one value buffer per kind, zero until a task writes it.
+`set_datastore_scalar_input(setter, values)` takes `(num_envs,)` and
+`set_datastore_vector_input(setter, values)` takes `(num_envs, 3)`;
+`datastore_scalar_input` / `datastore_vector_input` read the fed value back.
+A value holds until set again, across episode resets, because a fed setter is a
+property of the task and not of the episode — the same rule as
+`datastore_scalar_input_holds`.
+
+Two ordering hazards. The declared columns precede the command setters in the
+input block (`_build_bridge` assigns the layout lists before constructing
+`DatastoreCommands`, which appends to them), so declaring the same setter on
+both paths is rejected rather than written twice. And a declared setter is
+written from the very first controller step, before any task code has run, so
+its zero default reaches the controller unless the task feeds it during
+construction.
+
+**Re-measure if:** the native input block gains usage flags, or `apply_input`
+stops writing datastore columns every step.
+
+**History:**
+- 2026-09-15 — both fields existed on the cfg with output-shaped docstrings and
+  no reader; wired to the layout, the value buffers and the per-period write.
+
 ## DatastoreCommands
 
 **Current:** there is no alias layer. A task names native callbacks directly in

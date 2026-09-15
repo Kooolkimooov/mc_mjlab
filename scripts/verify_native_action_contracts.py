@@ -15,6 +15,7 @@ from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
 )
 from mc_mjlab.controller_datastore import (
   DatastoreCommands,
+  input_columns,
   output_columns,
   read_outputs,
 )
@@ -240,6 +241,10 @@ def verify_pipeline() -> None:
   )
   action._datastore_vector_output_columns = output_columns(io.layout, (), "vector3")
   action._datastore_scalar_output_columns = output_columns(io.layout, (), "scalar")
+  action._datastore_vector_input_columns = input_columns(io.layout, (), "vector3")
+  action._datastore_scalar_input_columns = input_columns(io.layout, (), "scalar")
+  action._datastore_vector_input_feed = torch.empty(2, 0, 3)
+  action._datastore_scalar_input_feed = torch.empty(2, 0)
   action._alloc_interpolation_buffers()
   action._in_np = np.zeros((2, io.layout.input_size))
   action._out_np = np.zeros((2, io.layout.output_size))

@@ -39,7 +39,17 @@ class DatastoreCommands:
     setters = [setter for _, setter in pairs]
     if len(set(setters)) != len(setters):
       raise ValueError("datastore setters must be unique within each numeric type")
-    setattr(layout.input, "datastore_" + kind, setters)
+    fed = list(getattr(layout.input, "datastore_" + kind))
+    clashing = [setter for setter in setters if setter in fed]
+    if clashing:
+      raise ValueError(
+        f"datastore setters {clashing} are already declared as unconditional "
+        f"{kind} inputs; a setter is written by one path only"
+      )
+    # Appended, not assigned: the unconditional inputs hold the columns before
+    # these, and `write` addresses this block from the first appended setter.
+    setattr(layout.input, "datastore_" + kind, [*fed, *setters])
+    self.setter_offset = len(fed)
     getters = list(getattr(layout.output, "datastore_" + kind))
     getters = list(dict.fromkeys([*getters, *(getter for getter, _ in pairs)]))
     setattr(layout.output, "datastore_" + kind, getters)
@@ -87,10 +97,34 @@ class DatastoreCommands:
     payload = np.where(self.absolute[None, :, None], values, self.baseline + values)
     payload[restoring] = self.baseline[restoring]
     off = getattr(self.layout.input, "datastore_" + self.kind + "_offset")()
+    off += self.width * self.setter_offset
     usage = getattr(self.layout.input, "use_datastore_" + self.kind + "_offset")()
+    usage += self.setter_offset
     rows[:, off : off + commands * self.width] = payload.reshape(count, -1)
     rows[:, usage : usage + commands] = enabled | restoring
     self.active[:] = enabled
+
+
+def input_columns(
+  layout: native.IoLayout, names: Iterable[str], kind: DatastoreKind
+) -> dict[str, int]:
+  """Resolve configured setter names to their native input columns, once."""
+  callbacks = list(getattr(layout.input, "datastore_" + kind))
+  off = getattr(layout.input, "datastore_" + kind + "_offset")()
+  width = 3 if kind == "vector3" else 1
+  return {name: off + width * callbacks.index(name) for name in names}
+
+
+def write_inputs(
+  rows: np.ndarray, columns: dict[str, int], values: torch.Tensor, kind: DatastoreKind
+) -> None:
+  """Copy one tensor of per-environment setter values into the input block."""
+  if not columns:
+    return
+  width = 3 if kind == "vector3" else 1
+  payload = values.detach().cpu().numpy().reshape(rows.shape[0], -1, width)
+  for index, start in enumerate(columns.values()):
+    rows[:, start : start + width] = payload[:, index]
 
 
 def output_columns(
