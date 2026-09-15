@@ -25,7 +25,7 @@ repos:
         entry: python3 scripts/check_prose.py
         language: system
         types: [python]
-        files: ^(src|scripts)/
+        files: ^(src|scripts|tests)/
 
       - id: ctest
         name: ctest (C++ and python)

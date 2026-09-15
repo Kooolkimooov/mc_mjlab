@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-"""Verify deterministic residual-feedback layout, isolation and parity contracts."""
+"""Deterministic residual-feedback layout, isolation and parity contracts."""
 
 from __future__ import annotations
 
@@ -22,7 +21,7 @@ from mc_mjlab.tasks.residual_mpc import mdp
 from mc_mjlab.tasks.residual_mpc.residual_mpc_env_cfg import residual_mpc_env_cfg
 
 
-def verify_rotation_composition() -> None:
+def test_rotation_composition() -> None:
   """A composed rotation stays a unit quaternion; adding one would not."""
 
   def compose(quat: torch.Tensor, rotvec: Sequence[Sequence[float]]) -> np.ndarray:
@@ -47,7 +46,7 @@ def verify_rotation_composition() -> None:
   assert plus[0, 2] * minus[0, 2] < 0.0, "sign of the rotation must be respected"
 
 
-def verify_modality_widths() -> None:
+def test_modality_widths() -> None:
   """Declared widths are what the action space grows by, per modality."""
   cfg = residual_feedback_env_cfg(num_envs=2, num_workers=1)
   action = cfg.actions[mdp.ACTION_NAME]
@@ -56,7 +55,7 @@ def verify_modality_widths() -> None:
   assert ROOT_POSE_DIM == 6, "root pose is 3 translation plus 3 rotation"
 
 
-def verify_rejects_bad_modalities() -> None:
+def test_rejects_bad_modalities() -> None:
   """An unknown or duplicated modality fails at build, not at the first step."""
   for bad in (("elbow_grease",), ("joint_position", "joint_position"), ()):
     try:
@@ -68,7 +67,7 @@ def verify_rejects_bad_modalities() -> None:
     raise AssertionError(f"modalities {bad!r} must be rejected")
 
 
-def verify_parity_with_residual_mpc() -> None:
+def test_parity_with_residual_mpc() -> None:
   """The two tasks may differ only in the action term."""
   a = residual_mpc_env_cfg(num_envs=2, num_workers=1)
   b = residual_feedback_env_cfg(num_envs=2, num_workers=1)
@@ -85,7 +84,7 @@ def verify_parity_with_residual_mpc() -> None:
   assert a.episode_length_s == b.episode_length_s, "episode length differs"
 
 
-def verify_curriculum_present() -> None:
+def test_curriculum_present() -> None:
   """The kick curriculum needs both its opt-in and a kick to apply."""
   for builder in (residual_mpc_env_cfg, residual_feedback_env_cfg):
     opted_in = builder(num_envs=2, num_workers=1, kick_curriculum=True)
@@ -102,17 +101,3 @@ def verify_curriculum_present() -> None:
     assert not (without.curriculum or {}), (
       f"{builder.__name__} must not curriculum a kick it does not apply"
     )
-
-
-def main() -> None:
-  """Run every deterministic residual-feedback contract."""
-  verify_rotation_composition()
-  verify_modality_widths()
-  verify_rejects_bad_modalities()
-  verify_parity_with_residual_mpc()
-  verify_curriculum_present()
-  print("residual-feedback deterministic contracts: PASS")
-
-
-if __name__ == "__main__":
-  main()

@@ -58,7 +58,7 @@ editable install points at — they are not copied into `.venv`. That persistent
 `build/` is also what makes the native tests runnable directly:
 
 ```sh
-cd build && ctest            # native tests plus the deterministic contracts
+cd build && ctest            # C++ tests plus the pytest suite in tests/
 ```
 
 Configuring by hand is only for building against a prefix other than this

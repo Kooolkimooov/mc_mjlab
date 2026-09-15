@@ -593,25 +593,30 @@ then drives nonzero action to assert exact inactive residual zeroing.
 
 ## Deterministic contract suites
 
-Three scripts assert the Python side of the action without starting a
-controller: `verify_native_action_contracts.py` (reference-order scatter and
+Three pytest modules assert the Python side of the action without starting a
+controller: `tests/test_native_action_contracts.py` (reference-order scatter and
 gather, quaternion conversion, sensor routing, datastore commands, dispatch
-pipeline, `required_controller`), `verify_residual_mpc_contracts.py` (bridge and blending) and
-`verify_residual_feedback_contracts.py` (modality widths, parity with
-ResidualMPC, kick-curriculum gating). The native tests under
+pipeline, `required_controller`), `tests/test_residual_mpc_contracts.py` (bridge
+and blending) and `tests/test_residual_feedback_contracts.py` (modality widths,
+parity with ResidualMPC, kick-curriculum gating). The C++ tests under
 `src/mc_rtc_interface/tests/` cover the other side of the boundary; these cover
 the mjlab side, and the two do not overlap.
 
-All three run under `ctest` as `contract_*`, about 4 s each, so a stale
-assertion fails at commit time rather than months later.
+They run with the binding tests beside them, under `uv run pytest` and as
+ctest's one `python` test, about 15 s for the directory, so a stale assertion
+fails at commit time rather than months later.
 
 ```sh
-cd build && ctest -R '^contract_'
+uv run pytest tests -k contracts
 ```
 
-**History:** `verify_residual_feedback_contracts.py` asserted a
-`kick_difficulty` curriculum that `e797db2` had already made opt-in, and failed
-undetected until 2026-09-14 because nothing ran it.
+**History:**
+- 2026-09-15 -- moved out of `scripts/` into `tests/`, dropping the three
+  `contract_*` ctest entries for the single `python` one. As standalone scripts
+  each had its own `main()`, and the two shared contracts ran twice.
+- `verify_residual_feedback_contracts.py` asserted a `kick_difficulty`
+  curriculum that `e797db2` had already made opt-in, and failed undetected until
+  2026-09-14 because nothing ran it.
 
 ## sweep_velocity_envelope.py
 

@@ -13,7 +13,7 @@ from utils.shared_memory import create_shm, row_window
 BINARY = Path(
   os.environ.get(
     "MC_RTC_SHARED_MEMORY_TEST",
-    Path(__file__).resolve().parents[3] / "build" / "test_shared_memory",
+    Path(__file__).resolve().parents[1] / "build" / "test_shared_memory",
   )
 )
 

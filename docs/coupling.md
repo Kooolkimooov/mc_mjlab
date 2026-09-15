@@ -41,7 +41,7 @@ the full native force-sensor ordering.
 **Re-measure if:** RobotModule joint/sensor metadata or MuJoCo conventions change.
 
 **History:** the legacy layout used target-order joints and a sixteen-value root
-block. Native mapping and geometry are covered by `verify_native_action_contracts`.
+block. Native mapping and geometry are covered by `tests/test_native_action_contracts.py`.
 
 ## Reset pose seeding
 

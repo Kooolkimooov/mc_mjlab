@@ -74,7 +74,7 @@ mc_mjlab = "mc_mjlab.tasks"
 [tool.pytest.ini_options]
 # Without it a bare `uv run pytest` walks .venv and collects torch's own test
 # modules, which error out at import.
-testpaths = ["src/mc_rtc_interface/tests"]
+testpaths = ["tests"]
 
 [tool.ruff]
 src = ["src"]

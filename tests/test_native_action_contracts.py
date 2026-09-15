@@ -1,4 +1,4 @@
-"""Verify native action wiring and scheduling without external controller adapters."""
+"""Native action wiring and scheduling, without external controller adapters."""
 
 import tempfile
 from pathlib import Path
@@ -124,7 +124,12 @@ def verify_layout() -> tuple[SimControllerBridge, NS, NS]:
   return bridge, env, entity
 
 
-def verify_walking_reference_feed() -> None:
+def test_layout() -> None:
+  """Run the layout contract; the bridge it returns is for the other suites."""
+  verify_layout()
+
+
+def test_walking_reference_feed() -> None:
   """Check the nominal latch, the hold while perturbing and the absolute mode."""
   action = object.__new__(GatedWalkingReferenceDeltaAction)
   action._env = NS(num_envs=2)  # ty: ignore[invalid-assignment]
@@ -176,7 +181,7 @@ def verify_walking_reference_feed() -> None:
   torch.testing.assert_close(fed, torch.tensor([[0.02, 0.0, 0.0]] * 2))
 
 
-def verify_required_controller() -> None:
+def test_required_controller() -> None:
   """Check that a term declaring a controller rejects a config enabling another."""
   action = object.__new__(McRtcResidualJointPositionAction)
   action._env = NS(cfg=NS(decimation=4))  # ty: ignore[invalid-assignment]
@@ -242,7 +247,7 @@ class Manager:
     self.resets.append(list(reset_row_ids))
 
 
-def verify_pipeline() -> None:
+def test_pipeline() -> None:
   """Keep interpolation delayed through partial resets and exclude failed rows."""
   bridge, env, entity = verify_layout()
   action = object.__new__(McRtcResidualJointPositionAction)
@@ -331,16 +336,3 @@ def verify_pipeline() -> None:
   action.apply_actions()
   action._collect_controller_output()
   assert not action._has_staged_control.any()
-
-
-def main() -> None:
-  """Run contracts that do not require native recovery or adapter callbacks."""
-  verify_layout()
-  verify_required_controller()
-  verify_walking_reference_feed()
-  verify_pipeline()
-  print("Native action deterministic contracts: PASS")
-
-
-if __name__ == "__main__":
-  main()

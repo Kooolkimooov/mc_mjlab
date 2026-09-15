@@ -20,7 +20,7 @@ DIRECT_JOINTS = 17
 PROBE_DIR = Path(
   os.environ.get(
     "MC_RTC_INSTANCE_PROBE_DIR",
-    Path(__file__).resolve().parents[3] / "build",
+    Path(__file__).resolve().parents[1] / "build",
   )
 )
 

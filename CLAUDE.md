@@ -68,9 +68,9 @@ uv run ruff format && uv run ruff check --fix    # format + lint
 uv run ty check                                  # type check (91 pre-existing
                                                  # diagnostics: unresolvable
                                                  # mc_rtc bindings + mujoco stubs)
-uv run pytest                                    # binding tests (testpaths is set)
-cd build && ctest                                # native tests, incl. worker recovery
-python3 scripts/check_prose.py src scripts       # prose budget + docs/ links
+uv run pytest                                    # tests/: bindings + action contracts
+cd build && ctest                                # C++ tests, worker recovery, and pytest
+python3 scripts/check_prose.py src scripts tests # prose budget + docs/ links
 ```
 
 The deterministic improvement-contract suite does not replace a live controller

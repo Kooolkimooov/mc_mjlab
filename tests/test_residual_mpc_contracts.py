@@ -1,10 +1,8 @@
-#!/usr/bin/env python3
-"""Verify deterministic ResidualMPC bridge and blending contracts."""
+"""Deterministic ResidualMPC bridge and blending contracts."""
 
 from __future__ import annotations
 
 import torch
-from verify_native_action_contracts import verify_layout, verify_walking_reference_feed
 
 import mc_mjlab.tasks  # noqa: F401
 from mc_mjlab.residual_mpc import (
@@ -16,7 +14,7 @@ from mc_mjlab.residual_mpc import (
 from mc_mjlab.residual_safety import project_residual
 
 
-def verify_phases() -> None:
+def test_phases() -> None:
   """Verify flat-foot duplication and the support-dependent half-cycle offset."""
   phases = contact_phases(
     torch.tensor([0.0, 0.5]),
@@ -28,7 +26,7 @@ def verify_phases() -> None:
   assert bool(((phases >= 0.0) & (phases <= 1.0)).all())
 
 
-def verify_history() -> None:
+def test_history() -> None:
   """Verify two physical action snapshots advance in temporal order."""
   current = torch.tensor([[3.0, 4.0]])
   previous = torch.tensor([[1.0, 2.0]])
@@ -37,7 +35,7 @@ def verify_history() -> None:
   torch.testing.assert_close(new_second, previous)
 
 
-def verify_blending() -> None:
+def test_blending() -> None:
   """Verify PD fallback, paper residual, lambda zero, scales, and projection."""
   # Deliberately distinct: eq (23) references the default posture while the PD
   # fallback tracks the controller, and a single tensor cannot catch a swap.
@@ -99,7 +97,7 @@ def verify_blending() -> None:
   assert projected.tolist() == [[True, False]]
 
 
-def verify_tracking_reward_discriminates() -> None:
+def test_tracking_reward_discriminates() -> None:
   """Check the bare prior cannot already score the tracking reward's ceiling."""
   import math
 
@@ -117,18 +115,3 @@ def verify_tracking_reward_discriminates() -> None:
     f"the prior scores {score:.3f} at the top of the command box; sigma "
     f"{LINEAR_TRACKING_SIGMA} leaves it nothing to earn"
   )
-
-
-def main() -> None:
-  """Run every deterministic ResidualMPC contract."""
-  verify_layout()
-  verify_walking_reference_feed()
-  verify_phases()
-  verify_history()
-  verify_blending()
-  verify_tracking_reward_discriminates()
-  print("ResidualMPC deterministic contracts: PASS")
-
-
-if __name__ == "__main__":
-  main()
