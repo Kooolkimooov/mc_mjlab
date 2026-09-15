@@ -118,6 +118,31 @@ stops writing datastore columns every step.
   no reader; wired to the layout, the value buffers and the per-period write.
   The walking reference moved onto them when the gated pairs were removed.
 
+## required_controller
+
+**Current:** a cfg field on `McRtcResidualActionCfg`, `None` by default, naming
+the controller a term's calls only exist in; `_validate_cfg` compares it to the
+config's `Enabled` (`utils.mc_rtc_config.get_controller_name`) before a worker
+starts, and its error names the field so a controller known to provide the same
+calls can be accepted. Only `WalkingReferenceActionCfg` redeclares it,
+defaulting to `LogisticController_ismpc`, the sole provider of the
+`ismpc_walking::get_ref_vel` / `set_ref_vel` pair; every other action term
+leaves it `None` and runs on whatever controller is enabled. Without the check a
+mismatch surfaces as the native "controller initialization failed" raise from
+the missing callbacks, which names the datastore entries rather than the
+controller.
+
+**Re-measure if:** another term starts calling controller-specific entries, or
+the walking reference moves to a differently named controller.
+
+**History:**
+- 2026-09-15 -- added `required_controller`, replacing the walking-reference
+  cfg's own `walking_controller` field and its `__post_init__` raise. That raise
+  fired during task registration, where mjlab's task loader turns an exception
+  into a `[WARN]` and a traceback: the run then failed as an unknown task id
+  rather than a wrong controller. `_validate_cfg` sees the final cfg, after any
+  `--env.*` override, and stops the run itself.
+
 ## Datastore callbacks
 
 **Current:** there is no alias layer. A task names native callbacks directly in

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import torch
@@ -16,7 +15,6 @@ from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionAction,
   McRtcResidualJointPositionActionCfg,
 )
-from utils.mc_rtc_config import get_controller_name
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -30,17 +28,11 @@ WALKING_REF_VEL_SETTER = "ismpc_walking::set_ref_vel"
 class WalkingReferenceActionCfg(McRtcResidualActionCfg):
   """Shared configuration for actions that drive the walking reference."""
 
-  walking_controller: str = "LogisticController_ismpc"
-  """Enabled controller that must provide the ismpc walking-reference calls."""
+  required_controller: str = "LogisticController_ismpc"
+  """Only this controller provides the ismpc walking-reference calls."""
 
   def __post_init__(self) -> None:
-    """Declare the reference callbacks and reject a controller lacking them."""
-    enabled = get_controller_name(Path(self.mc_rtc_config_path))
-    if enabled != self.walking_controller:
-      raise ValueError(
-        f"{WALKING_REF_VEL_SETTER} needs {self.walking_controller!r}, but "
-        f"{self.mc_rtc_config_path} enables {enabled!r}"
-      )
+    """Declare the reference callbacks; `_validate_cfg` owns the controller check."""
     self.datastore_vectors_inputs = tuple(
       dict.fromkeys((*self.datastore_vectors_inputs, WALKING_REF_VEL_SETTER))
     )

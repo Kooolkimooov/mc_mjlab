@@ -6,6 +6,7 @@ import abc
 import os
 import weakref
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
@@ -24,6 +25,7 @@ from mc_mjlab.recovery_authority import RecoveryAuthority
 from mc_mjlab.residual_printer import ResidualPrinter
 from mc_mjlab.robots import mc_rtc_robot_configuration as mc_rtc
 from mc_mjlab.sim_controller_bridge import SimControllerBridge
+from utils.mc_rtc_config import get_controller_name
 from utils.pd_gains import apply_reference_pd_gains
 from utils.shared_memory import ShmHandle, create_shm, row_window
 
@@ -40,6 +42,9 @@ class McRtcResidualActionCfg(BaseActionCfg):
 
   mc_rtc_robot_name: str = "jvrc1"
   """Name of the robot in mc_rtc."""
+
+  required_controller: str | None = None
+  """Enabled controller this term needs; ``None`` runs on any. docs/coupling.md"""
 
   frameskip: int = 1
   """Physics substeps per controller step (e.g. 5ms control / 1ms physics -> 5)."""
@@ -446,6 +451,18 @@ class McRtcResidualActionBase(BaseAction):
 
     if cfg.console_output not in ("none", "single", "all"):
       raise ValueError(f"invalid console_output: {cfg.console_output!r}")
+
+    # Before any worker starts: a term built on another controller's calls would
+    # otherwise surface as a native init failure. docs/coupling.md
+    if cfg.required_controller is not None:
+      enabled = get_controller_name(Path(cfg.mc_rtc_config_path))
+      if enabled != cfg.required_controller:
+        raise ValueError(
+          f"{type(self).__name__} requires the {cfg.required_controller!r} "
+          f"controller, but {cfg.mc_rtc_config_path} enables {enabled!r}. "
+          f"If {enabled!r} is compatible with the current configuration, set the action cfg's "
+          "`required_controller` to it (or None to accept any controller)."
+        )
 
   def _build_bridge(self, cfg: McRtcResidualActionCfg) -> None:
     """Bind the simulation bridge, declare its datastore columns and load PD gains."""
