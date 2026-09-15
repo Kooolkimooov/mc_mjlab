@@ -116,7 +116,7 @@ def probe_walking_reference(args: argparse.Namespace) -> list[GainResult]:
     impulse_fired = False
     while bool(active.any()):
       if not impulse_fired and int(elapsed.max()) >= impulse_step:
-        nominal_command.copy_(term.datastore_vector_output(mdp.WALKING_REF_VEL))
+        nominal_command.copy_(term.datastore_vector_output(mdp.WALKING_REF_VEL_GETTER))
         apply_fixed_impulse(env, args.push_speed, args.push_height, args.push_duration)
         impulse_fired = True
       error, grounded = dcm_error_vector(env, sensors, term)
@@ -154,7 +154,7 @@ def probe_walking_reference(args: argparse.Namespace) -> list[GainResult]:
 
   results = []
   restore_error = torch.linalg.vector_norm(
-    term.datastore_vector_output(mdp.WALKING_REF_VEL) - nominal_command, dim=1
+    term.datastore_vector_output(mdp.WALKING_REF_VEL_GETTER) - nominal_command, dim=1
   )
   for gain in gains:
     cohort = gain_by_env == gain
