@@ -47,7 +47,7 @@ uv sync                                          # after choosing the mjlab sour
 scripts/demos/run_test_mc_rtc.sh                 # viser viewer (1 env)
 uv run list-envs                                 # task ids (ours + mjlab's)
 # Ids are Mc-Mjlab-<task dir>-<Enabled>-<MainRobot>-<control suffix>,
-# built by utils/task_naming.py, which reads Enabled/MainRobot from
+# built by tasks/naming.py, which reads Enabled/MainRobot from
 # etc/mc_rtc.yaml and then `.title().replace("_", "-")`s the whole string -- so
 # LogisticController_ismpc/HRP5P become Logisticcontroller-Ismpc/Hrp5P, not the
 # spelling in the yaml. Never hand-assemble one: run list-envs.
@@ -65,7 +65,7 @@ uv run python scripts/verify_improvement_contracts.py
 # Regenerate docs/architecture/ from the source; --check fails on drift.
 uv run python scripts/generate_architecture_docs.py
 uv run ruff format && uv run ruff check --fix    # format + lint
-uv run ty check                                  # type check (91 pre-existing
+uv run ty check                                  # type check (110 pre-existing
                                                  # diagnostics: unresolvable
                                                  # mc_rtc bindings + mujoco stubs)
 uv run pytest                                    # tests/: bindings + action contracts
@@ -179,10 +179,10 @@ From mjlab down to mc_rtc:
   `mc_rtc_residual_joint_torque_actions.py` →
   `McRtcResidualJointTorqueAction(Cfg)` (adds channel `tau` → effort targets,
   residual on torque).
-- `mc_mjlab/sim_controller_bridge.py` — simulation-side reference-order scatter/gather,
+- `mc_mjlab/bridge/sim_controller_bridge.py` — simulation-side reference-order scatter/gather,
   biased encoders, measured effort, local root coordinates, wxyz-to-xyzw
   conversion and named sensors. Use native layout offset methods throughout.
-- `mc_mjlab/controller_datastore.py` — numeric output aliases and independently
+- `mc_mjlab/bridge/controller_datastore.py` — numeric output aliases and independently
   gated setters. Relative commands capture collected baselines, restore once on
   deactivation, and wait one control period after reset for fresh getters.
 - `mc_rtc_interface/cpp/` — native `ControllersManager`, worker, `ControllersHost`
@@ -194,7 +194,7 @@ From mjlab down to mc_rtc:
 - `mc_rtc_interface/hpp/io_layout.hpp` and `ipc_socket.hpp` define the layout and
   protocol. Root input is ten values (position, xyzw quaternion, linear velocity);
   every body sensor, including FloatingBase, has its own gyro/acceleration slot.
-  Public `alpha` maps to native `qd`. Python retains `utils/shared_memory.py`.
+  Public `alpha` maps to native `qd`. Python retains `bridge/shared_memory.py`.
 - Native worker recovery kills and reaps a failed generation during collection,
   then starts its replacement from the episode reset on a fresh endpoint. Its
   rows truncate, then the next reset-bearing step initializes the bound
@@ -218,28 +218,41 @@ From mjlab down to mc_rtc:
   register by default (six residual-balance, two zero-residual, one each for
   residual_mpc and residual_feedback); `MC_MJLAB_REGISTER_ARCHIVED_TASKS=1`
   restores ten historical residual ablations for old-checkpoint compatibility.
-- `tasks/residual_balance/residual_balance_runner.py` — snapshots external base
-  controller inputs into the run directory and every checkpoint, and validates
-  them on load. Its effective-training manifest records live resolved manager
-  terms, callable defaults and source hashes: full resumes enforce the semantic
-  training contract and immediately recompute curricula after restoring the
-  global counter, while actor-only loads enforce the narrower observation/action
-  interface. Position and torque registrations use distinct full task ids as
-  experiment names, so automatic resume cannot cross control modes.
+- `rl/` — what every task shares: the zero-init actor, the squashed Gaussian,
+  `RolloutAdaptivePPO`, and `runner.py`'s `McRtcResidualOnPolicyRunner`, which
+  snapshots external base controller inputs into the run directory
+  (`controller_provenance.py`) and every checkpoint and validates them on load.
+  Its effective-training manifest records live resolved manager terms, callable
+  defaults and source hashes: full resumes enforce the semantic training
+  contract and immediately recompute curricula after restoring the global
+  counter, while actor-only loads enforce the narrower observation/action
+  interface. `_RENAMED_MODULES` maps the paths this refactor moved, so an older
+  checkpoint is compared against today's spelling. Both task runners subclass it
+  through five hooks; the balance one adds the achievement curriculum, the
+  training budget and the watchdog, the MPC one an action-semantics gate.
+  Position and torque registrations use distinct full task ids as experiment
+  names, so automatic resume cannot cross control modes.
+- `mdp/` — the terms every task builds its managers from, split by
+  responsibility: `sensors` (the `_ZmpSensors` plumbing and the action-term
+  accessors the rest read through), then `observations`, `rewards`, `metrics`,
+  `terminations`, `disturbances` (the push and impulse events) and `curricula`.
+  `mdp/__init__.py` binds those seven submodules and nothing else: no star
+  imports anywhere in this repo, so every call site reads
+  `mdp.<submodule>.<term>` and says which file defines the term.
 - `robots/<ROBOT>/<robot>_constants.py` — per-robot constants: spec loading
   (collisions disabled by default, geom groups 2=visual/3=collision/4=sites),
   actuator configs, stance initial state, PD-gains path. The three are
   parallel by construction; each is thin, delegating to the shared
-  `robots/*_configuration.py` helpers below, and differing only in the
+  `robots/*.py` helpers below, and differing only in the
   robot-specific names (root body, foot bodies, deactivated joints).
 - `robots/*.py` — the shared machinery those constants files call, one
-  concern per module: `mc_rtc_robot_configuration` (joint order, stance, base
+  concern per module: `robot_module` (joint order, stance, base
   pose and torque limits read lazily from the mc_rtc `RobotModule`, so nothing
-  is hand-transcribed), `collision_configuration` (geom naming + the
-  `CollisionCfg` presets), `pd_actuator_configuration` (gains from the MJCF's
-  armature), `additional_sensors_configuration` (the RL-only sole velocimeters
+  is hand-transcribed), `collisions` (geom naming + the
+  `CollisionCfg` presets), `actuators` (gains from the MJCF's
+  armature), `sensors` (the RL-only sole velocimeters
   and root angular-momentum sensor), `mc_mujoco_assets` (first-use symlinks),
-  and `robots_registry` (`MainRobot` → `RobotSpec`, plus `prepare_cfg_for_mc_rtc`).
+  and `registry` (`MainRobot` → `RobotSpec`, plus `prepare_cfg_for_mc_rtc`).
   `etc/mc_rtc.yaml`'s `MainRobot` is the single source of truth for which robot
   runs: the demo reads it and loads the matching mjlab entity, and the host
   raises if the entity's joints don't exist on the controller's robot.
@@ -260,7 +273,7 @@ Cross-cutting invariants:
   — without it those joints would go limp.
 - The robot XMLs' collision geoms are unnamed, so mjlab's name-based collision
   presets would match nothing. Each robot's `get_spec` therefore names them
-  (`collision_configuration`) before disabling them by group, and ships
+  (`robots/collisions`) before disabling them by group, and ships
   presets; `RobotSpec.names_collision_geoms` records that it did, and
   `prepare_cfg_for_mc_rtc` keeps the presets. A robot that has *not* named its
   geoms falls back to enabling group 3 wholesale — the presets cannot be left
@@ -290,6 +303,12 @@ Cross-cutting invariants:
   too far from stability condition, stopping` — so neither "run() returned
   false" nor "reset() returns" can be relied on for a fallen robot. Native
   timeout and manager respawning are the required containment.
+- `import mjlab` imports this repo's tasks (its `mjlab.tasks` entry point) and
+  they build their cfgs at import, so the *first* module to pull mjlab in must
+  not be one of ours: `python -c "from mc_mjlab import mdp"` re-enters a
+  half-built `mc_mjlab.actions` and mjlab swallows it as a `[WARN]`, leaving the
+  ids unregistered until something imports `mc_mjlab.tasks` again. Any script
+  that imports mjlab first — isort puts it first — is unaffected.
 - `Robot.jointIndexByName` on a missing joint throws a C++ `std::out_of_range`
   that terminates the process uncatchably — always probe `hasJoint` first
   (the host's `joint_index` helper does).

@@ -1,6 +1,6 @@
 # Observations
 
-What the policy sees, and why. Terms in `tasks/mdp.py`, wiring in
+What the policy sees, and why. Terms in `mdp/`, wiring in
 `tasks/residual_balance/residual_balance_env_cfg.py`.
 
 ## Noise levels

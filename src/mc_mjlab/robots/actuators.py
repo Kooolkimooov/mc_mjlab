@@ -14,7 +14,7 @@ NATURAL_FREQ = 3.0 * 2.0 * math.pi  # rad/s
 DAMPING_RATIO = 1.5
 
 # Unclamped, like mc_mujoco's PD torque: with the real gains, nominal limits
-# would saturate constantly. docs/robots.md#pd_actuator_configuration
+# would saturate constantly. docs/robots.md#actuators
 EFFORT_LIMIT = float("inf")
 
 

@@ -27,7 +27,7 @@ linear combination of *measured CoM and CoM velocity*, but those terms score
 plan-tracking errors expresses a plan-independent stability margin.
 
 Constants in `tasks/residual_balance/residual_balance_env_cfg.py`; terms in
-`tasks/mdp.py`.
+`mdp/`.
 
 ## reward_audit
 
@@ -345,7 +345,7 @@ stabilizer QP does not directly regulate it, so unlike the tracking terms this i
 something the residual can improve without competing with the controller.
 
 It reads the `root_angmom` subtree-angular-momentum sensor, which
-`robots/additional_sensors_configuration.py` has been adding to every robot MJCF
+`robots/sensors.py` has been adding to every robot MJCF
 and which nothing had ever read.
 
 **The weight is measured, and the first guess was 10x too large.** A zero-residual
@@ -368,7 +368,7 @@ carries at least `min_normal_force`. Contact slip is a violation the QP's own
 model cannot see, which is again what makes it worth paying for.
 
 It reads the `left_foot_lin_vel` / `right_foot_lin_vel` velocimeters — the other
-pair of sensors added by `additional_sensors_configuration` and never read.
+pair of sensors added by `robots/sensors` and never read.
 
 **This term is deliberately near-inert, and the weight is set for that.** The
 baseline barely slips: measured `sum(v_tangential^2) = 0.0004`, i.e. ~0.02 m/s. The
@@ -827,7 +827,7 @@ to **0.64** of its limit. Nothing enforced any of it. The position clip bounds t
 *offset*, not the torque it produces. The hard clamp now makes an overlarge
 request visible through projection telemetry rather than divergent on hardware.
 
-Both halves already existed unwired: `mc_rtc_robot_configuration.get_effort_limits`
+Both halves already existed unwired: `robot_module.get_effort_limits`
 reads per-joint limits straight from the mc_rtc `RobotModule`, and
 `entity.data.qfrc_actuator` gives the realised joint torque.
 

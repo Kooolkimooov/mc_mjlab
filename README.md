@@ -10,24 +10,26 @@ src/mc_mjlab/
   actions/mc_rtc_residual_joint_position_actions.py  # McRtcResidualJointPositionAction(Cfg)
   actions/mc_rtc_residual_joint_torque_actions.py    # McRtcResidualJointTorqueAction(Cfg)
   actions/mc_rtc_residual_action.py        # residual action base (interpolation, async dispatch)
+  bridge/sim_controller_bridge.py  # simulation joints, root and sensors in native layout
+  bridge/controller_datastore.py   # numeric aliases, gated commands and baselines
+  bridge/config.py, bridge/shared_memory.py  # mc_rtc yaml reads, shared-memory views
+  residuals/recovery_authority.py  # recovery detector and authority gating
+  residuals/mpc_math.py       # MPC-side residual plumbing
+  residuals/safety.py         # residual clipping and feasibility guards
+  residuals/printer.py        # the per-joint residual `play` prints
   robots/                     # constants (assets are dynamically symlinked from mc_rtc install path)
+  mdp/                        # the tasks' MDP terms: rewards, observations, events, metrics
+  rl/                         # actor, distribution, PPO, shared runner and checkpoint contracts
   tasks/__init__.py           # imports every task sub-package (mjlab.tasks entry point)
-  tasks/mdp.py                # the tasks' MDP terms: rewards, observations, events, metrics
   tasks/residual_balance/     # the RL task: __init__ registers the ids, env cfg + PPO cfg alongside
   tasks/residual_mpc/         # paper-style task: residual on the MPC's own inputs
   tasks/residual_feedback/    # residual on the controller's feedback rather than its output
   tasks/zero_residual/        # the demo task: mc_rtc alone, RL residual left at zero
-  recovery_authority.py       # recovery detector and authority gating
-  residual_mpc.py             # MPC-side residual plumbing
-  residual_safety.py          # residual clipping and feasibility guards
-  sim_controller_bridge.py    # simulation joints, root and sensors in native layout
-  controller_datastore.py     # numeric aliases, gated commands and baselines
 src/mc_rtc_interface/
   cpp/                        # native manager, worker, host and controller instance
   hpp/io_layout.hpp           # authoritative shared-memory offsets
   hpp/ipc_socket.hpp          # worker protocol and memory descriptions
   bindings/module.cpp        # Python ControllersManager bindings
-src/utils/                    # task ids, config, PD gains and shared memory
 docs/                         # why the numbers are what they are (see docs/README.md)
 etc/
   mc_rtc.yaml                 # mc_rtc controller config
@@ -97,7 +99,7 @@ controller.** `controller_vector_callbacks` / `controller_scalar_callbacks` map
 public aliases onto callback names, so the same alias can be repointed at either
 side — `support_foot` resolves to the plugin's getter, while `walking_ref_vel`
 resolves to the controller's `ismpc_walking::get_ref_vel`. The defaults are
-`VECTOR_CALLBACKS` and `SCALAR_CALLBACKS` in `controller_datastore.py`.
+`VECTOR_CALLBACKS` and `SCALAR_CALLBACKS` in `bridge/controller_datastore.py`.
 
 Adding a getter means adding a function to `instance_datastore_plugin` and
 naming it in that map; `ControllerInstance::finish_reset` then registers it on

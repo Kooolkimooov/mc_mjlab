@@ -6,7 +6,7 @@ in `robots/*.py`, differing only in robot-specific names — root body, foot bod
 deactivated joints.
 
 `etc/mc_rtc.yaml`'s `MainRobot` is the single source of truth for which robot
-runs. Both the demo and the RL task resolve it through `robots_registry`, so the
+runs. Both the demo and the RL task resolve it through `robots/registry`, so the
 two sides cannot drift, and the host raises if the entity's joints do not exist
 on the controller's robot.
 
@@ -16,7 +16,7 @@ Robot assets (MJCF, meshes, PD gains) are **not tracked** in this repo. Each rob
 package symlinks them in on first use from
 `$HOME/workspace/install/share/mc_mujoco/<ROBOT>` (`mc_mujoco_assets`).
 
-## mc_rtc_robot_configuration
+## robot_module
 
 The controller's `RobotModule` owns the ground truth for refJointOrder, the
 half-sitting stance, the default floating-base attitude, and (via `bounds`) the
@@ -42,7 +42,7 @@ table of body names. The stabilizer is written against those names, so a humanoi
 module that runs a walking controller has them by construction.
 `get_limb_bodies` raises if one is missing rather than guessing.
 
-## collision_configuration
+## collisions
 
 The mc_mujoco robot XMLs mark collision geoms through MJCF default classes
 (`class="collision"`) but leave them **unnamed**, and everything in mjlab that
@@ -80,7 +80,7 @@ from the body — one primitive box on the last leg link (HRP5P), one collision 
 on the ankle-pitch link (JVRC1), one box per foot (RHPS1, whose ankle collision
 mesh is commented out in the XML).
 
-## pd_actuator_configuration
+## actuators
 
 Every robot drives its motorized joints with the same natural-frequency PD model,
 with per-joint gains derived from the reflected rotor inertia the MJCF already
@@ -95,7 +95,7 @@ actuator implementation. HRP5P finger bounds are empty in the module; those
 upper-body joints retain the unclamped actuator fallback and are excluded from
 the robot's residual-capable joint set.
 
-## additional_sensors_configuration
+## sensors
 
 The mc_mujoco XMLs ship the force/IMU sensors the stabilizer needs, but not the
 sole velocimeters and root angular-momentum sensor the RL rewards read. Those are

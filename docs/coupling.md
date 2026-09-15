@@ -122,7 +122,7 @@ stops writing datastore columns every step.
 
 **Current:** a cfg field on `McRtcResidualActionCfg`, `None` by default, naming
 the controller a term's calls only exist in; `_validate_cfg` compares it to the
-config's `Enabled` (`utils.mc_rtc_config.get_controller_name`) before a worker
+config's `Enabled` (`bridge.config.get_controller_name`) before a worker
 starts, and its error names the field so a controller known to provide the same
 calls can be accepted. Only `WalkingReferenceActionCfg` redeclares it,
 defaulting to `LogisticController_ismpc`, the sole provider of the
@@ -149,7 +149,7 @@ the walking reference moves to a differently named controller.
 `datastore_vectors_outputs` / `datastore_scalar_outputs`, and
 `datastore_vector_output` / `datastore_scalar_output` read them back under the
 same names. The adapter's four
-getters are constants in `mc_mjlab/controller_datastore.py` (`PLANNED_ZMP`,
+getters are constants in `mc_mjlab/bridge/controller_datastore.py` (`PLANNED_ZMP`,
 `CONTROL_COM`, `CONTROL_COM_VEL`, `SUPPORT_FOOT`); a controller's own getters are
 constants in the task that reads them, as `residual_mpc/mdp.py` holds the
 `ismpc_walking::` ones. `SUPPORT_FOOT` is numeric (right=0, left=1) — ismpc's own

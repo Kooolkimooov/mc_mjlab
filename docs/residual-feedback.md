@@ -464,7 +464,7 @@ uncertainty is the reset kick rather than hole pose, and survival stands in for
 insertion success.
 
 **Structure borrowed, not reinvented.** The smoothing and the advance/regress
-deadband follow `episode_length_impulse_curriculum` (`tasks/mdp.py`), which could
+deadband follow `episode_length_impulse_curriculum` (`mdp/curricula.py`), which could
 not be reused directly: it requires a `stratified_finite_impulse_curriculum` push
 term, and both tasks now use `initial_velocity_kick`. Like that term, it reads
 the termination buffers during `curriculum_manager.compute`, which runs before
