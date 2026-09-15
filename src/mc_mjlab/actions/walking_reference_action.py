@@ -71,9 +71,14 @@ class WalkingReferenceMixin(McRtcResidualActionBase):
     self._walking_reference_nominal = torch.zeros_like(
       self._walking_reference_requested
     )
+    self._walking_reference_fed = torch.zeros_like(self._walking_reference_requested)
     self._walking_reference_active = torch.zeros(
       self.num_envs, dtype=torch.bool, device=self.device
     )
+
+  def _advance_action_extensions(self) -> None:
+    super()._advance_action_extensions()
+    self._feed_walking_reference()
 
   def _feed_walking_reference(self) -> None:
     """Send the executed reference, as a target or an offset from the nominal."""
@@ -82,9 +87,10 @@ class WalkingReferenceMixin(McRtcResidualActionBase):
         WALKING_REF_VEL_SETTER, self._walking_reference_executed
       )
       return
-    # The getter reports what this term last wrote, so the nominal is only
-    # readable while the offset is zero. docs/walking-reference.md
-    idle = (self._previous_walking_reference_executed == 0.0).all(dim=1)
+    # The getter reports what this term last fed, so the nominal is only readable
+    # while that fed offset was zero, and only in the one collection before the
+    # next write overwrites the controller. docs/walking-reference.md
+    idle = (self._walking_reference_fed == 0.0).all(dim=1)
     hold = (idle & self._datastore_output_fresh).unsqueeze(-1)
     self._walking_reference_nominal.copy_(
       torch.where(
@@ -93,6 +99,7 @@ class WalkingReferenceMixin(McRtcResidualActionBase):
         self._walking_reference_nominal,
       )
     )
+    self._walking_reference_fed.copy_(self._walking_reference_executed)
     self.set_datastore_vector_input(
       WALKING_REF_VEL_SETTER,
       self._walking_reference_nominal + self._walking_reference_executed,
@@ -103,6 +110,7 @@ class WalkingReferenceMixin(McRtcResidualActionBase):
     self._walking_reference_requested[env_ids] = 0.0
     self._walking_reference_executed[env_ids] = 0.0
     self._previous_walking_reference_executed[env_ids] = 0.0
+    self._walking_reference_fed[env_ids] = 0.0
     self._walking_reference_active[env_ids] = False
     # The nominal survives: the rebuilt controller sets the same reference, and
     # feeding zero for the period before the first fresh getter stops the walk.
@@ -186,7 +194,6 @@ class GatedWalkingReferenceDeltaAction(
     self._walking_reference_active.copy_(
       self._walking_reference_executed.abs().amax(dim=1) > 1.0e-6
     )
-    self._feed_walking_reference()
 
   @property
   def walking_reference_normalized(self) -> torch.Tensor:
@@ -231,4 +238,3 @@ class AbsoluteWalkingReferenceMixin(WalkingReferenceMixin):
     self._walking_reference_requested.copy_(command)
     self._walking_reference_executed.copy_(command)
     self._walking_reference_active.fill_(True)
-    self._feed_walking_reference()

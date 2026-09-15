@@ -263,6 +263,9 @@ class McRtcResidualActionBase(BaseAction):
     # Collect the previous period's dispatch (it solved while the intervening
     # sim substeps ran) before reusing the shared I/O blocks.
     self._collect_controller_output()
+    # Between the two: a getter an extension reads is only the controller's own
+    # until the input this writes overwrites it. docs/walking-reference.md
+    self._advance_action_extensions()
 
     # Masked, not indexed: a boolean gather's data-dependent shape would sync.
     fresh = self._has_staged_control.unsqueeze(-1)
@@ -356,6 +359,9 @@ class McRtcResidualActionBase(BaseAction):
 
   def _process_action_extensions(self, actions: torch.Tensor) -> None:
     """Consume the action dimensions past ``_residual_action_dim``."""
+
+  def _advance_action_extensions(self) -> None:
+    """Refresh extension datastore feeds between the collect and the dispatch."""
 
   def _reset_action_extensions(self, env_ids: torch.Tensor | slice) -> None:
     """Clear extension state for the given (reset) envs."""

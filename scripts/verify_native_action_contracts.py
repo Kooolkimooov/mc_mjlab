@@ -128,6 +128,7 @@ def verify_walking_reference_feed() -> None:
   action._walking_reference_executed = zero.clone()
   action._previous_walking_reference_executed = zero.clone()
   action._walking_reference_nominal = zero.clone()
+  action._walking_reference_fed = zero.clone()
   action._datastore_output_fresh = torch.ones(2, dtype=torch.bool)
   nominal = torch.tensor([[0.1, 0.0, 0.0]] * 2)
   action._datastore_vector_outputs = {WALKING_REF_VEL_GETTER: nominal.clone()}
@@ -139,23 +140,34 @@ def verify_walking_reference_feed() -> None:
   action._feed_walking_reference()
   torch.testing.assert_close(fed, torch.tensor([[0.15, 0.0, 0.0]] * 2))
 
-  # The getter mirrors what the term wrote, so the nominal must not follow it.
-  action._previous_walking_reference_executed.copy_(action._walking_reference_executed)
+  # The getter mirrors what the term fed, so the nominal must not follow it.
   action._datastore_vector_outputs[WALKING_REF_VEL_GETTER].copy_(fed)
   action._walking_reference_executed.copy_(torch.tensor([[0.02, 0.0, 0.0]] * 2))
   action._feed_walking_reference()
   torch.testing.assert_close(action._walking_reference_nominal, nominal)
 
   # A reset zeroes the readouts; without fresh output the nominal still holds.
-  action._previous_walking_reference_executed.zero_()
+  action._walking_reference_fed.zero_()
   action._datastore_output_fresh.zero_()
   action._datastore_vector_outputs[WALKING_REF_VEL_GETTER].zero_()
   action._feed_walking_reference()
   torch.testing.assert_close(action._walking_reference_nominal, nominal)
 
+  # Mid-policy-step: the controller's own change is latched at the next collect,
+  # not lost to the cached write the intervening periods would repeat.
+  action._datastore_output_fresh.fill_(True)
+  action._walking_reference_executed.zero_()
+  action._feed_walking_reference()
+  moved = torch.tensor([[0.2, 0.0, 0.0]] * 2)
+  action._datastore_vector_outputs[WALKING_REF_VEL_GETTER].copy_(moved)
+  action._feed_walking_reference()
+  torch.testing.assert_close(action._walking_reference_nominal, moved)
+  torch.testing.assert_close(fed, moved)
+
   absolute = type("Absolute", (GatedWalkingReferenceDeltaAction,), {})
   absolute.walking_reference_is_absolute = True
   action.__class__ = absolute
+  action._walking_reference_executed.copy_(torch.tensor([[0.02, 0.0, 0.0]] * 2))
   action._feed_walking_reference()
   torch.testing.assert_close(fed, torch.tensor([[0.02, 0.0, 0.0]] * 2))
 

@@ -71,14 +71,27 @@ because an unconditional input column is always written — leaving it alone is
 not an option the transport offers. The absolute mode sends the command target
 as-is. The delta mode sends `nominal + offset`, and has to latch the nominal
 itself: once it starts writing, `get_ref_vel` reports its own last write, so the
-nominal is only readable while the previous offset was zero. It is relatched
-only when the base also reports `_datastore_output_fresh`, since a reset zeroes
-the collected readouts, and it deliberately survives a reset: the rebuilt
-controller sets the same reference, and feeding a zero nominal for the period
-before the first fresh getter would stop the walk.
+nominal is only readable while the offset it last fed was zero. Both the latch
+and the write therefore run on `_advance_action_extensions`, the base hook
+between the collect and the next dispatch — one control period, not one policy
+step. With `decimation=20` and `frameskip=2` a policy step covers ten periods,
+so a nominal latched only at policy rate would repeat a stale cached write over
+the controller's own value nine times out of ten and never see the FSM set it.
+It is relatched only when the base also reports `_datastore_output_fresh`, since
+a reset zeroes the collected readouts, and it deliberately survives a reset: the
+rebuilt controller sets the same reference, and feeding a zero nominal for the
+period before the first fresh getter would stop the walk.
 
 **Re-measure if:** the controller's own reference changes within an episode, or
 the reset path stops zeroing the datastore readouts.
+
+**History:**
+- 2026-09-15 — moved off the policy-rate feed. Zero-residual base displacement
+  over 12 s at `targetCmdVel: [0.1, 0, 0]`, two environments, seed 42, no push
+  and no encoder bias: `0.031 m` at policy rate against `0.878 m` per period,
+  matching the `0.88 m` of the plain position action. The nominal latches
+  `(0.1, 0, 0)` when `Walking::WalkCmdVelImpl` enters at about `3.4 s`; before
+  the fix it stayed `(0, 0, 0)` for the whole episode.
 
 ## walking_reference_velocity_slew_rate
 
