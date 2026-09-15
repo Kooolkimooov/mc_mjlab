@@ -25,6 +25,22 @@ from rsl_rl.models.mlp_model import MLPModel
 from rsl_rl.storage import RolloutStorage
 from tensordict import TensorDict
 
+from mc_mjlab.mdp.curricula import episode_length_impulse_curriculum
+from mc_mjlab.mdp.disturbances import (
+  achievement_finite_impulse_curriculum,
+  finite_impulse_curriculum,
+  gradual_finite_impulse_curriculum,
+  interpolated_impulse_range,
+  stratified_finite_impulse_curriculum,
+)
+from mc_mjlab.mdp.metrics import (
+  recovery_authority_coverage as mdp_recovery_authority_coverage,
+)
+from mc_mjlab.mdp.rewards import (
+  action_l2,
+  requested_action_l2,
+  requested_action_rate_l2,
+)
 from mc_mjlab.residuals.recovery_authority import (
   RecoveryCalibration,
   RecoveryFilter,
@@ -49,20 +65,6 @@ from mc_mjlab.rl.zero_init_actor import (
   ZeroInitMLPModel,
   ZeroInitRNNModel,
   mean_head_magnitude,
-)
-from mc_mjlab.tasks.mdp import (
-  achievement_finite_impulse_curriculum,
-  action_l2,
-  episode_length_impulse_curriculum,
-  finite_impulse_curriculum,
-  gradual_finite_impulse_curriculum,
-  interpolated_impulse_range,
-  requested_action_l2,
-  requested_action_rate_l2,
-  stratified_finite_impulse_curriculum,
-)
-from mc_mjlab.tasks.mdp import (
-  recovery_authority_coverage as mdp_recovery_authority_coverage,
 )
 from mc_mjlab.tasks.residual_balance.achievement_curriculum import (
   AchievementCurriculumBridge,

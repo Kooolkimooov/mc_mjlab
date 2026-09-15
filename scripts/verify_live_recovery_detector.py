@@ -7,7 +7,7 @@ import argparse
 import torch
 from mjlab.envs import ManagerBasedRlEnv
 
-from mc_mjlab.tasks import mdp
+from mc_mjlab import mdp
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import _make_env_cfg
 
 
@@ -33,7 +33,7 @@ def main() -> None:
   if args.disturbance == "velocity":
     cfg.events["push_robot"].params["planar_speed"] = 0.4
   env = ManagerBasedRlEnv(cfg, device=args.device)
-  term = mdp._residual_term(env, "mc_rtc_residual")
+  term = mdp.sensors._residual_term(env, "mc_rtc_residual")
   action = torch.ones(
     env.num_envs, env.action_manager.total_action_dim, device=env.device
   )
@@ -42,7 +42,7 @@ def main() -> None:
   authority_sum = 0.0
   impulses = 0
   impulse_error = 0.0
-  push_term = mdp._push_term(env, "push_robot")
+  push_term = mdp.disturbances._push_term(env, "push_robot")
   env.reset()
   for _ in range(args.steps):
     env.step(action)
@@ -53,7 +53,7 @@ def main() -> None:
       inactive_peak = max(inactive_peak, float(peak))
     max_authority = max(max_authority, float(authority.max()))
     authority_sum += float(authority.mean())
-    if isinstance(push_term, mdp.finite_impulse_curriculum):
+    if isinstance(push_term, mdp.disturbances.finite_impulse_curriculum):
       fired = push_term.last_push_step == env.common_step_counter
       ids = fired.nonzero(as_tuple=False).flatten()
       if ids.numel():

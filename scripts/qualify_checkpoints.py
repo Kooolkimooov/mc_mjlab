@@ -18,8 +18,8 @@ from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 from mjlab.rl import RslRlVecEnvWrapper
 from mjlab.utils.lab_api.math import quat_apply
 
+from mc_mjlab import mdp
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
-from mc_mjlab.tasks import mdp
 from mc_mjlab.tasks.residual_balance.curriculum_stages import (
   ACHIEVEMENT_STAGES,
   MINIMUM_QUALIFICATION_SEEDS,
@@ -190,7 +190,7 @@ class PairedDisturbances:
       self._velocity_kick(env_ids, delta_b)
     else:
       self._finite_impulse(env_ids, delta_b, durations, heights)
-    mdp.record_disturbance(self.env, env_ids, delta_b)
+    mdp.disturbances.record_disturbance(self.env, env_ids, delta_b)
 
   def _velocity_kick(self, env_ids: torch.Tensor, delta_b: torch.Tensor) -> None:
     quat = self.asset.data.root_link_quat_w[env_ids]

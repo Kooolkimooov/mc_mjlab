@@ -9,6 +9,7 @@ from pathlib import Path
 import torch
 from mjlab.envs import ManagerBasedRlEnv
 
+from mc_mjlab import mdp
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
 from mc_mjlab.residuals.recovery_authority import (
   FEATURE_NAMES,
@@ -17,7 +18,6 @@ from mc_mjlab.residuals.recovery_authority import (
   RecoveryFilter,
   detector_target,
 )
-from mc_mjlab.tasks import mdp
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import _make_env_cfg
 
 
@@ -39,9 +39,11 @@ def collect(
   term = env.action_manager.get_term("mc_rtc_residual")
   assert isinstance(term, McRtcResidualActionBase)
   extractor = RecoveryFeatureExtractor(env, term)
-  zmp_sensors = mdp._ZmpSensors(env, mdp.GROUND_CONTACT_SENSORS, "robot")
+  zmp_sensors = mdp.sensors._ZmpSensors(
+    env, mdp.sensors.GROUND_CONTACT_SENSORS, "robot"
+  )
   env_ids = torch.arange(env.num_envs, device=env.device)
-  mdp._push_term(env, "push_robot").disable(env_ids[env_ids % 4 < 2])
+  mdp.disturbances._push_term(env, "push_robot").disable(env_ids[env_ids % 4 < 2])
   action = torch.zeros(
     env.num_envs, env.action_manager.total_action_dim, device=env.device
   )
@@ -57,7 +59,7 @@ def collect(
       error = float((features[:, 0] - expected_dcm).abs().max())
       raise AssertionError(f"detector DCM differs from reward DCM by {error:.3g}")
     feature_rows.append(features.cpu())
-    age_rows.append(mdp.steps_since_push(env).cpu())
+    age_rows.append(mdp.observations.steps_since_push(env).cpu())
     episode_rows.append(env.episode_length_buf.cpu().clone())
     if (step + 1) % 250 == 0:
       print(f"[calibrate] collected {step + 1}/{args.steps} steps", flush=True)
@@ -75,7 +77,7 @@ def masks(
   """Return nominal, recovery, and late-recovery sample masks."""
   recovery_steps = round(2.0 / dt)
   warmup_steps = round(10.0 / dt)
-  nominal = (episode_ages >= warmup_steps) & (ages >= mdp.NEVER_AGE)
+  nominal = (episode_ages >= warmup_steps) & (ages >= mdp.disturbances.NEVER_AGE)
   recovery = (ages >= 1) & (ages <= recovery_steps)
   late = (ages > recovery_steps) & (ages <= round(5.0 / dt))
   return nominal, recovery, late

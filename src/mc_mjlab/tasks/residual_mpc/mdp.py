@@ -10,12 +10,12 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactSensor
 from mjlab.utils.lab_api.math import quat_apply_inverse
 
+from mc_mjlab import mdp as shared_mdp
 from mc_mjlab.actions.residual_mpc_joint_torque_action import (
   ResidualMpcJointTorqueAction,
 )
 from mc_mjlab.bridge.controller_datastore import SUPPORT_FOOT
 from mc_mjlab.residuals.mpc_math import contact_phases
-from mc_mjlab.tasks import mdp as shared_mdp
 
 if TYPE_CHECKING:
   from mjlab.entity import Entity
@@ -301,7 +301,7 @@ class survival_kick_curriculum:
     return {"kick_scale": self._kick.scale, "survival": self.smoothed}
 
 
-class initial_velocity_kick(shared_mdp.push_and_record):
+class initial_velocity_kick(shared_mdp.disturbances.push_and_record):
   """One base-velocity kick per episode, withheld until the FSM is walking."""
 
   #: Difficulty dial the survival curriculum drives.

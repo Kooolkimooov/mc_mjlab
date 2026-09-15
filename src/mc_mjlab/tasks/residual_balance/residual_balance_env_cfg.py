@@ -25,7 +25,7 @@ from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.terrains import TerrainEntityCfg
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 
-from mc_mjlab import MC_RTC_YAML_PATH
+from mc_mjlab import MC_RTC_YAML_PATH, mdp
 from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionActionCfg,
 )
@@ -46,7 +46,6 @@ from mc_mjlab.robots.registry import (
   get_main_robot_spec,
   prepare_cfg_for_mc_rtc,
 )
-from mc_mjlab.tasks import mdp
 from mc_mjlab.tasks.residual_balance.curriculum_stages import ACHIEVEMENT_STAGES
 
 # Only values used twice or more live here; the rest sit in the term that uses them.
@@ -255,33 +254,37 @@ def _make_env_cfg(
       func=envs_mdp.joint_vel_rel, noise=Unoise(n_min=-0.05, n_max=0.05)
     ),
     "actions": ObservationTermCfg(
-      func=mdp.executed_action, history_length=proprio_history
+      func=mdp.observations.executed_action, history_length=proprio_history
     ),
     "controller_ref_vel": ObservationTermCfg(
-      func=mdp.controller_reference_velocity, history_length=controller_history
+      func=mdp.observations.controller_reference_velocity,
+      history_length=controller_history,
     ),
     "controller_ref_pos": ObservationTermCfg(
-      func=mdp.controller_reference_position, history_length=controller_history
+      func=mdp.observations.controller_reference_position,
+      history_length=controller_history,
     ),
     "controller_pos_error": ObservationTermCfg(
-      func=mdp.controller_position_error,
+      func=mdp.observations.controller_position_error,
       noise=Unoise(n_min=-0.01, n_max=0.01),
       history_length=controller_history,
     ),
     "controller_planned_zmp": ObservationTermCfg(
-      func=mdp.controller_planned_zmp_offset, history_length=controller_history
+      func=mdp.observations.controller_planned_zmp_offset,
+      history_length=controller_history,
     ),
     "controller_planned_com_vel": ObservationTermCfg(
-      func=mdp.controller_planned_com_velocity, history_length=controller_history
+      func=mdp.observations.controller_planned_com_velocity,
+      history_length=controller_history,
     ),
     # Deployment-compatible support state; datastore timing stays probe-only.
     "foot_load_share": ObservationTermCfg(
-      func=mdp.foot_load_share, history_length=controller_history
+      func=mdp.sensors.foot_load_share, history_length=controller_history
     ),
     "gait_phase": ObservationTermCfg(
-      func=mdp.gait_phase,
+      func=mdp.sensors.gait_phase,
       params={
-        "sensor_names": mdp.GROUND_CONTACT_SENSORS,
+        "sensor_names": mdp.sensors.GROUND_CONTACT_SENSORS,
         "asset_cfg": SceneEntityCfg("robot"),
         # Measured |d_dot| rms over the baseline's load difference.
         "rate_ref": 7.1,
@@ -300,14 +303,14 @@ def _make_env_cfg(
   if walking_reference_velocity_scale is not None:
     actor_terms |= {
       "walking_reference_delta": ObservationTermCfg(
-        func=mdp.walking_reference_velocity, history_length=proprio_history
+        func=mdp.observations.walking_reference_velocity, history_length=proprio_history
       ),
       "controller_walking_reference": ObservationTermCfg(
-        func=mdp.controller_walking_reference_velocity,
+        func=mdp.observations.controller_walking_reference_velocity,
         history_length=controller_history,
       ),
       "recovery_dcm_error_vector": ObservationTermCfg(
-        func=mdp.recovery_dcm_error_vector, history_length=proprio_history
+        func=mdp.observations.recovery_dcm_error_vector, history_length=proprio_history
       ),
     }
 
@@ -327,12 +330,12 @@ def _make_env_cfg(
   )
 
   # Privileged, critic-only: exogenous or unobservable, and the largest source of
-  # return variance. `push_recency` is bounded on purpose -- see `mdp.push_recency`.
+  # return variance. `push_recency` is bounded on purpose -- see `mdp.observations.push_recency`.
   critic_terms |= {
-    "push_recency": ObservationTermCfg(func=mdp.push_recency),
-    "last_push_velocity": ObservationTermCfg(func=mdp.last_push_velocity),
-    "encoder_bias": ObservationTermCfg(func=mdp.encoder_bias),
-    "measured_zmp_offset": ObservationTermCfg(func=mdp.measured_zmp_offset),
+    "push_recency": ObservationTermCfg(func=mdp.observations.push_recency),
+    "last_push_velocity": ObservationTermCfg(func=mdp.observations.last_push_velocity),
+    "encoder_bias": ObservationTermCfg(func=mdp.sensors.encoder_bias),
+    "measured_zmp_offset": ObservationTermCfg(func=mdp.sensors.measured_zmp_offset),
   }
 
   observations = {
@@ -352,50 +355,52 @@ def _make_env_cfg(
     # The objective: divergence from the *commanded* one, which mc_rtc's
     # plan-matching cannot buy itself. docs/reward-shaping.md#dcm_stability
     "dcm_stability": RewardTermCfg(
-      func=mdp.dcm_stability,
+      func=mdp.rewards.dcm_stability,
       weight=0.0,
       params={
         "std": DCM_STD,
-        "sensor_names": mdp.GROUND_CONTACT_SENSORS,
+        "sensor_names": mdp.sensors.GROUND_CONTACT_SENSORS,
         "asset_cfg": SceneEntityCfg("robot"),
         "action_name": "mc_rtc_residual",
       },
     ),
     "recovery_dcm": RewardTermCfg(
-      func=mdp.recovery_dcm,
+      func=mdp.rewards.recovery_dcm,
       weight=4.0,
       params={
         "std": DCM_STD,
         # 2 s rests on a recovery profile taken before the probe was fixed.
         "window_s": 2.0,
-        "sensor_names": mdp.GROUND_CONTACT_SENSORS,
+        "sensor_names": mdp.sensors.GROUND_CONTACT_SENSORS,
         "asset_cfg": SceneEntityCfg("robot"),
         "push_term_name": "push_robot",
         "action_name": "mc_rtc_residual",
       },
     ),
-    "angular_momentum": RewardTermCfg(func=mdp.angular_momentum_l2, weight=-0.005),
+    "angular_momentum": RewardTermCfg(
+      func=mdp.rewards.angular_momentum_l2, weight=-0.005
+    ),
     "foot_slip": RewardTermCfg(
-      func=mdp.foot_slip,
+      func=mdp.rewards.foot_slip,
       weight=-1.0,
       params={
-        "sensor_names": mdp.GROUND_CONTACT_SENSORS,
+        "sensor_names": mdp.sensors.GROUND_CONTACT_SENSORS,
         "asset_cfg": SceneEntityCfg("robot"),
         "velocimeter_names": SOLE_VELOCIMETERS,
       },
     ),
     "torque_margin": RewardTermCfg(
-      func=mdp.torque_margin,
+      func=mdp.rewards.torque_margin,
       weight=TORQUE_MARGIN_WEIGHT,
       params={"soft_ratio": 0.8, "action_name": "mc_rtc_residual"},
     ),
     "residual_magnitude": RewardTermCfg(
-      func=mdp.requested_action_l2,
+      func=mdp.rewards.requested_action_l2,
       weight=-0.1,
       params={"action_name": "mc_rtc_residual"},
     ),
     "residual_rate": RewardTermCfg(
-      func=mdp.requested_action_rate_l2,
+      func=mdp.rewards.requested_action_rate_l2,
       weight=-0.1,
       params={"action_name": "mc_rtc_residual"},
     ),
@@ -403,12 +408,12 @@ def _make_env_cfg(
   if walking_reference_velocity_scale is not None:
     rewards |= {
       "walking_reference_magnitude": RewardTermCfg(
-        func=mdp.walking_reference_l2,
+        func=mdp.rewards.walking_reference_l2,
         weight=-0.05,
         params={"action_name": "mc_rtc_residual"},
       ),
       "walking_reference_rate": RewardTermCfg(
-        func=mdp.walking_reference_rate_l2,
+        func=mdp.rewards.walking_reference_rate_l2,
         weight=-0.05,
         params={"action_name": "mc_rtc_residual"},
       ),
@@ -421,18 +426,18 @@ def _make_env_cfg(
     ),
     # Crouch-collapse keeps the trunk upright, so `fell_over` misses it.
     "collapsed": TerminationTermCfg(
-      func=mdp.collapsed,
+      func=mdp.terminations.collapsed,
       params={
         "minimum_height": 0.7 * nominal_height,
         "limit_angle": FALL_LIMIT_ANGLE,
       },
     ),
     "controller_failed": TerminationTermCfg(
-      func=mdp.controller_failed, params={"action_name": "mc_rtc_residual"}
+      func=mdp.terminations.controller_failed, params={"action_name": "mc_rtc_residual"}
     ),
     # `time_out=True` is the point: exogenous, so bootstrap, and no fall penalty.
     "controller_worker_failed": TerminationTermCfg(
-      func=mdp.controller_worker_failed,
+      func=mdp.terminations.controller_worker_failed,
       params={"action_name": "mc_rtc_residual"},
       time_out=True,
     ),
@@ -477,7 +482,7 @@ def _make_env_cfg(
         },
       ),
       "randomize_pd_gains": EventTermCfg(
-        func=mdp.randomize_current_pd_gains,
+        func=mdp.disturbances.randomize_current_pd_gains,
         mode="startup",
         params={
           "scale_range": (1.0 - physics_scale, 1.0 + physics_scale),
@@ -495,7 +500,7 @@ def _make_env_cfg(
     }
   if disturbance == "velocity":
     events["push_robot"] = EventTermCfg(
-      func=mdp.push_and_record,
+      func=mdp.disturbances.push_and_record,
       mode="interval",
       interval_range_s=(5.0, 7.0),
       params={
@@ -510,7 +515,7 @@ def _make_env_cfg(
     )
   else:
     events["push_robot"] = EventTermCfg(
-      func=mdp.finite_impulse_curriculum,
+      func=mdp.disturbances.finite_impulse_curriculum,
       mode="step",
       params={
         "enabled": disturbance == "finite",
@@ -529,7 +534,7 @@ def _make_env_cfg(
 
   # Read tracking quality as `zmp_error / zmp_grounded`, never zmp_error alone.
   metric_params = {
-    "sensor_names": mdp.GROUND_CONTACT_SENSORS,
+    "sensor_names": mdp.sensors.GROUND_CONTACT_SENSORS,
     "asset_cfg": SceneEntityCfg("robot"),
     "action_name": "mc_rtc_residual",
   }
@@ -549,52 +554,56 @@ def _make_env_cfg(
   }
 
   metrics = {
-    "zmp_error": MetricsTermCfg(func=mdp.zmp_error, params=dict(metric_params)),
-    "zmp_grounded": MetricsTermCfg(func=mdp.zmp_grounded, params=dict(metric_params)),
-    "gate_mean": MetricsTermCfg(func=mdp.gate_mean),
-    "detector_score": MetricsTermCfg(func=mdp.detector_score, reduce="max"),
-    "inactive_residual_violation": MetricsTermCfg(
-      func=mdp.inactive_residual_violation, reduce="max"
+    "zmp_error": MetricsTermCfg(func=mdp.metrics.zmp_error, params=dict(metric_params)),
+    "zmp_grounded": MetricsTermCfg(
+      func=mdp.metrics.zmp_grounded, params=dict(metric_params)
     ),
-    "projection_fraction": MetricsTermCfg(func=mdp.projection_fraction),
-    "near_bound_fraction": MetricsTermCfg(func=mdp.near_bound_fraction),
-    "executed_residual_l2": MetricsTermCfg(func=mdp.action_l2),
-    "impulse_speed": MetricsTermCfg(func=mdp.impulse_speed),
-    "requested_residual_l2": MetricsTermCfg(func=mdp.requested_action_l2),
-    "requested_residual_rate_l2": MetricsTermCfg(func=mdp.requested_action_rate_l2),
+    "gate_mean": MetricsTermCfg(func=mdp.metrics.gate_mean),
+    "detector_score": MetricsTermCfg(func=mdp.metrics.detector_score, reduce="max"),
+    "inactive_residual_violation": MetricsTermCfg(
+      func=mdp.metrics.inactive_residual_violation, reduce="max"
+    ),
+    "projection_fraction": MetricsTermCfg(func=mdp.metrics.projection_fraction),
+    "near_bound_fraction": MetricsTermCfg(func=mdp.metrics.near_bound_fraction),
+    "executed_residual_l2": MetricsTermCfg(func=mdp.rewards.action_l2),
+    "impulse_speed": MetricsTermCfg(func=mdp.metrics.impulse_speed),
+    "requested_residual_l2": MetricsTermCfg(func=mdp.rewards.requested_action_l2),
+    "requested_residual_rate_l2": MetricsTermCfg(
+      func=mdp.rewards.requested_action_rate_l2
+    ),
     "max_effort_ratio": MetricsTermCfg(
-      func=mdp.max_effort_ratio,
+      func=mdp.metrics.max_effort_ratio,
       params={"action_name": "mc_rtc_residual"},
       reduce="max",
       per_substep=True,
     ),
     "com_velocity_error": MetricsTermCfg(
-      func=mdp.com_velocity_error,
+      func=mdp.metrics.com_velocity_error,
       params={"asset_cfg": SceneEntityCfg("robot"), "action_name": "mc_rtc_residual"},
     ),
-    "dcm_error": MetricsTermCfg(func=mdp.dcm_error, params=dict(metric_params)),
+    "dcm_error": MetricsTermCfg(func=mdp.metrics.dcm_error, params=dict(metric_params)),
     "recovery_dcm_error": MetricsTermCfg(
-      func=mdp.recovery_dcm_error,
+      func=mdp.metrics.recovery_dcm_error,
       params={**metric_params, "window_s": 2.0, "push_term_name": "push_robot"},
     ),
     # Detector recall inside the scored window: read over `recovery_active`.
     "recovery_authority_coverage": MetricsTermCfg(
-      func=mdp.recovery_authority_coverage,
+      func=mdp.metrics.recovery_authority_coverage,
       params={**metric_params, "window_s": 2.0, "push_term_name": "push_robot"},
     ),
     "recovery_active": MetricsTermCfg(
-      func=mdp.recovery_active,
+      func=mdp.metrics.recovery_active,
       params={
-        "sensor_names": mdp.GROUND_CONTACT_SENSORS,
+        "sensor_names": mdp.sensors.GROUND_CONTACT_SENSORS,
         "asset_cfg": SceneEntityCfg("robot"),
         "window_s": 2.0,
         "push_term_name": "push_robot",
       },
     ),
     "foot_slip": MetricsTermCfg(
-      func=mdp.foot_slip,
+      func=mdp.rewards.foot_slip,
       params={
-        "sensor_names": mdp.GROUND_CONTACT_SENSORS,
+        "sensor_names": mdp.sensors.GROUND_CONTACT_SENSORS,
         "asset_cfg": SceneEntityCfg("robot"),
         "velocimeter_names": SOLE_VELOCIMETERS,
       },
@@ -602,8 +611,10 @@ def _make_env_cfg(
   }
   if walking_reference_velocity_scale is not None:
     metrics |= {
-      "walking_reference_l2": MetricsTermCfg(func=mdp.walking_reference_l2),
-      "walking_reference_rate_l2": MetricsTermCfg(func=mdp.walking_reference_rate_l2),
+      "walking_reference_l2": MetricsTermCfg(func=mdp.rewards.walking_reference_l2),
+      "walking_reference_rate_l2": MetricsTermCfg(
+        func=mdp.rewards.walking_reference_rate_l2
+      ),
     }
 
   # Solver settings follow mc_mujoco's HRP5Pmain.xml, as in the demo.
@@ -686,7 +697,7 @@ def residual_balance_position_matched_impulse_env_cfg(
   """Build the task whose pushes span the qualifier's range at one authority."""
   cfg = residual_balance_position_env_cfg(play=play, authority_set=authority_set)
   push = cfg.events["push_robot"]
-  push.func = mdp.stratified_finite_impulse_curriculum
+  push.func = mdp.disturbances.stratified_finite_impulse_curriculum
   push.params["bands"] = QUALIFICATION_MATCHED_BANDS
   push.params["band_weights"] = QUALIFICATION_MATCHED_MIXTURES[mixture]
   union = (
@@ -707,7 +718,7 @@ def residual_balance_position_curriculum_env_cfg(
   if schedule == "frozen":
     push.params["stages"] = ((0, (0.10, 0.25)),)
   elif schedule == "gradual":
-    push.func = mdp.gradual_finite_impulse_curriculum
+    push.func = mdp.disturbances.gradual_finite_impulse_curriculum
     push.params["stages"] = (
       (0, (0.10, 0.25)),
       (48_000, (0.10, 0.25)),
@@ -726,7 +737,7 @@ def residual_balance_position_achievement_curriculum_env_cfg(
   """Build the ankle-authority achievement-gated training task."""
   cfg = residual_balance_position_env_cfg(play=play, authority_set="ankle")
   push = cfg.events["push_robot"]
-  push.func = mdp.achievement_finite_impulse_curriculum
+  push.func = mdp.disturbances.achievement_finite_impulse_curriculum
   push.params["stages"] = tuple(
     (index, stage.training_velocity_range)
     for index, stage in enumerate(ACHIEVEMENT_STAGES)
@@ -742,7 +753,9 @@ def residual_balance_position_achievement_curriculum_env_cfg(
       tuple(weights) for _stage in ACHIEVEMENT_STAGES
     )
   cfg.curriculum = {
-    "achievement_stage": CurriculumTermCfg(func=mdp.achievement_curriculum_state)
+    "achievement_stage": CurriculumTermCfg(
+      func=mdp.curricula.achievement_curriculum_state
+    )
   }
   return cfg
 

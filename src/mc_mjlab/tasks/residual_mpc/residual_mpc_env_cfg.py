@@ -27,6 +27,7 @@ from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.terrains import TerrainEntityCfg
 
 from mc_mjlab import MC_RTC_YAML_PATH
+from mc_mjlab import mdp as shared_mdp
 from mc_mjlab.actions.residual_mpc_joint_torque_action import (
   ResidualMpcJointTorqueActionCfg,
 )
@@ -36,7 +37,6 @@ from mc_mjlab.robots.registry import (
   get_main_robot_spec,
   prepare_cfg_for_mc_rtc,
 )
-from mc_mjlab.tasks import mdp as shared_mdp
 from mc_mjlab.tasks.residual_mpc import mdp
 
 POLICY_DT = 0.01
@@ -273,7 +273,7 @@ def residual_mpc_env_cfg(
         },
       ),
       "randomize_pd_gains": EventTermCfg(
-        func=shared_mdp.randomize_current_pd_gains,
+        func=shared_mdp.disturbances.randomize_current_pd_gains,
         mode="startup",
         params={"scale_range": (0.95, 1.05), "action_name": mdp.ACTION_NAME},
       ),

@@ -11,8 +11,8 @@ from pathlib import Path
 import torch
 from mjlab.envs import ManagerBasedRlEnv
 
-from mc_mjlab import MC_RTC_YAML_PATH
-from mc_mjlab.tasks import mdp
+from mc_mjlab import MC_RTC_YAML_PATH, mdp
+from mc_mjlab.bridge.controller_datastore import CONTROL_COM_VEL
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   DCM_STD,
   _make_env_cfg,
@@ -103,8 +103,8 @@ def run_regime(
   # `step()` would otherwise reset in place and erase what this measures.
   cfg.auto_reset = False
   env = ManagerBasedRlEnv(cfg, device=args.device)
-  sensors = mdp._ZmpSensors(env, mdp.GROUND_CONTACT_SENSORS, "robot")
-  term = mdp._residual_term(env, "mc_rtc_residual")
+  sensors = mdp.sensors._ZmpSensors(env, mdp.sensors.GROUND_CONTACT_SENSORS, "robot")
+  term = mdp.sensors._residual_term(env, "mc_rtc_residual")
   root = env.scene["robot"].indexing.root_body_id
 
   signs = torch.ones(env.action_manager.total_action_dim, device=env.device)
@@ -121,8 +121,10 @@ def run_regime(
       measured, normal_force = sensors.measured_offset(env)
       com = env.sim.data.subtree_com[:, root]
       com_vel = env.sim.data.subtree_linvel[:, root]
-      commanded = term.datastore_vector_output(mdp.CONTROL_COM_VEL)[:, :2]
-      omega = torch.sqrt(mdp.GRAVITY / com[:, 2].clamp(min=mdp.MIN_COM_HEIGHT))
+      commanded = term.datastore_vector_output(CONTROL_COM_VEL)[:, :2]
+      omega = torch.sqrt(
+        mdp.sensors.GRAVITY / com[:, 2].clamp(min=mdp.sensors.MIN_COM_HEIGHT)
+      )
       capture = com_vel[:, :2] / omega.unsqueeze(-1)
       grounded = normal_force >= 20.0
       sample.add(
@@ -135,7 +137,7 @@ def run_regime(
           torch.linalg.vector_norm(com_vel[:, :2], dim=1)
           - torch.linalg.vector_norm(commanded, dim=1)
         )[grounded],
-        mdp.steps_since_push(env)[grounded],
+        mdp.observations.steps_since_push(env)[grounded],
       )
     # Outside the warm-up guard: `auto_reset=False` makes a missed reset fatal.
     done = (terminated | time_outs).nonzero(as_tuple=False).flatten()

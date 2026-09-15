@@ -9,9 +9,9 @@ from typing import Any
 
 import torch
 
+from mc_mjlab import mdp
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
 from mc_mjlab.robots import robot_module as mc_rtc
-from mc_mjlab.tasks import mdp
 
 STRATUM_LABELS = (
   ("startup", "none", "none"),
@@ -145,8 +145,8 @@ class StratifiedDiagnostics:
       return
     strata = classify_strata(
       self.env.episode_length_buf,
-      mdp.steps_since_push(self.env),
-      mdp.last_push_velocity(self.env),
+      mdp.observations.steps_since_push(self.env),
+      mdp.observations.last_push_velocity(self.env),
       self.warmup_steps,
       self.recovery_steps,
     )

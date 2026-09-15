@@ -11,8 +11,10 @@ import torch
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.utils.lab_api.math import quat_apply, quat_apply_inverse
 
+from mc_mjlab import mdp
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
-from mc_mjlab.tasks import mdp
+from mc_mjlab.actions.walking_reference_action import WALKING_REF_VEL_GETTER
+from mc_mjlab.bridge.controller_datastore import CONTROL_COM_VEL
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   WALKING_REFERENCE_SCALE,
   _make_env_cfg,
@@ -34,15 +36,19 @@ class GainResult:
 
 
 def dcm_error_vector(
-  env: ManagerBasedRlEnv, sensors: mdp._ZmpSensors, term: McRtcResidualActionBase
+  env: ManagerBasedRlEnv,
+  sensors: mdp.sensors._ZmpSensors,
+  term: McRtcResidualActionBase,
 ) -> tuple[torch.Tensor, torch.Tensor]:
   """Return command-relative horizontal DCM error and grounded mask."""
   root = env.scene["robot"].indexing.root_body_id
   measured, normal_force = sensors.measured_offset(env)
   com = env.sim.data.subtree_com[:, root]
   com_vel = env.sim.data.subtree_linvel[:, root]
-  commanded = term.datastore_vector_output(mdp.CONTROL_COM_VEL)[:, :2]
-  omega = torch.sqrt(mdp.GRAVITY / com[:, 2].clamp(min=mdp.MIN_COM_HEIGHT))
+  commanded = term.datastore_vector_output(CONTROL_COM_VEL)[:, :2]
+  omega = torch.sqrt(
+    mdp.sensors.GRAVITY / com[:, 2].clamp(min=mdp.sensors.MIN_COM_HEIGHT)
+  )
   error = (com_vel[:, :2] - commanded) / omega.unsqueeze(-1) - measured
   return error, normal_force >= 20.0
 
@@ -51,7 +57,10 @@ def apply_fixed_impulse(
   env: ManagerBasedRlEnv, speed: float, height: float, duration_s: float
 ) -> None:
   """Install one identical sagittal force-equivalent impulse in every world."""
-  push = cast(mdp.finite_impulse_curriculum, mdp._push_term(env, "push_robot"))
+  push = cast(
+    mdp.disturbances.finite_impulse_curriculum,
+    mdp.disturbances._push_term(env, "push_robot"),
+  )
   ids = torch.arange(env.num_envs, device=env.device)
   delta_b = torch.zeros(env.num_envs, 3, device=env.device)
   delta_b[:, 0] = speed
@@ -95,7 +104,7 @@ def probe_walking_reference(args: argparse.Namespace) -> list[GainResult]:
   term = env.action_manager.get_term("mc_rtc_residual")
   if not isinstance(term, McRtcResidualActionBase):
     raise TypeError(f"unexpected action term {type(term).__name__}")
-  sensors = mdp._ZmpSensors(env, mdp.GROUND_CONTACT_SENSORS, "robot")
+  sensors = mdp.sensors._ZmpSensors(env, mdp.sensors.GROUND_CONTACT_SENSORS, "robot")
   gain_by_env = torch.tensor(gains, device=env.device).repeat_interleave(
     args.envs_per_gain
   )
@@ -116,7 +125,7 @@ def probe_walking_reference(args: argparse.Namespace) -> list[GainResult]:
     impulse_fired = False
     while bool(active.any()):
       if not impulse_fired and int(elapsed.max()) >= impulse_step:
-        nominal_command.copy_(term.datastore_vector_output(mdp.WALKING_REF_VEL_GETTER))
+        nominal_command.copy_(term.datastore_vector_output(WALKING_REF_VEL_GETTER))
         apply_fixed_impulse(env, args.push_speed, args.push_height, args.push_duration)
         impulse_fired = True
       error, grounded = dcm_error_vector(env, sensors, term)
@@ -130,7 +139,7 @@ def probe_walking_reference(args: argparse.Namespace) -> list[GainResult]:
       elapsed[active] += 1
       _, _, terminated, time_outs, _ = env.step(action)
 
-      age = mdp.steps_since_push(env)
+      age = mdp.observations.steps_since_push(env)
       recovery = active & grounded & (age >= 1) & (age <= round(2.0 / env.step_dt))
       error_sum[recovery] += torch.linalg.vector_norm(error[recovery], dim=1).double()
       error_count[recovery] += 1.0
@@ -154,7 +163,7 @@ def probe_walking_reference(args: argparse.Namespace) -> list[GainResult]:
 
   results = []
   restore_error = torch.linalg.vector_norm(
-    term.datastore_vector_output(mdp.WALKING_REF_VEL_GETTER) - nominal_command, dim=1
+    term.datastore_vector_output(WALKING_REF_VEL_GETTER) - nominal_command, dim=1
   )
   for gain in gains:
     cohort = gain_by_env == gain
