@@ -54,6 +54,43 @@ _RUNTIME_MODULES = (
   "rsl_rl.runners.on_policy_runner",
 )
 _RUNTIME_PACKAGES = ("mc-mjlab", "mjlab", "mujoco", "rsl-rl-lib", "torch")
+# A contract names every term and model by import path, so the source-tree move
+# would have stranded every checkpoint written before it. Verified path-only:
+# the moved modules were not edited. docs/evaluation.md#_RENAMED_MODULES
+_RENAMED_MODULES = {
+  "mc_mjlab.controller_datastore": "mc_mjlab.bridge.controller_datastore",
+  "mc_mjlab.recovery_authority": "mc_mjlab.residuals.recovery_authority",
+  "mc_mjlab.residual_mpc": "mc_mjlab.residuals.mpc_math",
+  "mc_mjlab.residual_printer": "mc_mjlab.residuals.printer",
+  "mc_mjlab.residual_safety": "mc_mjlab.residuals.safety",
+  "mc_mjlab.robots.additional_sensors_configuration": "mc_mjlab.robots.sensors",
+  "mc_mjlab.robots.collision_configuration": "mc_mjlab.robots.collisions",
+  "mc_mjlab.robots.mc_rtc_robot_configuration": "mc_mjlab.robots.robot_module",
+  "mc_mjlab.robots.pd_actuator_configuration": "mc_mjlab.robots.actuators",
+  "mc_mjlab.robots.robots_registry": "mc_mjlab.robots.registry",
+  "mc_mjlab.sim_controller_bridge": "mc_mjlab.bridge.sim_controller_bridge",
+  "mc_mjlab.tasks.residual_balance.effective_training_manifest": (
+    "mc_mjlab.rl.effective_training_manifest"
+  ),
+  "mc_mjlab.tasks.rollout_adaptive_ppo": "mc_mjlab.rl.rollout_adaptive_ppo",
+  "mc_mjlab.tasks.squashed_gaussian": "mc_mjlab.rl.squashed_gaussian",
+  "mc_mjlab.tasks.zero_init_actor": "mc_mjlab.rl.zero_init_actor",
+  "utils.mc_rtc_config": "mc_mjlab.bridge.config",
+  "utils.pd_gains": "mc_mjlab.robots.pd_gains",
+  "utils.shared_memory": "mc_mjlab.bridge.shared_memory",
+  "utils.task_naming": "mc_mjlab.tasks.naming",
+}
+#: Split across `mc_mjlab.mdp`, so its terms are looked up, not mapped by hand.
+_SPLIT_MDP_MODULE = "mc_mjlab.tasks.mdp"
+_MDP_SUBMODULES = (
+  "curricula",
+  "disturbances",
+  "metrics",
+  "observations",
+  "rewards",
+  "sensors",
+  "terminations",
+)
 
 
 def _qualified_name(value: Any) -> str:
@@ -432,13 +469,46 @@ def _strip_source_hashes(value: Any) -> Any:
   return value
 
 
+def rename_legacy_modules(value: Any) -> Any:
+  """Rewrite import paths a checkpoint recorded before the source tree moved."""
+  if isinstance(value, str):
+    return _renamed_qualified_name(value)
+  if isinstance(value, dict):
+    return {key: rename_legacy_modules(item) for key, item in value.items()}
+  if isinstance(value, list):
+    return [rename_legacy_modules(item) for item in value]
+  return value
+
+
+def _renamed_qualified_name(name: str) -> str:
+  """Map one ``module:qualname`` (or bare module) onto its current spelling."""
+  module, separator, attribute = name.partition(":")
+  if module == _SPLIT_MDP_MODULE and attribute:
+    return _split_mdp_name(attribute) or name
+  renamed = _RENAMED_MODULES.get(module)
+  return f"{renamed}{separator}{attribute}" if renamed else name
+
+
+def _split_mdp_name(attribute: str) -> str | None:
+  """Find which ``mc_mjlab.mdp`` submodule a once-single term now lives in."""
+  package = importlib.import_module("mc_mjlab.mdp")
+  name = attribute.split(".")[0]
+  for submodule in _MDP_SUBMODULES:
+    target = getattr(getattr(package, submodule), name, None)
+    if target is not None and target.__module__ == f"mc_mjlab.mdp.{submodule}":
+      return f"{target.__module__}:{attribute}"
+  return None
+
+
 def source_drift(saved: Mapping[str, Any], active: Mapping[str, Any]) -> list[str]:
   """Return the audit-record paths whose defining source file changed."""
   # Only the digests: the record also holds evaluator-side differences such as
   # worker count and the qualifier's own disturbance term, which are expected.
   return [
     path
-    for path in _differences(saved.get("record"), active.get("record"))
+    for path in _differences(
+      rename_legacy_modules(saved.get("record")), active.get("record")
+    )
     if path.endswith("source_sha256")
   ]
 
@@ -499,6 +569,7 @@ def validate_effective_training_manifest(
   """Reject incompatible actor loads and semantically changed full resumes."""
   if saved.get("schema_version") != active.get("schema_version"):
     raise RuntimeError("Checkpoint effective-training manifest schema is unsupported.")
+  saved = rename_legacy_modules(saved)
   contract = "training" if full_resume else "policy_interface"
   payload_key = f"{contract}_contract" if full_resume else contract
   # Re-digest both sides: a checkpoint written before source hashes became

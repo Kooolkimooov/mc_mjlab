@@ -341,6 +341,39 @@ should be enforced rather than recorded.
   defect on the branch and `leo-mjlab-review.md` had already recorded the
   decision to exclude them.
 
+## _RENAMED_MODULES
+
+**Current:** `validate_effective_training_manifest` rewrites the import paths a
+saved manifest recorded before the 2026-09-15 source-tree move, so a checkpoint
+is compared against the module spellings it would carry today. `_RENAMED_MODULES`
+maps the whole-module moves; terms from the split `mc_mjlab.tasks.mdp` are
+resolved by scanning the seven `mc_mjlab.mdp` submodules for the one that
+defines the name, so the map does not have to list every term and cannot go
+stale against a later re-split.
+
+**Why.** Both enforced contracts name each manager term, action class, config
+dataclass and configured `class_name` by `module:qualname`. The move changed
+every one of those strings while changing no behaviour, so without the rewrite
+each of the position, ankle, achievement and matched-impulse checkpoints would
+fail its full resume *and* its actor-only load with a diff listing nothing but
+paths. That is the failure `source_drift` already records as the wrong
+shape of enforcement: identity is evidence about semantics, not semantics.
+
+The rewrite is deliberately narrow. It is applied only to the saved side, only
+to the listed modules, and it does not touch values, orderings, dimensions or
+effective parameters: a term that really did move to a different callable still
+fails, because its attribute name no longer resolves.
+
+**Re-measure if:** modules move again -- add the pair rather than widening the
+rule -- or `mc_mjlab.mdp` stops binding its seven submodules, which is what the
+lookup walks.
+
+**History:**
+- 2026-09-15 — added with the source-layout refactor
+  (`docs/target-source-tree.md`), which moved 20 modules and split the MDP terms
+  into seven. Verified path-only: the moved files' contents are unchanged in the
+  move commits.
+
 ## invalidated_scenarios
 
 **Current:** a scenario whose baseline or policy arm lost a controller worker is

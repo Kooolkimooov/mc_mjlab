@@ -1,12 +1,10 @@
 """Runner that refuses checkpoints written under different action semantics."""
 
 from mc_mjlab.residuals.mpc_math import ACTION_SEMANTICS_VERSION
-from mc_mjlab.tasks.residual_balance.residual_balance_runner import (
-  ResidualBalanceOnPolicyRunner,
-)
+from mc_mjlab.rl.runner import McRtcResidualOnPolicyRunner
 
 
-class ResidualMpcOnPolicyRunner(ResidualBalanceOnPolicyRunner):
+class ResidualMpcOnPolicyRunner(McRtcResidualOnPolicyRunner):
   """Adds a hard action-semantics gate to the provenance-aware runner."""
 
   SEMANTICS_KEY = "action_semantics_version"

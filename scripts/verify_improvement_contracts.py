@@ -872,6 +872,40 @@ def verify_source_hash_is_audit_only() -> None:
     raise AssertionError("a renamed observation callable was accepted")
 
 
+def verify_renamed_modules_do_not_strand_checkpoints() -> None:
+  """Check the source-tree move alone cannot invalidate an older checkpoint."""
+  contract = {
+    "terms": {"a": {"callable": {"name": "mc_mjlab.mdp.rewards:zmp_tracking"}}},
+    "actor": {"class_name": "mc_mjlab.rl.zero_init_actor:ZeroInitMLPModel"},
+    "entity": {"__type__": "mc_mjlab.robots.registry:RobotSpec"},
+  }
+  active = {
+    "schema_version": 1,
+    "record": {},
+    "training_contract": contract,
+    "policy_interface": contract,
+  }
+  saved = json.loads(
+    json.dumps(active)
+    .replace("mc_mjlab.mdp.rewards:zmp_tracking", "mc_mjlab.tasks.mdp:zmp_tracking")
+    .replace("mc_mjlab.rl.zero_init_actor", "mc_mjlab.tasks.zero_init_actor")
+    .replace("mc_mjlab.robots.registry", "mc_mjlab.robots.robots_registry")
+  )
+  assert saved != active
+  for full in (True, False):
+    validate_effective_training_manifest(saved, active, full_resume=full)
+
+  # Only the recorded path is rewritten: a term that is no longer there fails.
+  gone = json.loads(json.dumps(saved))
+  gone["policy_interface"]["terms"]["a"]["callable"]["name"] = "mc_mjlab.tasks.mdp:gone"
+  try:
+    validate_effective_training_manifest(gone, active, full_resume=False)
+  except RuntimeError:
+    pass
+  else:
+    raise AssertionError("a term missing from the split mdp package was accepted")
+
+
 def verify_qualifier_power() -> None:
   """Check the Student-t interval, the one-cluster hole, and power reporting."""
   assert _t_critical(1) == math.inf
@@ -1376,6 +1410,7 @@ def main() -> None:
   verify_curriculum_reachability()
   verify_log_ratio_cannot_overflow()
   verify_source_hash_is_audit_only()
+  verify_renamed_modules_do_not_strand_checkpoints()
   verify_qualifier_power()
   verify_paired_clustering()
   verify_stratified_impulse()
