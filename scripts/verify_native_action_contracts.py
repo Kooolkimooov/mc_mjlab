@@ -18,10 +18,6 @@ from mc_mjlab.actions.walking_reference_action import (
   WALKING_REF_VEL_SETTER,
   GatedWalkingReferenceDeltaAction,
 )
-from mc_mjlab.controller_datastore import (
-  input_columns,
-  output_columns,
-)
 from mc_mjlab.sim_controller_bridge import SimControllerBridge
 
 
@@ -80,7 +76,7 @@ def verify_layout() -> tuple[SimControllerBridge, NS, NS]:
       "mc_mjlab.sim_controller_bridge.robots.get_robot_module", return_value=module
     ),
   ):
-    io = SimControllerBridge(
+    bridge = SimControllerBridge(
       env,  # ty: ignore[invalid-argument-type]
       entity,  # ty: ignore[invalid-argument-type]
       ["b", "a"],
@@ -89,19 +85,19 @@ def verify_layout() -> tuple[SimControllerBridge, NS, NS]:
       ("q", "alpha", "tau"),
       "robot",
     )
-  rows = np.zeros((2, io.layout.input_size))
-  io.set_feedback_offset(torch.tensor([[0.1, 0.2], [0.3, 0.4]]))
-  io.set_joint_velocity_offset(torch.tensor([[0.2, 0.3], [0.4, 0.5]]))
-  io.set_wrench_offset(torch.ones(2, 6))
-  io.fill_controller_input(rows)
-  layout = io.layout.input
+  rows = np.zeros((2, bridge.layout.input_size))
+  bridge.set_feedback_offset(torch.tensor([[0.1, 0.2], [0.3, 0.4]]))
+  bridge.set_joint_velocity_offset(torch.tensor([[0.2, 0.3], [0.4, 0.5]]))
+  bridge.set_wrench_offset(torch.ones(2, 6))
+  bridge.fill_controller_input(rows)
+  layout = bridge.layout.input
   np.testing.assert_allclose(rows[:, :3], [[5.2, 0.7, 4.1], [7.4, 0.7, 6.3]])
   np.testing.assert_allclose(rows[:, 3:6], [[9.3, 0, 8.2], [11.5, 0, 10.4]])
   np.testing.assert_allclose(rows[:, 6:9], [[39, 0, 38], [47, 0, 46]])
   ro = layout.root_offset()
   np.testing.assert_allclose(rows[:, ro : ro + 3], [[1, 2, 3]] * 2)
   data.qpos[:, 3:7] = torch.tensor([1.0, 0.0, 0.0, 0.0])
-  io.fill_controller_input(rows)
+  bridge.fill_controller_input(rows)
   np.testing.assert_allclose(rows[:, ro + 3 : ro + 7], [[0, 0, 0, 1]] * 2)
   bo = layout.body_sensors_offset()
   np.testing.assert_allclose(rows[:, bo : bo + 3], data.qvel[:, 3:6])
@@ -109,18 +105,18 @@ def verify_layout() -> tuple[SimControllerBridge, NS, NS]:
   np.testing.assert_allclose(rows[:, bo + 6 : bo + 12], data.sensordata[:, :6])
   fo = layout.force_sensors_offset()
   np.testing.assert_allclose(rows[:, fo : fo + 6], data.sensordata[:, 6:12] + 1)
-  io.set_root_pose_offset(torch.ones(2, 3), torch.tensor([[0.0, 0.1, 0.0]] * 2))
-  io.fill_controller_input(rows)
+  bridge.set_root_pose_offset(torch.ones(2, 3), torch.tensor([[0.0, 0.1, 0.0]] * 2))
+  bridge.fill_controller_input(rows)
   np.testing.assert_allclose(rows[:, ro : ro + 3], [[2, 3, 4]] * 2)
   assert not np.allclose(rows[:, bo + 9 : bo + 12], data.sensordata[:, 3:6])
   np.testing.assert_allclose(np.linalg.norm(rows[:, ro + 3 : ro + 7], axis=1), 1)
-  out = np.arange(2.0 * io.layout.output_size).reshape(2, -1)
-  block = io.upload_controller_output(out)
+  out = np.arange(2.0 * bridge.layout.output_size).reshape(2, -1)
+  block = bridge.upload_controller_output(out)
   for channel, offset in (("q", 0), ("alpha", 3), ("tau", 6)):
     np.testing.assert_allclose(
-      io.read_controller_output(block)[channel], out[:, [offset + 2, offset]]
+      bridge.read_controller_output(block)[channel], out[:, [offset + 2, offset]]
     )
-  return io, env, entity
+  return bridge, env, entity
 
 
 def verify_walking_reference_feed() -> None:
@@ -181,7 +177,7 @@ class Manager:
   def collect(self) -> list[int]:
     out = self.action._out_np
     out[:] = self.calls * 4
-    out[:, self.action._io.layout.output.status_offset()] = 0
+    out[:, self.action._bridge.layout.output.status_offset()] = 0
     return self.failure
 
   def respawn(self, reset_row_ids: list[int]) -> None:
@@ -190,27 +186,27 @@ class Manager:
 
 def verify_pipeline() -> None:
   """Keep interpolation delayed through partial resets and exclude failed rows."""
-  io, env, entity = verify_layout()
+  bridge, env, entity = verify_layout()
   action = object.__new__(McRtcResidualJointPositionAction)
   action._env = env  # ty: ignore[invalid-assignment]
   action._entity = entity  # ty: ignore[invalid-assignment]
   action.cfg = NS(  # ty: ignore[invalid-assignment]
-    frameskip=2, datastore_vectors_outputs=(), datastore_scalar_outputs=()
+    frameskip=2,
+    datastore_vectors_outputs=(),
+    datastore_scalar_outputs=(),
+    datastore_vectors_inputs=(),
+    datastore_scalar_inputs=(),
   )
   action._num_targets = 2
   action._target_ids = torch.tensor([0, 1])
-  action._io = io
-  io._output_channels = action.output_channels
-  action._datastore_vector_output_columns = output_columns(io.layout, (), "vector3")
-  action._datastore_scalar_output_columns = output_columns(io.layout, (), "scalar")
-  action._datastore_output_fresh = torch.zeros(2, dtype=torch.bool)
-  action._datastore_vector_input_columns = input_columns(io.layout, (), "vector3")
-  action._datastore_scalar_input_columns = input_columns(io.layout, (), "scalar")
-  action._datastore_vector_input_feed = torch.empty(2, 0, 3)
-  action._datastore_scalar_input_feed = torch.empty(2, 0)
+  action._bridge = bridge
+  bridge._output_channels = action.output_channels
+  action._setup_datastore_outputs(action.cfg)
+  action._setup_datastore_inputs(action.cfg)
   action._alloc_interpolation_buffers()
-  action._in_np = np.zeros((2, io.layout.input_size))
-  action._out_np = np.zeros((2, io.layout.output_size))
+  action._alloc_failure_latches()
+  action._in_np = np.zeros((2, bridge.layout.input_size))
+  action._out_np = np.zeros((2, bridge.layout.output_size))
   action._manager = Manager(action)
   action._pending_dispatch = False
   action._pending_reset = np.zeros(2, dtype=bool)
@@ -263,7 +259,7 @@ def verify_pipeline() -> None:
   assert not action.controller_failed.any()
   action._manager.failure = []
   action.apply_actions()
-  assert action._manager.inputs[-1][:, io.layout.input.reset_offset()].tolist() == [
+  assert action._manager.inputs[-1][:, bridge.layout.input.reset_offset()].tolist() == [
     0,
     1,
   ]

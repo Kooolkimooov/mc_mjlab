@@ -103,6 +103,8 @@ def get_collision_presets(
   all_expr = rf"^({core}|{prefix}_collision_.*)$"
   feet_only = CollisionCfg(
     geom_names_expr=(foot_expr,),
+    contype=0,
+    conaffinity=1,
     condim=3,
     priority=1,
     disable_other_geoms=False,
@@ -112,7 +114,7 @@ def get_collision_presets(
     contype=1,
     conaffinity=1,
     condim=3,
-    priority={foot_expr: 1},
+    priority={foot_expr: 1, ".*": 0},
     disable_other_geoms=False,
   )
   full_without_self = CollisionCfg(
@@ -120,7 +122,7 @@ def get_collision_presets(
     contype=0,
     conaffinity=1,
     condim=3,
-    priority={foot_expr: 1},
+    priority={foot_expr: 1, ".*": 0},
     disable_other_geoms=False,
   )
   return feet_only, full, full_without_self
