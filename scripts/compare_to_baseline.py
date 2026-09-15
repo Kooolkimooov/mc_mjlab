@@ -11,9 +11,10 @@ import time
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any, TextIO
 
 import torch
-from mjlab.envs import ManagerBasedRlEnv
+from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 
@@ -29,14 +30,14 @@ from mc_mjlab.tasks.residual_balance.residual_balance_runner import (
 )
 
 
-def _apply_scale(cfg, num_envs: int, num_workers: int) -> None:
+def _apply_scale(cfg: ManagerBasedRlEnvCfg, num_envs: int, num_workers: int) -> None:
   """Point a registered cfg at this comparison's environment and worker counts."""
   cfg.scene.num_envs = num_envs
   for action in cfg.actions.values():
     if hasattr(action, "num_workers"):
-      action.num_workers = num_workers
+      action.num_workers = num_workers  # ty: ignore[invalid-assignment]
     if hasattr(action, "console_output"):
-      action.console_output = "none"
+      action.console_output = "none"  # ty: ignore[invalid-assignment]
 
 
 #: Where every comparison's CSV and printed report land, beside the training logs
@@ -47,7 +48,7 @@ COMPARISON_DIR = Path("logs/comparisons")
 class _Tee:
   """Write the report to the terminal and to the run's log file at once."""
 
-  def __init__(self, stream, path: Path) -> None:
+  def __init__(self, stream: TextIO, path: Path) -> None:
     self._stream = stream
     # Line-buffered, so a killed run still leaves everything it printed.
     self._file = path.open("w", buffering=1)
@@ -60,7 +61,7 @@ class _Tee:
     self._stream.flush()
     self._file.flush()
 
-  def __getattr__(self, name: str):
+  def __getattr__(self, name: str) -> Any:
     # `isatty`, `fileno` and friends: mjlab colourises on the first and mc_rtc's
     # fd redirection needs the second, so this must stay a real stdout otherwise.
     return getattr(self._stream, name)
@@ -162,7 +163,12 @@ class Arm:
 
 
 def _run_both(
-  env, wrapped, policy, minutes: float, policy_ids, skip_steps: int = 0
+  env: ManagerBasedRlEnv,
+  wrapped: RslRlVecEnvWrapper,
+  policy: Any,
+  minutes: float,
+  policy_ids: Sequence[int],
+  skip_steps: int = 0,
 ) -> tuple[Arm, Arm]:
   """Step both arms at once, split by env index -- docs/evaluation.md#both-arms-at-once."""
   policy_set = set(policy_ids)
@@ -236,7 +242,7 @@ def _run_both(
   return base, pol
 
 
-def _reset_done(env, env_ids) -> None:
+def _reset_done(env: ManagerBasedRlEnv, env_ids: torch.Tensor) -> None:
   """Recycle finished envs without pushing a second observation-history frame."""
   # `reset()` would append a frame for *every* env, halving the history's span.
   # docs/evaluation.md#resetting-without-corrupting-the-observation-history
@@ -249,7 +255,14 @@ def _survival(eps: Sequence[Episode]) -> tuple[int, int]:
   return sum(e.terms.get("time_out", 0) for e in eps), len(eps)
 
 
-def _report(base: Arm, pol: Arm, env, cfg, term_names, reward_terms) -> None:
+def _report(
+  base: Arm,
+  pol: Arm,
+  env: ManagerBasedRlEnv,
+  cfg: ManagerBasedRlEnvCfg,
+  term_names: Sequence[str],
+  reward_terms: Sequence[str],
+) -> None:
   b_eps, b_k = base.trimmed()
   p_eps, p_k = pol.trimmed()
   dt = env.step_dt

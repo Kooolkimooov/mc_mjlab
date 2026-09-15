@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+import mujoco
 from mjlab.entity import EntityCfg
 
 from mc_mjlab.robots.collision_configuration import enable_all_collision_geoms
@@ -77,7 +78,7 @@ def prepare_cfg_for_mc_rtc(
   """Prepare a robot cfg for the mc_rtc coupling."""
   base_spec_fn = robot_cfg.spec_fn
 
-  def spec_fn():
+  def spec_fn() -> mujoco.MjSpec:
     spec = base_spec_fn()
     if not names_collision_geoms:
       enable_all_collision_geoms(spec)  # unnamed geoms: presets can't match

@@ -6,8 +6,9 @@ import argparse
 import gc
 import statistics
 
+import mujoco
 import torch
-from mjlab.envs import ManagerBasedRlEnv
+from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
 from mc_mjlab.robots import mc_rtc_robot_configuration as mc_rtc
@@ -17,14 +18,14 @@ AXES = {"x": 0, "y": 1, "z": 2}
 DEFAULT_OFFSETS_MM = (-10.0, -5.0, -2.0, 0.0, 2.0, 5.0, 10.0)
 
 
-def shift_compiled_com(cfg, axis: str, offset_mm: float) -> float:
+def shift_compiled_com(cfg: ManagerBasedRlEnvCfg, axis: str, offset_mm: float) -> float:
   """Shift torso inertia so the initial aggregate COM moves by ``offset_mm``."""
   robot_cfg = cfg.scene.entities["robot"]
   base_spec_fn = robot_cfg.spec_fn
   root_name = mc_rtc.get_root_body(cfg.actions["mc_rtc_residual"].mc_rtc_robot_name)
   torso_shift_mm = 0.0
 
-  def shifted_spec():
+  def shifted_spec() -> mujoco.MjSpec:
     nonlocal torso_shift_mm
     spec = base_spec_fn()
     root = spec.body(root_name)
@@ -40,7 +41,9 @@ def shift_compiled_com(cfg, axis: str, offset_mm: float) -> float:
   return torso_shift_mm
 
 
-def run_offset(axis: str, offset_mm: float, args) -> dict[str, float]:
+def run_offset(
+  axis: str, offset_mm: float, args: argparse.Namespace
+) -> dict[str, float]:
   """Run one compiled COM mismatch cohort without policy action or pushes."""
   cfg = _make_env_cfg(
     "position",

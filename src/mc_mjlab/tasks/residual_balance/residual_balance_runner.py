@@ -6,11 +6,16 @@ import hashlib
 import json
 import os
 import shutil
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
-from mjlab.rl import MjlabOnPolicyRunner
+from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 
-from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
+from mc_mjlab.actions.mc_rtc_residual_action import (
+  McRtcResidualActionBase,
+  McRtcResidualActionCfg,
+)
 from mc_mjlab.tasks.residual_balance.achievement_curriculum import (
   AchievementCurriculumBridge,
 )
@@ -59,9 +64,11 @@ def _controller_config_paths(controller_name: str) -> list[Path]:
   return sorted(path.resolve() for path in paths if path.is_file())
 
 
-def collect_controller_provenance(env) -> dict:
+def collect_controller_provenance(env: RslRlVecEnvWrapper) -> dict:
   """Collect all non-checkpoint inputs that define the base controller."""
-  action_cfg = env.unwrapped.cfg.actions["mc_rtc_residual"]
+  action_cfg = cast(
+    McRtcResidualActionCfg, env.unwrapped.cfg.actions["mc_rtc_residual"]
+  )
   project_cfg = Path(action_cfg.mc_rtc_config_path)
   controller_name = get_controller_name(project_cfg)
   records = [
@@ -112,7 +119,13 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
   ACHIEVEMENT_KEY = "achievement_curriculum"
   WATCHDOG_KEY = "training_watchdog"
 
-  def __init__(self, env, train_cfg: dict, log_dir=None, device: str = "cpu") -> None:
+  def __init__(
+    self,
+    env: RslRlVecEnvWrapper,
+    train_cfg: dict,
+    log_dir: str | None = None,
+    device: str = "cpu",
+  ) -> None:
     super().__init__(env, train_cfg, log_dir, device)
     self._configure_actor_update_mask(env)
     self._controller_provenance = collect_controller_provenance(env)
@@ -122,7 +135,9 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
     self._watchdog = RunnerWatchdogBridge(self, log_dir)
     # rsl_rl's `learn()` offers no per-iteration hook, so the one logging call it
     # makes is where the diagnostics attach. docs/ppo.md#training-diagnostics
-    self.logger.log = self._log_with_diagnostics(self.logger.log)
+    self.logger.log = self._log_with_diagnostics(  # ty: ignore[invalid-assignment]
+      self.logger.log
+    )
     if log_dir is not None and int(os.environ.get("RANK", "0")) == 0:
       _materialize_provenance(self._controller_provenance, Path(log_dir))
       materialize_effective_training_manifest(self._effective_manifest, Path(log_dir))
@@ -130,7 +145,7 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
         json.dumps(self._training_budget, indent=2) + "\n"
       )
 
-  def _configure_actor_update_mask(self, env) -> None:
+  def _configure_actor_update_mask(self, env: RslRlVecEnvWrapper) -> None:
     """Connect PPO actor updates to the authority applied by the action term."""
     configure = getattr(self.alg, "set_actor_update_mask_source", None)
     if not callable(configure):
@@ -140,10 +155,10 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
       raise TypeError("residual runner requires an mc_rtc residual action")
     configure(lambda: action.actor_update_gate)
 
-  def _log_with_diagnostics(self, log):
+  def _log_with_diagnostics(self, log: Callable[..., Any]) -> Callable[..., Any]:
     """Wrap the logger so every iteration also records the PPO diagnostics."""
 
-    def logging_call(*args, **kwargs):
+    def logging_call(*args: Any, **kwargs: Any) -> Any:
       writer = self.logger.writer
       iteration = kwargs.get("it", args[0] if args else None)
       diagnostics = ppo_diagnostics(self.alg)
@@ -183,7 +198,7 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
     else:
       self._watchdog.completed()
 
-  def save(self, path: str, infos=None) -> None:
+  def save(self, path: str, infos: dict | None = None) -> None:
     """Embed controller inputs in every checkpoint as well as the run directory."""
     achievement = self._achievement.snapshot()
     infos = {

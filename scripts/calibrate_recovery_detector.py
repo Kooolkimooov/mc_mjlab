@@ -9,6 +9,7 @@ from pathlib import Path
 import torch
 from mjlab.envs import ManagerBasedRlEnv
 
+from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
 from mc_mjlab.recovery_authority import (
   FEATURE_NAMES,
   RecoveryCalibration,
@@ -20,7 +21,9 @@ from mc_mjlab.tasks import mdp
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import _make_env_cfg
 
 
-def collect(args) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def collect(
+  args: argparse.Namespace,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
   """Collect feature, push-age, and episode-age tensors with zero residual."""
   cfg = _make_env_cfg(
     "position",
@@ -34,6 +37,7 @@ def collect(args) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
   cfg.events["push_robot"].params["planar_speed"] = args.push_velocity
   env = ManagerBasedRlEnv(cfg, device=args.device)
   term = env.action_manager.get_term("mc_rtc_residual")
+  assert isinstance(term, McRtcResidualActionBase)
   extractor = RecoveryFeatureExtractor(env, term)
   zmp_sensors = mdp._ZmpSensors(env, mdp.GROUND_CONTACT_SENSORS, "robot")
   env_ids = torch.arange(env.num_envs, device=env.device)

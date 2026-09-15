@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 
 def read_config_key(path: Path, key: str) -> str:
@@ -40,5 +42,5 @@ def get_controller_name(path: Path) -> str:
 class _IterItemsDict(dict):
   """``setWrenches`` iterates with Python-2 ``.iteritems()``; alias it."""
 
-  def iteritems(self):
+  def iteritems(self) -> Iterator[tuple[Any, Any]]:
     return iter(self.items())

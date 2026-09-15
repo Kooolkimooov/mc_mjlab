@@ -1,6 +1,7 @@
 """ResidualMPC's task with the residual moved onto the controller's own feedback."""
 
 from dataclasses import fields
+from typing import Any
 
 from mjlab.envs import ManagerBasedRlEnvCfg
 
@@ -30,7 +31,7 @@ def residual_feedback_env_cfg(
   wrench_force_scale: float = WRENCH_FORCE_SCALE,
   wrench_torque_scale: float = WRENCH_TORQUE_SCALE,
   torque_channel: bool = True,
-  **kwargs,
+  **kwargs: Any,
 ) -> ManagerBasedRlEnvCfg:
   """ResidualMPC's env with the action swapped for the residual-feedback one."""
   cfg = residual_mpc_env_cfg(play=play, **kwargs)

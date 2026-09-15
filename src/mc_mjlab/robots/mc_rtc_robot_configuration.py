@@ -5,10 +5,11 @@ from __future__ import annotations
 import dataclasses
 import functools
 from collections.abc import Iterable
+from typing import Any
 
 
 @functools.lru_cache(maxsize=None)
-def get_robot_module(name: str):
+def get_robot_module(name: str) -> Any:
   """The mc_rtc ``RobotModule`` for ``name`` (e.g. ``"RHPS1_MuJoCo"``)."""
   import mc_rbdyn
 

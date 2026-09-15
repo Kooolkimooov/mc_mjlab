@@ -8,6 +8,7 @@ import itertools
 import statistics
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 import torch
 from mjlab.envs import ManagerBasedRlEnv
@@ -52,7 +53,12 @@ def _grid(spec: str) -> list[float]:
   return [float(lo) + step * i for i in range(n)]
 
 
-def evaluate(twist, arm: str, policy, args) -> list[Sample]:
+def evaluate(
+  twist: tuple[float, float, float],
+  arm: str,
+  policy: Any,
+  args: argparse.Namespace,
+) -> list[Sample]:
   """Hold one twist across every environment and score the settled tracking."""
   cfg = residual_mpc_env_cfg(
     num_envs=args.num_envs,

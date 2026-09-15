@@ -9,6 +9,7 @@ import json
 import math
 import random
 import re
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -83,7 +84,9 @@ def resolve_checkpoints(inputs: list[str]) -> list[Path]:
   return sorted((path.resolve() for path in paths), key=key)
 
 
-def scenario_cfg(name: str, seed: int, args) -> ManagerBasedRlEnvCfg:
+def scenario_cfg(
+  name: str, seed: int, args: argparse.Namespace
+) -> ManagerBasedRlEnvCfg:
   """Build a deterministic qualification cfg for one scenario."""
   cfg = _make_env_cfg(
     control=args.control,
@@ -108,7 +111,11 @@ class PairedDisturbances:
   """Apply a deterministic schedule shared by both arms of each episode pair."""
 
   def __init__(
-    self, env, scenario: str, seed: int, achievement_stage_index: int | None = None
+    self,
+    env: ManagerBasedRlEnv,
+    scenario: str,
+    seed: int,
+    achievement_stage_index: int | None = None,
   ) -> None:
     self.env = env
     self.scenario = scenario
@@ -223,7 +230,9 @@ class PairedDisturbances:
     self.remaining[env_ids] = 0
 
 
-def _metric_snapshot(env, done: torch.Tensor) -> dict[str, list[float]]:
+def _metric_snapshot(
+  env: ManagerBasedRlEnv, done: torch.Tensor
+) -> dict[str, list[float]]:
   """Read true episode metric reductions before reset clears their buffers."""
   manager = env.metrics_manager
   counts = manager._step_count[done].float().clamp(min=1.0)
@@ -240,7 +249,7 @@ def _metric_snapshot(env, done: torch.Tensor) -> dict[str, list[float]]:
   return output
 
 
-def _reset_done(env, env_ids: torch.Tensor) -> None:
+def _reset_done(env: ManagerBasedRlEnv, env_ids: torch.Tensor) -> None:
   """Recycle envs without appending an extra observation-history frame."""
   env._reset_idx(env_ids)
   env.scene.write_data_to_sim()
@@ -248,7 +257,7 @@ def _reset_done(env, env_ids: torch.Tensor) -> None:
 
 
 def run_checkpoint(
-  checkpoint: Path, scenario: str, seed: int, args
+  checkpoint: Path, scenario: str, seed: int, args: argparse.Namespace
 ) -> tuple[list[Episode], list[StratumRecord]]:
   """Run one checkpoint and scenario to a fixed paired episode count."""
   torch.manual_seed(seed)
@@ -543,7 +552,7 @@ def summarize(episodes: list[Episode]) -> dict:
 
 
 def _paired_stratum_value(
-  records: list[StratumRecord], value
+  records: list[StratumRecord], value: Callable[[StratumRecord], float]
 ) -> dict[str, float | int | str | dict]:
   """Summarize one stratum value with environment- or seed-clustered pairing."""
   grouped = {

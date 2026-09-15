@@ -36,7 +36,9 @@ class McRtcResidualJointTorqueAction(McRtcResidualActionBase):
   output_channels = ("q", "alpha", "tau")
   residual_unit = "Nm"
 
-  def __init__(self, cfg: McRtcResidualJointTorqueActionCfg, env: ManagerBasedRlEnv):
+  def __init__(
+    self, cfg: McRtcResidualJointTorqueActionCfg, env: ManagerBasedRlEnv
+  ) -> None:
     super().__init__(cfg, env)
 
     # After the base applied `pd_gains_path`, so this copies the real gains.

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 from rsl_rl.models.mlp_model import MLPModel
 from rsl_rl.models.rnn_model import RNNModel
@@ -10,7 +12,7 @@ from rsl_rl.models.rnn_model import RNNModel
 class ZeroInitMLPModel(MLPModel):
   """MLPModel with the final layer's mean rows zeroed after construction."""
 
-  def __init__(self, *args, **kwargs) -> None:
+  def __init__(self, *args: Any, **kwargs: Any) -> None:
     super().__init__(*args, **kwargs)
     zero_mean_head(self)
 
@@ -18,7 +20,7 @@ class ZeroInitMLPModel(MLPModel):
 class ZeroInitRNNModel(RNNModel):
   """RNNModel with the final layer's mean rows zeroed after construction."""
 
-  def __init__(self, *args, **kwargs) -> None:
+  def __init__(self, *args: Any, **kwargs: Any) -> None:
     super().__init__(*args, **kwargs)
     zero_mean_head(self)
 
@@ -36,7 +38,7 @@ def zero_mean_head(model: MLPModel) -> None:
     layers[-1].bias[:mean_rows].zero_()
 
 
-def mean_head_magnitude(model: MLPModel, obs) -> float:
+def mean_head_magnitude(model: MLPModel, obs: Any) -> float:
   """Peak absolute mean action over a batch, for asserting the head really is zero."""
   with torch.no_grad():
     return float(model(obs, stochastic_output=False).abs().max())

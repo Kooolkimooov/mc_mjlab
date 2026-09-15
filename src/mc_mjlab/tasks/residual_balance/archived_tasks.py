@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.tasks.registry import register_mjlab_task
 
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
@@ -20,7 +21,12 @@ from utils.task_naming import get_task_name
 TASK_DIR = Path(__file__).resolve().parent.name
 
 
-def _register(task_id: str, env_cfg, play_env_cfg, recurrent: bool = False) -> None:
+def _register(
+  task_id: str,
+  env_cfg: ManagerBasedRlEnvCfg,
+  play_env_cfg: ManagerBasedRlEnvCfg,
+  recurrent: bool = False,
+) -> None:
   """Register one historical configuration under its original task id."""
   register_mjlab_task(
     task_id=task_id,

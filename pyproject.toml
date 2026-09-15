@@ -86,5 +86,7 @@ indent-width = 2
 target-version = "py313"
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F", "I", "B"]
-ignore = ["B011"]
+select = ["E4", "E7", "E9", "F", "I", "B", "ANN"]
+# ANN401: `Any` is the honest annotation where the untyped mc_rtc bindings cross
+# into Python; ANN requires an annotation, `ty` judges whether it is right.
+ignore = ["B011", "ANN401"]

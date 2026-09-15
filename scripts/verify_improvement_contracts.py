@@ -109,7 +109,7 @@ from mc_mjlab.tasks.zero_init_actor import (
 )
 
 
-def _manifest_probe(_env, gain: float = 2.0):
+def _manifest_probe(_env: Any, gain: float = 2.0) -> float:
   """Provide a callable default for effective-manifest assertions."""
   return gain
 
@@ -160,7 +160,7 @@ class _CountingReward:
     self.values = values
     self.calls = 0
 
-  def __call__(self, _env) -> torch.Tensor:
+  def __call__(self, _env: Any) -> torch.Tensor:
     """Return the configured per-environment values."""
     self.calls += 1
     return self.values
@@ -202,7 +202,7 @@ class _AuditRewardManager:
 class _CurriculumManager(_TermManager):
   """Apply a deterministic fake stage from the restored global counter."""
 
-  def __init__(self, env) -> None:
+  def __init__(self, env: Any) -> None:
     super().__init__()
     self.env = env
     self._curriculum_state = {"torque_margin": 0}
@@ -282,7 +282,7 @@ class _ActionManager:
     self.action_term_dim = [1]
     self.total_action_dim = 1
 
-  def get_term(self, _name: str):
+  def get_term(self, _name: str) -> Any:
     """Return a fake built action term."""
     return self
 
@@ -705,7 +705,7 @@ def verify_episode_length_ladder() -> None:
   finite_impulse_curriculum.__init__ = lambda self, cfg, env: None
   try:
     push = stratified_finite_impulse_curriculum(
-      _TermCfg(
+      _TermCfg(  # ty: ignore[invalid-argument-type]
         func=None,
         params={
           "bands": QUALIFICATION_MATCHED_BANDS,

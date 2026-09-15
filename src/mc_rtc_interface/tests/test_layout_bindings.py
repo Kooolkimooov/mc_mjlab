@@ -5,14 +5,14 @@ import pytest
 import mc_rtc_interface as native
 
 
-def test_controller_access_is_through_the_manager():
+def test_controller_access_is_through_the_manager() -> None:
   assert hasattr(native, "ControllersManager")
   assert not hasattr(native, "ControllersHost")
   assert not hasattr(native, "ControllerInstance")
 
 
 @pytest.mark.parametrize("num_joints", [0, 1, 5])
-def test_layout_joint_channels_do_not_overlap(num_joints):
+def test_layout_joint_channels_do_not_overlap(num_joints: int) -> None:
   layout = native.IoLayout()
   names = [f"joint_{i}" for i in range(num_joints)]
   layout.set_joint_order(names)
@@ -30,7 +30,7 @@ def test_layout_joint_channels_do_not_overlap(num_joints):
   assert layout.output_size == 3 * num_joints + 1
 
 
-def test_nested_layout_retains_its_parent():
+def test_nested_layout_retains_its_parent() -> None:
   layout = native.IoLayout()
   nested = layout.input
   del layout

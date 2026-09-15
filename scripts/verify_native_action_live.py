@@ -12,7 +12,7 @@ from mc_mjlab.tasks.zero_residual.zero_residual_env_cfg import (
 )
 
 
-def measure(mode, seconds, device):
+def measure(mode: str, seconds: float, device: str) -> None:
   """Run a bounded demo and report root height, displacement and reference speed."""
   builder = (
     zero_residual_position_env_cfg
@@ -60,7 +60,7 @@ def measure(mode, seconds, device):
     env.close()
 
 
-def main():
+def main() -> None:
   """Run the selected live actuator mode."""
   parser = argparse.ArgumentParser()
   parser.add_argument("--mode", choices=("position", "torque"), required=True)

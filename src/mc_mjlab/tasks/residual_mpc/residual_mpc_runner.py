@@ -11,7 +11,7 @@ class ResidualMpcOnPolicyRunner(ResidualBalanceOnPolicyRunner):
 
   SEMANTICS_KEY = "action_semantics_version"
 
-  def save(self, path: str, infos=None) -> None:
+  def save(self, path: str, infos: dict | None = None) -> None:
     """Stamp the action-semantics version into every checkpoint."""
     super().save(path, {**(infos or {}), self.SEMANTICS_KEY: ACTION_SEMANTICS_VERSION})
 

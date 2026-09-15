@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from mjlab.envs import ManagerBasedRlEnv
+from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 from mjlab.rl import RslRlVecEnvWrapper
 
 from mc_mjlab.tasks.residual_balance.effective_training_manifest import (
@@ -98,7 +98,7 @@ def _output_path(args: argparse.Namespace) -> Path:
   return OUTPUT_DIR / f"{stem}.json"
 
 
-def _make_cfg(args: argparse.Namespace):
+def _make_cfg(args: argparse.Namespace) -> ManagerBasedRlEnvCfg:
   """Build the requested live environment without changing reward semantics."""
   cfg = _make_env_cfg(
     control=args.control,

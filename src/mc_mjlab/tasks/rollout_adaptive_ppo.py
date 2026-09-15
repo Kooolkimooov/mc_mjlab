@@ -28,7 +28,7 @@ class RolloutAdaptivePPO(PPO):
   last_schedule_kl: float = float("nan")
   last_actor_update_fraction: float = 1.0
 
-  def __init__(self, *args, **kwargs) -> None:
+  def __init__(self, *args: Any, **kwargs: Any) -> None:
     super().__init__(*args, **kwargs)
     self._actor_mask_source: Callable[[], torch.Tensor] | None = None
     self._actor_update_masks = torch.zeros(

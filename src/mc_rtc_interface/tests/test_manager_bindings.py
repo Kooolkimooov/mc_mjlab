@@ -1,6 +1,7 @@
 """Run native manager commands against Python-owned shared-memory rows."""
 
 import os
+from collections.abc import Iterator
 from pathlib import Path
 
 import mc_rbdyn
@@ -8,7 +9,9 @@ import numpy as np
 import pytest
 
 import mc_rtc_interface as native
-from utils.shared_memory import create_shm, row_window
+from utils.shared_memory import ShmHandle, create_shm, row_window
+
+SharedIo = tuple[native.WorkerStartMessage, ShmHandle, ShmHandle]
 
 DIRECT_JOINTS = 17
 
@@ -22,7 +25,7 @@ PROBE_DIR = Path(
 )
 
 
-def make_layout():
+def make_layout() -> native.IoLayout:
   """Prepare the worker layout from the robot module's complete reference order."""
   robot = mc_rbdyn.get_robot_module("HRP5P")
   layout = native.IoLayout()
@@ -34,7 +37,7 @@ def make_layout():
   return layout
 
 
-def make_configuration(tmp_path):
+def make_configuration(tmp_path: Path) -> str:
   """Write the probe controller configuration with isolated plugin loading."""
   config = tmp_path / "mc_rtc.yaml"
   config.write_text(
@@ -47,7 +50,7 @@ def make_configuration(tmp_path):
 
 
 @pytest.fixture
-def shared_io():
+def shared_io() -> Iterator[SharedIo]:
   """Allocate a batch whose uneven worker split exercises row offsets."""
   layout = make_layout()
   layout.input.datastore_scalar = ["set_scalar", "set_hang"]
@@ -69,7 +72,7 @@ def shared_io():
     outputs.unlink()
 
 
-def test_manager_steps_python_owned_rows(tmp_path, shared_io):
+def test_manager_steps_python_owned_rows(tmp_path: Path, shared_io: SharedIo) -> None:
   configuration, inputs, outputs = shared_io
   layout = configuration.layout
   inputs.arr[:, :DIRECT_JOINTS] = np.arange(3)[:, None] * 0.05
@@ -105,7 +108,9 @@ def test_manager_steps_python_owned_rows(tmp_path, shared_io):
   assert (outputs.arr == 42.0).all()
 
 
-def test_uninitialized_step_only_writes_row_status(tmp_path, shared_io):
+def test_uninitialized_step_only_writes_row_status(
+  tmp_path: Path, shared_io: SharedIo
+) -> None:
   configuration, inputs, outputs = shared_io
   status = configuration.layout.output.status_offset()
   outputs.arr[:] = 42.0
@@ -122,7 +127,7 @@ def test_uninitialized_step_only_writes_row_status(tmp_path, shared_io):
     ).all()
 
 
-def test_manager_respawns_wedged_worker(tmp_path, shared_io):
+def test_manager_respawns_wedged_worker(tmp_path: Path, shared_io: SharedIo) -> None:
   configuration, inputs, outputs = shared_io
   layout = configuration.layout
   scalar = layout.input.datastore_scalar_offset()
@@ -154,7 +159,9 @@ def test_manager_respawns_wedged_worker(tmp_path, shared_io):
     )
 
 
-def test_qp_failure_latches_until_row_reset(tmp_path, shared_io):
+def test_qp_failure_latches_until_row_reset(
+  tmp_path: Path, shared_io: SharedIo
+) -> None:
   configuration, inputs, outputs = shared_io
   layout = configuration.layout
   scalar = layout.input.datastore_scalar_offset()
@@ -179,7 +186,9 @@ def test_qp_failure_latches_until_row_reset(tmp_path, shared_io):
     assert outputs.arr[0, layout.output.datastore_scalar_offset()] == 3.0
 
 
-def test_context_manager_closes_on_python_exception(tmp_path, shared_io):
+def test_context_manager_closes_on_python_exception(
+  tmp_path: Path, shared_io: SharedIo
+) -> None:
   configuration, _, _ = shared_io
   with pytest.raises(ValueError, match="probe"):
     with native.ControllersManager(

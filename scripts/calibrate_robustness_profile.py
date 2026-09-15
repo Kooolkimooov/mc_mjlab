@@ -7,7 +7,7 @@ import gc
 import statistics
 
 import torch
-from mjlab.envs import ManagerBasedRlEnv
+from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import _make_env_cfg
@@ -26,7 +26,7 @@ PROFILES = (
 )
 
 
-def select_components(cfg, profile: str) -> None:
+def select_components(cfg: ManagerBasedRlEnvCfg, profile: str) -> None:
   """Keep only the requested stage-one randomization component."""
   selected = set(EVENT_COMPONENTS) if profile == "all" else {profile}
   for component, event_name in EVENT_COMPONENTS.items():
@@ -42,7 +42,7 @@ def select_components(cfg, profile: str) -> None:
       actuator.delay_max_lag = 0
 
 
-def run_profile(profile: str, args) -> dict[str, float]:
+def run_profile(profile: str, args: argparse.Namespace) -> dict[str, float]:
   """Run one no-residual cohort to its first termination or time limit."""
   stage = 0 if profile == "nominal" else 1
   cfg = _make_env_cfg(
