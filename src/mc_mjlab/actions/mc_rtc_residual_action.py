@@ -135,7 +135,7 @@ class McRtcResidualActionBase(BaseAction):
 
   def _build_bridge(self, cfg: McRtcResidualActionCfg) -> None:
     """Bind the simulation bridge, declare its datastore columns and load PD gains."""
-    self._io = SimControllerBridge(
+    self._bridge = SimControllerBridge(
       self._env,
       self._entity,
       self._target_names,
@@ -145,20 +145,20 @@ class McRtcResidualActionBase(BaseAction):
       cfg.entity_name,
     )
 
-    self._io.layout.output.datastore_scalar = list(
+    self._bridge.layout.output.datastore_scalar = list(
       dict.fromkeys(cfg.datastore_scalar_outputs)
     )
 
-    self._io.layout.output.datastore_vector3 = list(
+    self._bridge.layout.output.datastore_vector3 = list(
       dict.fromkeys(cfg.datastore_vectors_outputs)
     )
 
     # Declared before the command pairs, which append their setters after these.
-    self._io.layout.input.datastore_scalar = list(
+    self._bridge.layout.input.datastore_scalar = list(
       dict.fromkeys(cfg.datastore_scalar_inputs)
     )
 
-    self._io.layout.input.datastore_vector3 = list(
+    self._bridge.layout.input.datastore_vector3 = list(
       dict.fromkeys(cfg.datastore_vectors_inputs)
     )
 
@@ -177,7 +177,7 @@ class McRtcResidualActionBase(BaseAction):
     if cfg.pd_gains_path is not None:
       apply_reference_pd_gains(
         self._entity,
-        self._io.layout.input.joint_order,
+        self._bridge.layout.input.joint_order,
         self._target_names,
         cfg.pd_gains_path,
       )
@@ -185,14 +185,14 @@ class McRtcResidualActionBase(BaseAction):
   def _start_controllers(self, cfg: McRtcResidualActionCfg) -> None:
     """Map the shared-memory blocks, start the worker pool and initialize every row."""
     # Both sizes count the datastore columns declared above; keep this after them.
-    self._input_memory = create_shm((self.num_envs, self._io.layout.input_size))
-    self._output_memory = create_shm((self.num_envs, self._io.layout.output_size))
+    self._input_memory = create_shm((self.num_envs, self._bridge.layout.input_size))
+    self._output_memory = create_shm((self.num_envs, self._bridge.layout.output_size))
     self._in_np = self._input_memory.arr
     self._out_np = self._output_memory.arr
-    self._io.fill_controller_input(self._in_np)
+    self._bridge.fill_controller_input(self._in_np)
 
     configuration = native.WorkerStartMessage(
-      self._io.layout,
+      self._bridge.layout,
       native.SharedMemoryDescription(*row_window(self._input_memory, 0, self.num_envs)),
       native.SharedMemoryDescription(
         *row_window(self._output_memory, 0, self.num_envs)
@@ -223,14 +223,14 @@ class McRtcResidualActionBase(BaseAction):
 
     self._manager.dispatch(native.Command.Initialize)
     failed = self._manager.collect()
-    status = self._out_np[:, self._io.layout.output.status_offset()]
+    status = self._out_np[:, self._bridge.layout.output.status_offset()]
 
     if failed or np.any(status != int(native.OutputLayout.Status.OK)):
       raise RuntimeError(
         "native controller initialization failed; verify configured numeric "
         "datastore callbacks and the mc_mjlab controller adapter "
-        f"(vectors={list(self._io.layout.output.datastore_vector3)}, "
-        f"scalars={list(self._io.layout.output.datastore_scalar)})"
+        f"(vectors={list(self._bridge.layout.output.datastore_vector3)}, "
+        f"scalars={list(self._bridge.layout.output.datastore_scalar)})"
       )
 
     all_envs = list(range(self.num_envs))
@@ -274,7 +274,7 @@ class McRtcResidualActionBase(BaseAction):
       self._manager.close()
 
     self._manager = None
-    self._io.release_views()
+    self._bridge.release_views()
     self._in_np = self._out_np = None
 
     for name in ("_input_memory", "_output_memory"):
@@ -384,10 +384,10 @@ class McRtcResidualActionBase(BaseAction):
   def _setup_datastore_outputs(self, cfg: McRtcResidualActionCfg) -> None:
     """Resolve the collected getter columns and their latched readouts."""
     self._datastore_vector_output_columns = output_columns(
-      self._io.layout, cfg.datastore_vectors_outputs, "vector3"
+      self._bridge.layout, cfg.datastore_vectors_outputs, "vector3"
     )
     self._datastore_scalar_output_columns = output_columns(
-      self._io.layout, cfg.datastore_scalar_outputs, "scalar"
+      self._bridge.layout, cfg.datastore_scalar_outputs, "scalar"
     )
     # Whole-controller vectors: latched as collected, no ramp (see the cfg).
     self._datastore_vector_outputs = {
@@ -402,10 +402,10 @@ class McRtcResidualActionBase(BaseAction):
   def _setup_datastore_inputs(self, cfg: McRtcResidualActionCfg) -> None:
     """Resolve the unconditionally fed setter columns and their value buffers."""
     self._datastore_scalar_input_columns = input_columns(
-      self._io.layout, dict.fromkeys(cfg.datastore_scalar_inputs), "scalar"
+      self._bridge.layout, dict.fromkeys(cfg.datastore_scalar_inputs), "scalar"
     )
     self._datastore_vector_input_columns = input_columns(
-      self._io.layout, dict.fromkeys(cfg.datastore_vectors_inputs), "vector3"
+      self._bridge.layout, dict.fromkeys(cfg.datastore_vectors_inputs), "vector3"
     )
     # Every declared setter is written each period from the first step on, so a
     # task that declares one owns its value from then on. docs/coupling.md
@@ -817,7 +817,7 @@ class McRtcResidualActionBase(BaseAction):
 
     # Sample the current state and dispatch this period's solve without
     # blocking; it overlaps the next `frameskip` substeps of sim.
-    self._io.fill_controller_input(self._in_np)
+    self._bridge.fill_controller_input(self._in_np)
     write_inputs(
       self._in_np,
       self._datastore_scalar_input_columns,
@@ -837,9 +837,9 @@ class McRtcResidualActionBase(BaseAction):
     )
 
     self._dispatch_resets[:] = self._pending_reset
-    self._in_np[:, self._io.layout.input.reset_offset()] = self._dispatch_resets
+    self._in_np[:, self._bridge.layout.input.reset_offset()] = self._dispatch_resets
     # An unserviced row must never look like a fresh successful result.
-    self._out_np[:, self._io.layout.output.status_offset()] = int(
+    self._out_np[:, self._bridge.layout.output.status_offset()] = int(
       native.OutputLayout.Status.WORKER_FAILED
     )
     self._manager.dispatch(native.Command.Step)
@@ -856,7 +856,7 @@ class McRtcResidualActionBase(BaseAction):
 
     # Merge the worker failures into the block itself, so the single upload
     # below carries the final status and no mask has to cross separately.
-    status_column = self._out_np[:, self._io.layout.output.status_offset()]
+    status_column = self._out_np[:, self._bridge.layout.output.status_offset()]
     status_column[failed] = int(native.OutputLayout.Status.WORKER_FAILED)
     status = status_column.copy()
 
@@ -868,8 +868,8 @@ class McRtcResidualActionBase(BaseAction):
     self._datastore_vector_input_commands.reset(failed_indices)
     env_indices = np.flatnonzero(status == int(native.OutputLayout.Status.OK)).tolist()
 
-    block = self._io.upload_controller_output(self._out_np)
-    status_t = block[:, self._io.layout.output.status_offset()]
+    block = self._bridge.upload_controller_output(self._out_np)
+    status_t = block[:, self._bridge.layout.output.status_offset()]
     ok = status_t == int(native.OutputLayout.Status.OK)
     self.controller_failed |= status_t == int(native.OutputLayout.Status.QP_FAILED)
     self.controller_worker_failed |= status_t == int(
@@ -879,7 +879,7 @@ class McRtcResidualActionBase(BaseAction):
     # Every status is OK, QP_FAILED or WORKER_FAILED: fresh output means OK.
     self._has_staged_control.copy_(ok)
     fresh = ok.unsqueeze(-1)
-    for channel, values in self._io.read_controller_output(block).items():
+    for channel, values in self._bridge.read_controller_output(block).items():
       staged = self._staged_control[channel]
       staged.copy_(torch.where(fresh, values, staged))
 
