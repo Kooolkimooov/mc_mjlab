@@ -70,7 +70,7 @@ selected interpreter's environment.
 
 An action can read extra numbers out of mc_rtc through its datastore, on top of
 the joint channels every task uses. This is **optional and opt-in**: a task asks
-for entries by listing aliases in `controller_vectors` / `controller_scalars`,
+for entries by listing aliases in `datastore_vectors_outputs` / `datastore_scalar_outputs`,
 both empty by default — the zero-residual demo lists nothing and runs with the
 datastore untouched. A task names known entries in those lists; a getter that
 does not exist yet is added to `instance_datastore_plugin`.

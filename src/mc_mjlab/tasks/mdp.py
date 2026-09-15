@@ -295,14 +295,16 @@ def controller_planned_com_velocity(
   env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
 ) -> torch.Tensor:
   """The CoM velocity the controller's plan calls for."""
-  return _residual_term(env, action_name).controller_vector(CONTROL_COM_VEL)
+  return _residual_term(env, action_name).datastore_vector_output(CONTROL_COM_VEL)
 
 
 def controller_walking_reference_velocity(
   env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
 ) -> torch.Tensor:
   """Current ``(vx, vy, yaw_rate)`` command reported by the walking controller."""
-  return _residual_term(env, action_name).controller_vector(WALKING_REF_VEL_GETTER)
+  return _residual_term(env, action_name).datastore_vector_output(
+    WALKING_REF_VEL_GETTER
+  )
 
 
 def base_progress_tanh(
@@ -470,7 +472,9 @@ class _ZmpSensors:
     data = env.sim.data
     com = data.subtree_com[:, self.root_body_id]
     com_vel = data.subtree_linvel[:, self.root_body_id]
-    commanded = _residual_term(env, action_name).controller_vector(CONTROL_COM_VEL)
+    commanded = _residual_term(env, action_name).datastore_vector_output(
+      CONTROL_COM_VEL
+    )
     omega = torch.sqrt(GRAVITY / com[:, 2].clamp(min=MIN_COM_HEIGHT)).unsqueeze(-1)
     offset = (com_vel[:, :2] - commanded[:, :2]) / omega - measured
     return torch.linalg.vector_norm(offset, dim=1), normal_force
@@ -499,9 +503,10 @@ def planned_zmp_offset(
 ) -> torch.Tensor:
   """The controller's own CoM-to-ZMP offset, the target side of the comparison."""
   term = _residual_term(env, action_name)
-  return (term.controller_vector(PLANNED_ZMP) - term.controller_vector(CONTROL_COM))[
-    :, :2
-  ]
+  return (
+    term.datastore_vector_output(PLANNED_ZMP)
+    - term.datastore_vector_output(CONTROL_COM)
+  )[:, :2]
 
 
 def foot_load_share(
@@ -664,9 +669,9 @@ class com_velocity_tracking:
   ) -> torch.Tensor:
     del asset_cfg  # Resolved at init.
     term = _residual_term(env, action_name)
-    error = env.sim.data.subtree_linvel[:, self._root_body_id] - term.controller_vector(
-      CONTROL_COM_VEL
-    )
+    error = env.sim.data.subtree_linvel[
+      :, self._root_body_id
+    ] - term.datastore_vector_output(CONTROL_COM_VEL)
     horizontal = torch.linalg.vector_norm(error[:, :2], dim=1)
     vertical = error[:, 2].abs()
     return 0.5 * (
@@ -692,9 +697,9 @@ class com_velocity_error:
   ) -> torch.Tensor:
     del asset_cfg  # Resolved at init.
     term = _residual_term(env, action_name)
-    error = env.sim.data.subtree_linvel[:, self._root_body_id] - term.controller_vector(
-      CONTROL_COM_VEL
-    )
+    error = env.sim.data.subtree_linvel[
+      :, self._root_body_id
+    ] - term.datastore_vector_output(CONTROL_COM_VEL)
     return torch.linalg.vector_norm(error, dim=1)
 
 

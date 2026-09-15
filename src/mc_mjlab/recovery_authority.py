@@ -76,7 +76,7 @@ class RecoveryFeatureExtractor:
     total_force = force_w.sum(dim=1)
     com = data.subtree_com[:, self.root_body_id]
     com_vel = data.subtree_linvel[:, self.root_body_id]
-    commanded = self.term.controller_vector(CONTROL_COM_VEL)
+    commanded = self.term.datastore_vector_output(CONTROL_COM_VEL)
     normal_force = total_force[:, 2].clamp(min=20.0)
     site_pos = data.site_xpos[:, self.site_ids]
     lever = site_pos - com.unsqueeze(1)

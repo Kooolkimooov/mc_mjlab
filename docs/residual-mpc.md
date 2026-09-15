@@ -1184,7 +1184,7 @@ pass. The existence check now runs after `init`; the binding-capability check
 stays at configure, being ordering-independent.
 
 **Raising it changes nothing measurable.** Held at `0.3` through
-`datastore_scalar_holds` and swept in-process, the envelope is identical to the
+`datastore_scalar_input_holds` and swept in-process, the envelope is identical to the
 installed `0.1` to three decimals. Cells are mean tracking *error* in `m/s`, not
 achieved speed: a `0.60` command reading `0.515` achieved `0.085`.
 
@@ -1193,7 +1193,7 @@ achieved speed: a `0.60` command reading `0.515` achieved `0.085`.
 | `mean_speed = 0.1` | 0.071 | 0.136 | 0.319 | 0.515 |
 | `mean_speed = 0.3` | 0.075 | 0.138 | 0.320 | 0.516 |
 
-**The knob arrives and is ignored.** Read back through `controller_scalars`
+**The knob arrives and is ignored.** Read back through `datastore_scalar_output`
 from inside a running simulation while commanding `0.6 m/s`:
 
 ```
@@ -1287,5 +1287,5 @@ switch were removed in the native migration; re-evaluate against native workers.
 resolved.
 
 **History:**
-- 2026-08-31 — added the scalar entries and `datastore_scalar_holds`; the
+- 2026-08-31 — added the scalar entries and `datastore_scalar_input_holds`; the
   runtime path works standalone and fails inside the worker pool.

@@ -95,15 +95,15 @@ def controller_contact_phases(env: ManagerBasedRlEnv) -> torch.Tensor:
   """Four flat-foot phases from live ISMPC timing and support side."""
   action = _action(env)
   return contact_phases(
-    action.controller_scalar(STEP_TIME_CALLBACK),
-    action.controller_scalar(STEP_DURATION_CALLBACK),
-    action.controller_scalar(SUPPORT_FOOT_CALLBACK),
+    action.datastore_scalar_output(STEP_TIME_CALLBACK),
+    action.datastore_scalar_output(STEP_DURATION_CALLBACK),
+    action.datastore_scalar_output(SUPPORT_FOOT_CALLBACK),
   )
 
 
 def controller_qp_objective(env: ManagerBasedRlEnv) -> torch.Tensor:
   """Last valid ISMPC QP objective."""
-  return _action(env).controller_scalar(QP_OBJECTIVE_CALLBACK).unsqueeze(-1)
+  return _action(env).datastore_scalar_output(QP_OBJECTIVE_CALLBACK).unsqueeze(-1)
 
 
 def linear_velocity_tracking(

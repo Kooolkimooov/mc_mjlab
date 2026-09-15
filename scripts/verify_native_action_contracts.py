@@ -231,11 +231,15 @@ def verify_pipeline() -> None:
   action._target_ids = torch.tensor([0, 1])
   action._io = io
   io._output_channels = action.output_channels
-  action._datastore_scalar_commands = ()
-  action._vector_commands = DatastoreCommands(io.layout, 2, (), "vector3")
-  action._scalar_commands = DatastoreCommands(io.layout, 2, (), "scalar")
-  action._vector_columns = output_columns(io.layout, (), "vector3")
-  action._scalar_columns = output_columns(io.layout, (), "scalar")
+  action._datastore_scalar_input_command_pairs = ()
+  action._datastore_vector_input_commands = DatastoreCommands(
+    io.layout, 2, (), "vector3"
+  )
+  action._datastore_scalar_input_commands = DatastoreCommands(
+    io.layout, 2, (), "scalar"
+  )
+  action._datastore_vector_output_columns = output_columns(io.layout, (), "vector3")
+  action._datastore_scalar_output_columns = output_columns(io.layout, (), "scalar")
   action._alloc_interpolation_buffers()
   action._in_np = np.zeros((2, io.layout.input_size))
   action._out_np = np.zeros((2, io.layout.output_size))
@@ -244,10 +248,10 @@ def verify_pipeline() -> None:
   action._pending_reset = np.zeros(2, dtype=bool)
   action._dispatch_resets = np.zeros(2, dtype=bool)
   action._substep = 0
-  action._vector_command_active = torch.zeros(2, 0, dtype=torch.bool)
-  action._vector_command_values = torch.empty(2, 0)
-  action._datastore_scalar_active = torch.empty(2, 0, dtype=torch.bool)
-  action._datastore_scalar_delta = torch.empty(2, 0)
+  action._datastore_vector_input_active = torch.zeros(2, 0, dtype=torch.bool)
+  action._datastore_vector_input_values = torch.empty(2, 0)
+  action._datastore_scalar_input_active = torch.empty(2, 0, dtype=torch.bool)
+  action._datastore_scalar_input_delta = torch.empty(2, 0)
   action._processed_actions = torch.zeros(2, 2)
   action._last_gate = torch.ones(2)
   action._torque_peak = torch.zeros(2, 2)
@@ -263,8 +267,8 @@ def verify_pipeline() -> None:
   action._walking_reference_requested = torch.empty(2, 0)
   action._previous_walking_reference_executed = torch.empty(2, 0)
   action._previous_gate = torch.ones(2)
-  action._datastore_scalar_holds = ()
-  action._datastore_scalar_hold_values = torch.empty(0)
+  action._datastore_scalar_input_holds = ()
+  action._datastore_scalar_input_hold_values = torch.empty(0)
   action._recovery_authority = None
   applied = []
 

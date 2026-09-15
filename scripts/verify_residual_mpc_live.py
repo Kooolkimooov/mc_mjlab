@@ -51,9 +51,9 @@ def main() -> None:
       assert bool(torch.isfinite(term.nominal_torque).all())
       assert bool(torch.isfinite(term.residual_torque).all())
       assert bool(
-        torch.isfinite(term.controller_scalar(mdp.QP_OBJECTIVE_CALLBACK)).all()
+        torch.isfinite(term.datastore_scalar_output(mdp.QP_OBJECTIVE_CALLBACK)).all()
       )
-      support = term.controller_scalar(mdp.SUPPORT_FOOT_CALLBACK)
+      support = term.datastore_scalar_output(mdp.SUPPORT_FOOT_CALLBACK)
       assert bool(((support == 0.0) | (support == 1.0)).all())
       phase = mdp.controller_contact_phases(env)
       assert bool(((phase >= 0.0) & (phase <= 1.0)).all())

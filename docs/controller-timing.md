@@ -30,7 +30,7 @@ datastore binding changes.
 - 2026-08-25 — enumerated 43 total datastore entries and 31 walking entries
   from the live installed controller without invoking a setter.
 
-## datastore_scalar_commands
+## datastore_scalar_input_commands
 
 **Current:** the shared-memory transport accepts paired scalar getter/setters.
 Each active command is a delta from a baseline captured inside its worker. The

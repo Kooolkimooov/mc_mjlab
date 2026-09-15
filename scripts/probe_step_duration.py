@@ -45,7 +45,7 @@ def dcm_error_vector(
   measured, normal_force = sensors.measured_offset(env)
   com = env.sim.data.subtree_com[:, root]
   com_vel = env.sim.data.subtree_linvel[:, root]
-  commanded = term.controller_vector(mdp.CONTROL_COM_VEL)[:, :2]
+  commanded = term.datastore_vector_output(mdp.CONTROL_COM_VEL)[:, :2]
   omega = torch.sqrt(mdp.GRAVITY / com[:, 2].clamp(min=mdp.MIN_COM_HEIGHT))
   error = (com_vel[:, :2] - commanded) / omega.unsqueeze(-1) - measured
   return error, normal_force >= 20.0
@@ -96,7 +96,7 @@ def probe_step_duration(args: argparse.Namespace) -> list[DurationResult]:
   cfg.events["encoder_bias"].params["bias_range"] = (0.0, 0.0)
   cfg.events["push_robot"].params["enabled"] = False
   action_cfg = cast(McRtcResidualActionCfg, cfg.actions["mc_rtc_residual"])
-  action_cfg.datastore_scalar_commands = (STEP_TIME_CALLBACKS,)
+  action_cfg.datastore_scalar_input_commands = (STEP_TIME_CALLBACKS,)
   env = ManagerBasedRlEnv(cfg, device=args.device)
   step_dt = env.step_dt
   term = env.action_manager.get_term("mc_rtc_residual")
@@ -130,7 +130,7 @@ def probe_step_duration(args: argparse.Namespace) -> list[DurationResult]:
       gate = term.last_gate.clone()
       requested = delta_by_env * gate
       command_active = alive & (gate > 0.0) & (delta_by_env != 0.0)
-      term.set_datastore_scalar_delta(STEP_TIME_GETTER, command_active, requested)
+      term.set_datastore_scalar_input_delta(STEP_TIME_GETTER, command_active, requested)
       elapsed[alive] += 1
       _, _, terminated, time_outs, _ = env.step(action)
 
@@ -144,10 +144,10 @@ def probe_step_duration(args: argparse.Namespace) -> list[DurationResult]:
 
       enabled = alive & (term.last_gate > 0.0) & (delta_by_env != 0.0)
       was_commanded |= enabled
-      command_baseline[enabled] = term.controller_scalar_baseline(STEP_TIME_GETTER)[
-        enabled
-      ]
-      applied = term.controller_scalar(STEP_TIME_GETTER) - command_baseline
+      command_baseline[enabled] = term.datastore_scalar_output_baseline(
+        STEP_TIME_GETTER
+      )[enabled]
+      applied = term.datastore_scalar_output(STEP_TIME_GETTER) - command_baseline
       applied_sum[enabled] += applied[enabled].double().abs()
       applied_count[enabled] += 1.0
       restored = (

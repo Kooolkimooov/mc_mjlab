@@ -51,12 +51,14 @@ class WalkingReferenceMixin(McRtcResidualActionBase):
   walking_reference_is_absolute: bool = False
   """Whether the setter takes a target rather than an offset from the nominal."""
 
-  def _setup_datastore_vector_commands(self, cfg: McRtcResidualActionCfg) -> None:
-    super()._setup_datastore_vector_commands(cfg)
-    self._datastore_vector_commands = (
+  def _setup_datastore_vector_input_commands(self, cfg: McRtcResidualActionCfg) -> None:
+    super()._setup_datastore_vector_input_commands(cfg)
+    self._datastore_vector_input_command_pairs = (
       (WALKING_REF_VEL_GETTER, WALKING_REF_VEL_SETTER),
     )
-    self._datastore_vector_command_is_absolute = (self.walking_reference_is_absolute,)
+    self._datastore_vector_input_command_is_absolute = (
+      self.walking_reference_is_absolute,
+    )
     self._walking_reference_requested = torch.zeros(
       self.num_envs, 3, device=self.device
     )
@@ -70,8 +72,8 @@ class WalkingReferenceMixin(McRtcResidualActionBase):
       self.num_envs, dtype=torch.bool, device=self.device
     )
     # Aliases, not copies: the base writes these straight into the input block.
-    self._vector_command_active = self._walking_reference_active
-    self._vector_command_values = self._walking_reference_executed
+    self._datastore_vector_input_active = self._walking_reference_active
+    self._datastore_vector_input_values = self._walking_reference_executed
 
   def _reset_action_extensions(self, env_ids: torch.Tensor | slice) -> None:
     super()._reset_action_extensions(env_ids)

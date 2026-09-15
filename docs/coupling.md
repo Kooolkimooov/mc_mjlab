@@ -91,8 +91,9 @@ measurements and failure evidence are in [the historical notes](coupling-history
 ## DatastoreCommands
 
 **Current:** there is no alias layer. A task names native callbacks directly in
-`datastore_vectors_outputs` / `datastore_scalar_outputs`, and `controller_vector`
-/ `controller_scalar` read them back under the same names. The adapter's four
+`datastore_vectors_outputs` / `datastore_scalar_outputs`, and
+`datastore_vector_output` / `datastore_scalar_output` read them back under the
+same names. The adapter's four
 getters are constants in `mc_mjlab/controller_datastore.py` (`PLANNED_ZMP`,
 `CONTROL_COM`, `CONTROL_COM_VEL`, `SUPPORT_FOOT`); a controller's own getters are
 constants in the task that reads them, as `residual_mpc/mdp.py` holds the

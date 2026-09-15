@@ -56,7 +56,7 @@ absolute target, adding no action dimensions.
 - 2026-09-15 — split out of `McRtcResidualActionCfg`. The two modes had been
   mutually exclusive fields guarded by a runtime `ValueError`; they are now two
   classes, and the base action carries three generic extension hooks
-  (`_setup_datastore_vector_commands`, `_setup_action_extensions`,
+  (`_setup_datastore_vector_input_commands`, `_setup_action_extensions`,
   `_process_action_extensions`, `_reset_action_extensions`) instead of any
   walking state.
 

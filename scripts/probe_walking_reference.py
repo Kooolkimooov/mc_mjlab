@@ -41,7 +41,7 @@ def dcm_error_vector(
   measured, normal_force = sensors.measured_offset(env)
   com = env.sim.data.subtree_com[:, root]
   com_vel = env.sim.data.subtree_linvel[:, root]
-  commanded = term.controller_vector(mdp.CONTROL_COM_VEL)[:, :2]
+  commanded = term.datastore_vector_output(mdp.CONTROL_COM_VEL)[:, :2]
   omega = torch.sqrt(mdp.GRAVITY / com[:, 2].clamp(min=mdp.MIN_COM_HEIGHT))
   error = (com_vel[:, :2] - commanded) / omega.unsqueeze(-1) - measured
   return error, normal_force >= 20.0
@@ -116,7 +116,7 @@ def probe_walking_reference(args: argparse.Namespace) -> list[GainResult]:
     impulse_fired = False
     while bool(active.any()):
       if not impulse_fired and int(elapsed.max()) >= impulse_step:
-        nominal_command.copy_(term.controller_vector(mdp.WALKING_REF_VEL))
+        nominal_command.copy_(term.datastore_vector_output(mdp.WALKING_REF_VEL))
         apply_fixed_impulse(env, args.push_speed, args.push_height, args.push_duration)
         impulse_fired = True
       error, grounded = dcm_error_vector(env, sensors, term)
@@ -154,7 +154,7 @@ def probe_walking_reference(args: argparse.Namespace) -> list[GainResult]:
 
   results = []
   restore_error = torch.linalg.vector_norm(
-    term.controller_vector(mdp.WALKING_REF_VEL) - nominal_command, dim=1
+    term.datastore_vector_output(mdp.WALKING_REF_VEL) - nominal_command, dim=1
   )
   for gain in gains:
     cohort = gain_by_env == gain
