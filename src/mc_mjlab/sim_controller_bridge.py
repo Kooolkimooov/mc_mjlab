@@ -76,6 +76,159 @@ class SimControllerBridge:
     self._clear_state_feedback_offsets()
     self._alloc_device_buffers(env.num_envs)
 
+  # Simulation to controller.
+
+  def fill_controller_input(self, rows: np.ndarray) -> None:
+    """Write biased encoders, measured effort, local root pose and raw sensors."""
+    block = self._input_block
+    self._fill_joint_columns(block)
+    self._fill_root_columns(block)
+    self._fill_sensor_columns(block)
+    self._apply_state_feedback_offsets(block)
+
+    # Last: every step above reads the root rotation as mjlab wxyz, native wants xyzw.
+    ro = self.layout.input.root_offset()
+    block[:, ro + 3 : ro + 7] = block[:, self._quat_xyzw_t]
+
+    self._host_view(rows, "input")[:, : self._input_width].copy_(block)
+
+  def _fill_joint_columns(self, block: torch.Tensor) -> None:
+    """Scatter encoders, velocities and measured effort into reference order."""
+    layout = self.layout.input
+    count = len(layout.joint_order)
+    entity = self._entity.data
+
+    # The reference-order stance was written once; only simulated slots vary.
+    block[:, layout.q_offset() + self._ref_cols_t] = _f64(
+      entity.joint_pos_biased[:, self._sim_cols_t]
+    )
+    for offset, data in (
+      (layout.qd_offset(), entity.joint_vel[:, self._sim_cols_t]),
+      (layout.tau_offset(), self._env.sim.data.qfrc_actuator[:, self._dof_cols_t]),
+    ):
+      block[:, offset : offset + count] = 0.0
+      block[:, offset + self._ref_cols_t] = _f64(data)
+
+    for offset, feedback in (
+      (layout.q_offset(), self._feedback_offset),
+      (layout.qd_offset(), self._joint_velocity_offset),
+    ):
+      if feedback is not None:
+        block[:, offset + self._target_cols_t] += _f64(feedback)
+
+  def _fill_root_columns(self, block: torch.Tensor) -> None:
+    """Write the root pose and linear velocity, local to this env's origin."""
+    layout = self.layout.input
+    ro = layout.root_offset()
+
+    if self._root_qpos_adr >= 0:
+      qa, da = self._root_qpos_adr, self._root_dof_adr
+      block[:, ro : ro + 7] = self._env.sim.data.qpos[:, qa : qa + 7]
+      block[:, ro + 7 : ro + 10] = self._env.sim.data.qvel[:, da : da + 3]
+    else:
+      data = self._entity.data
+      block[:, ro : ro + 3] = data.root_link_pos_w
+      block[:, ro + 3 : ro + 7] = data.root_link_quat_w
+      block[:, ro + 7 : ro + 10] = data.root_link_lin_vel_w
+
+    block[:, ro : ro + 3] -= self._env.scene.env_origins
+
+  def _fill_sensor_columns(self, block: torch.Tensor) -> None:
+    """Scatter the routed sensor triples, synthesizing FloatingBase from the root."""
+    layout = self.layout.input
+
+    block[:, layout.body_sensors_offset() : self._input_width] = 0.0
+    if self._sens_src_cols:
+      block[:, self._sens_dst_t] = _f64(
+        self._env.sim.data.sensordata[:, self._sens_src_t]
+      )
+
+    if _FLOATING_BASE in layout.body_sensors and self._root_dof_adr >= 0:
+      index = layout.body_sensors.index(_FLOATING_BASE)
+      off = layout.body_sensors_offset() + _SENSOR_STRIDE * index
+      da = self._root_dof_adr
+      block[:, off : off + 3] = self._env.sim.data.qvel[:, da + 3 : da + 6]
+      block[:, off + 3 : off + 6] = self._env.sim.data.qacc[:, da : da + 3]
+
+  def _apply_state_feedback_offsets(self, block: torch.Tensor) -> None:
+    """Apply feedback while the root quaternion is still wxyz."""
+    layout = self.layout.input
+    ro = layout.root_offset()
+
+    if self._wrench_offset is not None:
+      off = layout.force_sensors_offset()
+      width = _SENSOR_STRIDE * len(layout.force_sensors)
+      block[:, off : off + width] += self._wrench_offset
+
+    if self._root_translation_offset is not None:
+      block[:, ro : ro + 3] += self._root_translation_offset
+
+    if self._root_rotation_offset is None:
+      return
+
+    # The body sensors read in the root frame, so they turn the opposite way.
+    for i, name in enumerate(layout.body_sensors):
+      if name == _FLOATING_BASE:
+        continue
+      for j in (0, _TRIPLE):
+        off = layout.body_sensors_offset() + _SENSOR_STRIDE * i + j
+        block[:, off : off + _TRIPLE] = _rotate_by_rotvec(
+          block[:, off : off + _TRIPLE], -self._root_rotation_offset
+        )
+    block[:, ro + 3 : ro + 7] = _compose_small_rotation(
+      block[:, ro + 3 : ro + 7], self._root_rotation_offset
+    )
+
+  # Controller to simulation.
+
+  def upload_controller_output(self, rows: np.ndarray) -> torch.Tensor:
+    """Copy the whole output block to the device; every gather then runs there."""
+    if self._output_block is None or self._output_block.shape != rows.shape:
+      self._output_block = torch.empty(
+        rows.shape, dtype=torch.float64, device=self._device
+      )
+    self._output_block.copy_(self._host_view(rows, "output"))
+    return self._output_block
+
+  def read_controller_output(self, block: torch.Tensor) -> dict[str, torch.Tensor]:
+    """Gather action joints and expose native qd as the public alpha channel."""
+    layout = self.layout.output
+    offsets = {
+      "q": layout.q_offset(),
+      "alpha": layout.qd_offset(),
+      "tau": layout.tau_offset(),
+    }
+    dtype = torch.get_default_dtype()
+    return {
+      c: block[:, offsets[c] + self._target_cols_t].to(dtype)
+      for c in self._output_channels
+    }
+
+  # State feedback: what the controller is told, not what the simulation measured.
+
+  def set_feedback_offset(self, offset: torch.Tensor | None) -> None:
+    """Bias the joint positions the controller sees, in target order."""
+    self._feedback_offset = offset
+
+  def set_joint_velocity_offset(self, offset: torch.Tensor | None) -> None:
+    """Bias the joint velocities the controller sees, in target order."""
+    self._joint_velocity_offset = offset
+
+  def set_wrench_offset(self, offset: torch.Tensor | None) -> None:
+    """Bias every force-sensor wrench the controller sees."""
+    self._wrench_offset = offset
+
+  def set_root_pose_offset(
+    self, translation: torch.Tensor | None, rotation: torch.Tensor | None
+  ) -> None:
+    """Bias the root pose the controller sees, rotation as a body-frame rotvec."""
+    self._root_translation_offset = translation
+    self._root_rotation_offset = rotation
+
+  def release_views(self) -> None:
+    """Drop the shared-block views so the blocks can be unlinked."""
+    self._views = {}
+
   # Setup: resolve every index once, so a control period is pure gather/scatter.
 
   def _resolve_joint_columns(
@@ -155,6 +308,14 @@ class SimControllerBridge:
       self._sens_src_cols.extend(range(source, source + _TRIPLE))
       self._sens_dst_cols.extend(range(destination, destination + _TRIPLE))
 
+  def _clear_state_feedback_offsets(self) -> None:
+    """Start every modality neutral; the action sets only the ones it owns."""
+    self._feedback_offset = None
+    self._joint_velocity_offset = None
+    self._root_translation_offset = None
+    self._root_rotation_offset = None
+    self._wrench_offset = None
+
   def _alloc_device_buffers(self, num_envs: int) -> None:
     """Stage whole I/O blocks on the device so each period costs one copy."""
     layout = self.layout.input
@@ -195,164 +356,3 @@ class SimControllerBridge:
       self._views[key] = (view, rows)
       return view
     return cached[0]
-
-  def release_views(self) -> None:
-    """Drop the shared-block views so the blocks can be unlinked."""
-    self._views = {}
-
-  # Simulation to controller.
-
-  def fill_controller_input(self, rows: np.ndarray) -> None:
-    """Write biased encoders, measured effort, local root pose and raw sensors."""
-    block = self._input_block
-    self._fill_joint_columns(block)
-    self._fill_root_columns(block)
-    self._fill_sensor_columns(block)
-    self._apply_state_feedback_offsets(block)
-
-    # Last: every step above reads the root rotation as mjlab wxyz, native wants xyzw.
-    ro = self.layout.input.root_offset()
-    block[:, ro + 3 : ro + 7] = block[:, self._quat_xyzw_t]
-
-    self._host_view(rows, "input")[:, : self._input_width].copy_(block)
-
-  def _fill_joint_columns(self, block: torch.Tensor) -> None:
-    """Scatter encoders, velocities and measured effort into reference order."""
-    layout = self.layout.input
-    count = len(layout.joint_order)
-    entity = self._entity.data
-
-    # The reference-order stance was written once; only simulated slots vary.
-    block[:, layout.q_offset() + self._ref_cols_t] = _f64(
-      entity.joint_pos_biased[:, self._sim_cols_t]
-    )
-    for offset, data in (
-      (layout.qd_offset(), entity.joint_vel[:, self._sim_cols_t]),
-      (layout.tau_offset(), self._env.sim.data.qfrc_actuator[:, self._dof_cols_t]),
-    ):
-      block[:, offset : offset + count] = 0.0
-      block[:, offset + self._ref_cols_t] = _f64(data)
-
-    for offset, feedback in (
-      (layout.q_offset(), self._feedback_offset),
-      (layout.qd_offset(), self._joint_velocity_offset),
-    ):
-      if feedback is not None:
-        block[:, offset + self._target_cols_t] += _f64(feedback)
-
-  def _fill_root_columns(self, block: torch.Tensor) -> None:
-    """Write the root pose and linear velocity, local to this env's origin."""
-    layout = self.layout.input
-    ro = layout.root_offset()
-
-    if self._root_qpos_adr >= 0:
-      qa, da = self._root_qpos_adr, self._root_dof_adr
-      block[:, ro : ro + 7] = self._env.sim.data.qpos[:, qa : qa + 7]
-      block[:, ro + 7 : ro + 10] = self._env.sim.data.qvel[:, da : da + 3]
-    else:
-      data = self._entity.data
-      block[:, ro : ro + 3] = data.root_link_pos_w
-      block[:, ro + 3 : ro + 7] = data.root_link_quat_w
-      block[:, ro + 7 : ro + 10] = data.root_link_lin_vel_w
-
-    block[:, ro : ro + 3] -= self._env.scene.env_origins
-
-  def _fill_sensor_columns(self, block: torch.Tensor) -> None:
-    """Scatter the routed sensor triples, synthesizing FloatingBase from the root."""
-    layout = self.layout.input
-
-    block[:, layout.body_sensors_offset() : self._input_width] = 0.0
-    if self._sens_src_cols:
-      block[:, self._sens_dst_t] = _f64(
-        self._env.sim.data.sensordata[:, self._sens_src_t]
-      )
-
-    if _FLOATING_BASE in layout.body_sensors and self._root_dof_adr >= 0:
-      index = layout.body_sensors.index(_FLOATING_BASE)
-      off = layout.body_sensors_offset() + _SENSOR_STRIDE * index
-      da = self._root_dof_adr
-      block[:, off : off + 3] = self._env.sim.data.qvel[:, da + 3 : da + 6]
-      block[:, off + 3 : off + 6] = self._env.sim.data.qacc[:, da : da + 3]
-
-  # Controller to simulation.
-
-  def upload_controller_output(self, rows: np.ndarray) -> torch.Tensor:
-    """Copy the whole output block to the device; every gather then runs there."""
-    if self._output_block is None or self._output_block.shape != rows.shape:
-      self._output_block = torch.empty(
-        rows.shape, dtype=torch.float64, device=self._device
-      )
-    self._output_block.copy_(self._host_view(rows, "output"))
-    return self._output_block
-
-  def read_controller_output(self, block: torch.Tensor) -> dict[str, torch.Tensor]:
-    """Gather action joints and expose native qd as the public alpha channel."""
-    layout = self.layout.output
-    offsets = {
-      "q": layout.q_offset(),
-      "alpha": layout.qd_offset(),
-      "tau": layout.tau_offset(),
-    }
-    dtype = torch.get_default_dtype()
-    return {
-      c: block[:, offsets[c] + self._target_cols_t].to(dtype)
-      for c in self._output_channels
-    }
-
-  # State feedback: what the controller is told, not what the simulation measured.
-
-  def _clear_state_feedback_offsets(self) -> None:
-    """Start every modality neutral; the action sets only the ones it owns."""
-    self._feedback_offset = None
-    self._joint_velocity_offset = None
-    self._root_translation_offset = None
-    self._root_rotation_offset = None
-    self._wrench_offset = None
-
-  def set_feedback_offset(self, offset: torch.Tensor | None) -> None:
-    """Bias the joint positions the controller sees, in target order."""
-    self._feedback_offset = offset
-
-  def set_joint_velocity_offset(self, offset: torch.Tensor | None) -> None:
-    """Bias the joint velocities the controller sees, in target order."""
-    self._joint_velocity_offset = offset
-
-  def set_wrench_offset(self, offset: torch.Tensor | None) -> None:
-    """Bias every force-sensor wrench the controller sees."""
-    self._wrench_offset = offset
-
-  def set_root_pose_offset(
-    self, translation: torch.Tensor | None, rotation: torch.Tensor | None
-  ) -> None:
-    """Bias the root pose the controller sees, rotation as a body-frame rotvec."""
-    self._root_translation_offset = translation
-    self._root_rotation_offset = rotation
-
-  def _apply_state_feedback_offsets(self, block: torch.Tensor) -> None:
-    """Apply feedback while the root quaternion is still wxyz."""
-    layout = self.layout.input
-    ro = layout.root_offset()
-
-    if self._wrench_offset is not None:
-      off = layout.force_sensors_offset()
-      width = _SENSOR_STRIDE * len(layout.force_sensors)
-      block[:, off : off + width] += self._wrench_offset
-
-    if self._root_translation_offset is not None:
-      block[:, ro : ro + 3] += self._root_translation_offset
-
-    if self._root_rotation_offset is None:
-      return
-
-    # The body sensors read in the root frame, so they turn the opposite way.
-    for i, name in enumerate(layout.body_sensors):
-      if name == _FLOATING_BASE:
-        continue
-      for j in (0, _TRIPLE):
-        off = layout.body_sensors_offset() + _SENSOR_STRIDE * i + j
-        block[:, off : off + _TRIPLE] = _rotate_by_rotvec(
-          block[:, off : off + _TRIPLE], -self._root_rotation_offset
-        )
-    block[:, ro + 3 : ro + 7] = _compose_small_rotation(
-      block[:, ro + 3 : ro + 7], self._root_rotation_offset
-    )

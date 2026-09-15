@@ -120,6 +120,318 @@ class McRtcResidualActionBase(BaseAction):
       self.close()
       raise
 
+  def process_actions(self, actions: torch.Tensor) -> None:
+    self._previous_executed_physical.copy_(self._executed_physical)
+    self._previous_residual_raw_actions.copy_(self._residual_raw_actions)
+    self._previous_gate.copy_(self._last_gate)
+
+    self._raw_actions.copy_(actions)
+    residual = actions[:, : self._residual_action_dim]
+    self._residual_raw_actions.copy_(residual)
+    self._processed_actions.copy_(residual * self._scale + self._offset)
+    if self.cfg.clip is not None:
+      self._processed_actions.copy_(
+        torch.clamp(
+          self._processed_actions,
+          min=self._clip[:, :, 0],
+          max=self._clip[:, :, 1],
+        )
+      )
+
+    if self._recovery_authority is not None:
+      self._last_gate.copy_(self._recovery_authority.update())
+    self._actor_update_gate.copy_(self._last_gate)
+
+    self._process_action_extensions(actions)
+
+    if self._print_every:
+      self._print_pending = True
+
+  def apply_actions(self) -> None:
+    substep_in_period = self._substep % self.cfg.frameskip
+    self._substep += 1
+    if substep_in_period == 0:
+      self._advance_control_period()
+
+    # coef=1 on the last substep gives the full new target, matching mc_mujoco.
+    interpolation_coef = (substep_in_period + 1) / self.cfg.frameskip
+    interpolated_control = {}
+    for channel in self.output_channels:
+      torch.lerp(
+        self._previous_control[channel],
+        self._next_control[channel],
+        interpolation_coef,
+        out=self._interpolated[channel],
+      )
+      interpolated_control[channel] = self._interpolated[channel]
+
+    # Peak-held across the decimation window: what sizes an actuator is the worst
+    # instant, and apply_actions runs before sim.step so this trails by a substep.
+    torch.maximum(
+      self._torque_peak,
+      self._entity.data.qfrc_actuator[:, self._target_ids].abs(),
+      out=self._torque_peak,
+    )
+
+    residual = self._processed_actions * self._last_gate.unsqueeze(-1)
+    if self._residual_ids is not None:
+      # Scatter into the full target width; non-matched joints get 0, i.e. pure
+      # mc_rtc tracking.
+      self._residual_full.zero_()
+      self._residual_full[:, self._residual_ids] = residual
+      residual = self._residual_full
+
+    executed, projected = self._apply_control(interpolated_control, residual)
+    if self._residual_ids is None:
+      self._executed_physical.copy_(executed)
+      self._projection_mask.copy_(projected)
+    else:
+      self._executed_physical.copy_(executed[:, self._residual_ids])
+      self._projection_mask.copy_(projected[:, self._residual_ids])
+
+    if self._print_pending:
+      self._print_residual()
+      self._print_pending = False
+
+  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+    super().reset(env_ids=env_ids)
+
+    self._collect_controller_output()
+
+    if env_ids is None:
+      env_ids = slice(None)
+
+    self._torque_peak[env_ids] = 0.0
+    self._last_gate[env_ids] = 0.0 if self._recovery_authority is not None else 1.0
+    self._previous_gate[env_ids] = self._last_gate[env_ids]
+    # PPO reads the transition gate after terminal environments auto-reset.
+    self._executed_physical[env_ids] = 0.0
+    self._previous_executed_physical[env_ids] = 0.0
+    self._residual_raw_actions[env_ids] = 0.0
+    self._previous_residual_raw_actions[env_ids] = 0.0
+    self._projection_mask[env_ids] = False
+    self._reset_action_extensions(env_ids)
+
+    if self._recovery_authority is not None:
+      self._recovery_authority.reset(env_ids)
+
+    if isinstance(env_ids, slice):
+      env_indices = list(range(self.num_envs))[env_ids]
+    else:
+      env_indices = env_ids.tolist()
+
+    self._manager.respawn(env_indices)
+    self._pending_reset[env_indices] = True
+
+    # Seed interpolation (subclass-specific rest value per channel) and discard
+    # any staged output for the reset envs; they restart from that seed.
+    rows = torch.tensor(env_indices, device=self.device, dtype=torch.long)
+    self._seed_interpolation(rows)
+    self._has_staged_control[rows] = False
+
+    for readouts in (self._datastore_vector_outputs, self._datastore_scalar_outputs):
+      for values in readouts.values():
+        values[rows] = 0.0
+    self._datastore_output_fresh[rows] = False
+
+    # Episode latches clear now; the queued native reset still has to complete.
+    self.controller_failed[rows] = False
+    self.controller_worker_failed[rows] = False
+
+  def close(self) -> None:
+    """Stop the manager before releasing either shared-memory block."""
+    if self._finalizer is not None:
+      self._finalizer()
+      self._finalizer = None
+      self._input_memory = self._output_memory = None
+    elif self._manager is not None:
+      self._manager.close()
+
+    self._manager = None
+    self._bridge.release_views()
+    self._in_np = self._out_np = None
+
+    for name in ("_input_memory", "_output_memory"):
+      memory = getattr(self, name, None)
+      if memory is not None:
+        memory.unlink()
+        setattr(self, name, None)
+
+  def _advance_control_period(self) -> None:
+    """Collect the finished solve, roll the ramp endpoints and dispatch the next."""
+    assert self._manager is not None
+    assert self._in_np is not None and self._out_np is not None
+
+    # Collect the previous period's dispatch (it solved while the intervening
+    # sim substeps ran) before reusing the shared I/O blocks.
+    self._collect_controller_output()
+
+    # Masked, not indexed: a boolean gather's data-dependent shape would sync.
+    fresh = self._has_staged_control.unsqueeze(-1)
+    for channel in self.output_channels:
+      scratch = self._swap_scratch[channel]
+      torch.where(
+        fresh, self._next_control[channel], self._previous_control[channel], out=scratch
+      )
+      self._previous_control[channel].copy_(scratch)
+      torch.where(
+        fresh, self._staged_control[channel], self._next_control[channel], out=scratch
+      )
+      self._next_control[channel].copy_(scratch)
+    self._has_staged_control.zero_()
+
+    # Sample the current state and dispatch this period's solve without
+    # blocking; it overlaps the next `frameskip` substeps of sim.
+    self._bridge.fill_controller_input(self._in_np)
+    write_inputs(
+      self._in_np,
+      self._datastore_scalar_input_columns,
+      self._datastore_scalar_input_feed,
+      "scalar",
+    )
+    write_inputs(
+      self._in_np,
+      self._datastore_vector_input_columns,
+      self._datastore_vector_input_feed,
+      "vector3",
+    )
+
+    self._dispatch_resets[:] = self._pending_reset
+    self._in_np[:, self._bridge.layout.input.reset_offset()] = self._dispatch_resets
+    # An unserviced row must never look like a fresh successful result.
+    self._out_np[:, self._bridge.layout.output.status_offset()] = int(
+      native.OutputLayout.Status.WORKER_FAILED
+    )
+    self._manager.dispatch(native.Command.Step)
+    self._pending_dispatch = True
+
+  def _collect_controller_output(self) -> None:
+    """Await the outstanding async step (if any) and stage its outputs."""
+    if not self._pending_dispatch:
+      return
+    assert self._manager is not None and self._out_np is not None
+
+    failed = self._manager.collect()
+    self._pending_dispatch = False
+
+    # Merge the worker failures into the block itself, so the single upload
+    # below carries the final status and no mask has to cross separately.
+    status_column = self._out_np[:, self._bridge.layout.output.status_offset()]
+    status_column[failed] = int(native.OutputLayout.Status.WORKER_FAILED)
+    status = status_column.copy()
+
+    worker_failed = status == int(native.OutputLayout.Status.WORKER_FAILED)
+    self._pending_reset[self._dispatch_resets & ~worker_failed] = False
+    self._pending_reset[worker_failed] = True
+
+    block = self._bridge.upload_controller_output(self._out_np)
+    status_t = block[:, self._bridge.layout.output.status_offset()]
+    ok = status_t == int(native.OutputLayout.Status.OK)
+    self.controller_failed |= status_t == int(native.OutputLayout.Status.QP_FAILED)
+    self.controller_worker_failed |= status_t == int(
+      native.OutputLayout.Status.WORKER_FAILED
+    )
+
+    # Every status is OK, QP_FAILED or WORKER_FAILED: fresh output means OK.
+    self._has_staged_control.copy_(ok)
+    fresh = ok.unsqueeze(-1)
+    for channel, values in self._bridge.read_controller_output(block).items():
+      staged = self._staged_control[channel]
+      staged.copy_(torch.where(fresh, values, staged))
+
+    self._latch_datastore_outputs(block, ok)
+
+  @abc.abstractmethod
+  def _seed_interpolation(self, env_ids: torch.Tensor) -> None:
+    """Seed the interpolation endpoints for the given (reset) envs."""
+    raise NotImplementedError
+
+  @abc.abstractmethod
+  def _apply_control(
+    self, interpolated_control: dict[str, torch.Tensor], residual: torch.Tensor
+  ) -> tuple[torch.Tensor, torch.Tensor]:
+    """Write targets and return full-width executed residual and projection mask."""
+    raise NotImplementedError
+
+  def _setup_action_extensions(self, cfg: McRtcResidualActionCfg) -> None:
+    """Append extra action dimensions past the residual; the base has none."""
+
+  def _process_action_extensions(self, actions: torch.Tensor) -> None:
+    """Consume the action dimensions past ``_residual_action_dim``."""
+
+  def _reset_action_extensions(self, env_ids: torch.Tensor | slice) -> None:
+    """Clear extension state for the given (reset) envs."""
+
+  def controller_reference(self, channel: str) -> torch.Tensor:
+    """Latest raw controller output for ``channel``, residual excluded."""
+    return self._next_control[channel]
+
+  def datastore_scalar_output(self, getter: str) -> torch.Tensor:
+    """Latest scalar datastore getter value collected from each controller."""
+    try:
+      return self._datastore_scalar_outputs[getter]
+    except KeyError:
+      raise KeyError(
+        f"datastore scalar output {getter!r} is not configured; add it to the "
+        f"action term's `datastore_scalar_outputs` "
+        f"(have: {sorted(self._datastore_scalar_outputs)})"
+      ) from None
+
+  def datastore_vector_output(self, getter: str) -> torch.Tensor:
+    """Latest ``(num_envs, 3)`` value of one collected vector datastore getter."""
+    try:
+      return self._datastore_vector_outputs[getter]
+    except KeyError:
+      raise KeyError(
+        f"datastore vector output {getter!r} is not collected; add it to the "
+        f"action term's `datastore_vectors_outputs` "
+        f"(have: {sorted(self._datastore_vector_outputs)})"
+      ) from None
+
+  def datastore_scalar_input(self, setter: str) -> torch.Tensor:
+    """Value currently fed to one configured scalar datastore setter."""
+    index = self._datastore_input_index(
+      self._datastore_scalar_input_columns, setter, "scalar"
+    )
+    return self._datastore_scalar_input_feed[:, index]
+
+  def datastore_vector_input(self, setter: str) -> torch.Tensor:
+    """Value currently fed to one configured vector datastore setter."""
+    index = self._datastore_input_index(
+      self._datastore_vector_input_columns, setter, "vectors"
+    )
+    return self._datastore_vector_input_feed[:, index]
+
+  def set_datastore_scalar_input(self, setter: str, values: torch.Tensor) -> None:
+    """Feed one scalar datastore setter; the value holds until set again."""
+    index = self._datastore_input_index(
+      self._datastore_scalar_input_columns, setter, "scalar"
+    )
+    if tuple(values.shape) != (self.num_envs,):
+      raise ValueError(
+        f"datastore scalar input shape {tuple(values.shape)}, "
+        f"expected {(self.num_envs,)}"
+      )
+    self._datastore_scalar_input_feed[:, index].copy_(values)
+
+  def set_datastore_vector_input(self, setter: str, values: torch.Tensor) -> None:
+    """Feed one vector datastore setter; the value holds until set again."""
+    index = self._datastore_input_index(
+      self._datastore_vector_input_columns, setter, "vectors"
+    )
+    if tuple(values.shape) != (self.num_envs, 3):
+      raise ValueError(
+        f"datastore vector input shape {tuple(values.shape)}, "
+        f"expected {(self.num_envs, 3)}"
+      )
+    self._datastore_vector_input_feed[:, index].copy_(values)
+
+  def consume_torque_peak(self) -> torch.Tensor:
+    """Peak |joint torque| since the last call, over the target joints; resets it."""
+    peak = self._torque_peak.clone()
+    self._torque_peak.zero_()
+    return peak
+
   def _validate_cfg(self, cfg: McRtcResidualActionCfg) -> None:
     """Reject configurations the shared-memory pipeline cannot honour."""
     if cfg.frameskip <= 0 or self._env.cfg.decimation % cfg.frameskip:
@@ -244,36 +556,6 @@ class McRtcResidualActionBase(BaseAction):
       self._previous_gate.zero_()
       self._actor_update_gate.zero_()
 
-  @staticmethod
-  def _release_controller(
-    manager: native.ControllersManager,
-    input_memory: ShmHandle,
-    output_memory: ShmHandle,
-  ) -> None:
-    """Release workers before the memory they may still be accessing."""
-    manager.close()
-    input_memory.unlink()
-    output_memory.unlink()
-
-  def close(self) -> None:
-    """Stop the manager before releasing either shared-memory block."""
-    if self._finalizer is not None:
-      self._finalizer()
-      self._finalizer = None
-      self._input_memory = self._output_memory = None
-    elif self._manager is not None:
-      self._manager.close()
-
-    self._manager = None
-    self._bridge.release_views()
-    self._in_np = self._out_np = None
-
-    for name in ("_input_memory", "_output_memory"):
-      memory = getattr(self, name, None)
-      if memory is not None:
-        memory.unlink()
-        setattr(self, name, None)
-
   def _setup_residual(self, cfg: McRtcResidualActionCfg) -> None:
     """Slice scale/offset/clip down to the residual actuator subset."""
     self._residual_ids: torch.Tensor | None = None
@@ -361,21 +643,6 @@ class McRtcResidualActionBase(BaseAction):
       ).unsqueeze(0),
     )
 
-  def _latch_datastore_outputs(self, block: torch.Tensor, ok: torch.Tensor) -> None:
-    """Latch the collected getters of every environment the block is fresh for."""
-    self._datastore_output_fresh.copy_(ok)
-    for kind, columns, destination in (
-      (
-        "vector3",
-        self._datastore_vector_output_columns,
-        self._datastore_vector_outputs,
-      ),
-      ("scalar", self._datastore_scalar_output_columns, self._datastore_scalar_outputs),
-    ):
-      mask = ok.unsqueeze(-1) if kind == "vector3" else ok
-      for name, value in read_outputs(block, columns, kind).items():
-        destination[name].copy_(torch.where(mask, value, destination[name]))
-
   def _setup_datastore_outputs(self, cfg: McRtcResidualActionCfg) -> None:
     """Resolve the collected getter columns and their latched readouts."""
     self._datastore_vector_output_columns = output_columns(
@@ -415,56 +682,6 @@ class McRtcResidualActionBase(BaseAction):
     self._datastore_vector_input_feed = torch.zeros(
       self.num_envs, len(self._datastore_vector_input_columns), 3, device=self.device
     )
-
-  def _datastore_input_index(
-    self, columns: dict[str, int], setter: str, kind: str
-  ) -> int:
-    """Position of one configured setter in its input value buffer."""
-    try:
-      return list(columns).index(setter)
-    except ValueError:
-      raise KeyError(
-        f"datastore {kind} input {setter!r} is not configured; add it to the "
-        f"action term's `datastore_{kind}_inputs` (have: {sorted(columns)})"
-      ) from None
-
-  def datastore_scalar_input(self, setter: str) -> torch.Tensor:
-    """Value currently fed to one configured scalar datastore setter."""
-    index = self._datastore_input_index(
-      self._datastore_scalar_input_columns, setter, "scalar"
-    )
-    return self._datastore_scalar_input_feed[:, index]
-
-  def datastore_vector_input(self, setter: str) -> torch.Tensor:
-    """Value currently fed to one configured vector datastore setter."""
-    index = self._datastore_input_index(
-      self._datastore_vector_input_columns, setter, "vectors"
-    )
-    return self._datastore_vector_input_feed[:, index]
-
-  def set_datastore_scalar_input(self, setter: str, values: torch.Tensor) -> None:
-    """Feed one scalar datastore setter; the value holds until set again."""
-    index = self._datastore_input_index(
-      self._datastore_scalar_input_columns, setter, "scalar"
-    )
-    if tuple(values.shape) != (self.num_envs,):
-      raise ValueError(
-        f"datastore scalar input shape {tuple(values.shape)}, "
-        f"expected {(self.num_envs,)}"
-      )
-    self._datastore_scalar_input_feed[:, index].copy_(values)
-
-  def set_datastore_vector_input(self, setter: str, values: torch.Tensor) -> None:
-    """Feed one vector datastore setter; the value holds until set again."""
-    index = self._datastore_input_index(
-      self._datastore_vector_input_columns, setter, "vectors"
-    )
-    if tuple(values.shape) != (self.num_envs, 3):
-      raise ValueError(
-        f"datastore vector input shape {tuple(values.shape)}, "
-        f"expected {(self.num_envs, 3)}"
-      )
-    self._datastore_vector_input_feed[:, index].copy_(values)
 
   def _setup_residual_printing(self, cfg: McRtcResidualActionCfg) -> None:
     """Resolve the printout interval and the column labels it prints once."""
@@ -525,58 +742,71 @@ class McRtcResidualActionBase(BaseAction):
       self.num_envs, dtype=torch.bool, device=self.device
     )
 
-  def _setup_action_extensions(self, cfg: McRtcResidualActionCfg) -> None:
-    """Append extra action dimensions past the residual; the base has none."""
+  def _latch_datastore_outputs(self, block: torch.Tensor, ok: torch.Tensor) -> None:
+    """Latch the collected getters of every environment the block is fresh for."""
+    self._datastore_output_fresh.copy_(ok)
+    for kind, columns, destination in (
+      (
+        "vector3",
+        self._datastore_vector_output_columns,
+        self._datastore_vector_outputs,
+      ),
+      ("scalar", self._datastore_scalar_output_columns, self._datastore_scalar_outputs),
+    ):
+      mask = ok.unsqueeze(-1) if kind == "vector3" else ok
+      for name, value in read_outputs(block, columns, kind).items():
+        destination[name].copy_(torch.where(mask, value, destination[name]))
 
-  def _process_action_extensions(self, actions: torch.Tensor) -> None:
-    """Consume the action dimensions past ``_residual_action_dim``."""
-
-  def _reset_action_extensions(self, env_ids: torch.Tensor | slice) -> None:
-    """Clear extension state for the given (reset) envs."""
-
-  @abc.abstractmethod
-  def _seed_interpolation(self, env_ids: torch.Tensor) -> None:
-    """Seed the interpolation endpoints for the given (reset) envs."""
-    raise NotImplementedError
-
-  @abc.abstractmethod
-  def _apply_control(
-    self, interpolated_control: dict[str, torch.Tensor], residual: torch.Tensor
-  ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Write targets and return full-width executed residual and projection mask."""
-    raise NotImplementedError
-
-  def controller_reference(self, channel: str) -> torch.Tensor:
-    """Latest raw controller output for ``channel``, residual excluded."""
-    return self._next_control[channel]
-
-  def datastore_vector_output(self, getter: str) -> torch.Tensor:
-    """Latest ``(num_envs, 3)`` value of one collected vector datastore getter."""
+  def _datastore_input_index(
+    self, columns: dict[str, int], setter: str, kind: str
+  ) -> int:
+    """Position of one configured setter in its input value buffer."""
     try:
-      return self._datastore_vector_outputs[getter]
-    except KeyError:
+      return list(columns).index(setter)
+    except ValueError:
       raise KeyError(
-        f"datastore vector output {getter!r} is not collected; add it to the "
-        f"action term's `datastore_vectors_outputs` "
-        f"(have: {sorted(self._datastore_vector_outputs)})"
+        f"datastore {kind} input {setter!r} is not configured; add it to the "
+        f"action term's `datastore_{kind}_inputs` (have: {sorted(columns)})"
       ) from None
 
-  def datastore_scalar_output(self, getter: str) -> torch.Tensor:
-    """Latest scalar datastore getter value collected from each controller."""
-    try:
-      return self._datastore_scalar_outputs[getter]
-    except KeyError:
-      raise KeyError(
-        f"datastore scalar output {getter!r} is not configured; add it to the "
-        f"action term's `datastore_scalar_outputs` "
-        f"(have: {sorted(self._datastore_scalar_outputs)})"
-      ) from None
+  def _print_residual(self) -> None:
+    """One line of env 0's residual, throttled by ``print_residual_every``."""
+    if self._print_countdown:
+      self._print_countdown -= 1
+      return
+    self._print_countdown = self._print_every - 1
 
-  def consume_torque_peak(self) -> torch.Tensor:
-    """Peak |joint torque| since the last call, over the target joints; resets it."""
-    peak = self._torque_peak.clone()
-    self._torque_peak.zero_()
-    return peak
+    values = self._executed_physical[0].detach().cpu().tolist()
+    if self._print_header_pending:
+      # Lazily, on the first line: a header printed at construction would be
+      # buried under mc_rtc's own startup logging long before the first frame.
+      unit = f" [{self.residual_unit}]" if self.residual_unit else ""
+      print(
+        f"[residual] env 0, every {self._print_every} policy step(s){unit}; * = clipped"
+      )
+      print("[residual] " + " ".join(f"{n:>6s} " for n in self._print_names) + "   |r|")
+      self._print_header_pending = False
+
+    limit = self._print_limit
+    cells = [
+      f"{v:+.3f}" + ("*" if limit is not None and abs(v) >= 0.999 * limit[j] else " ")
+      for j, v in enumerate(values)
+    ]
+    norm = sum(v * v for v in values) ** 0.5
+    # Flushed: Python block-buffers into a pipe while spdlog writes to fd 1, so
+    # unflushed the two interleave wrongly. docs/coupling.md#console-output
+    print("[residual] " + " ".join(cells) + f" {norm:6.3f}", flush=True)
+
+  @staticmethod
+  def _release_controller(
+    manager: native.ControllersManager,
+    input_memory: ShmHandle,
+    output_memory: ShmHandle,
+  ) -> None:
+    """Release workers before the memory they may still be accessing."""
+    manager.close()
+    input_memory.unlink()
+    output_memory.unlink()
 
   @property
   def processed_action(self) -> torch.Tensor:
@@ -673,233 +903,3 @@ class McRtcResidualActionBase(BaseAction):
       effort = effort[:, self._residual_ids]
       limit = limit[:, self._residual_ids]
     return effort / limit.clamp_min(torch.finfo(effort.dtype).eps)
-
-  def process_actions(self, actions: torch.Tensor) -> None:
-    self._previous_executed_physical.copy_(self._executed_physical)
-    self._previous_residual_raw_actions.copy_(self._residual_raw_actions)
-    self._previous_gate.copy_(self._last_gate)
-
-    self._raw_actions.copy_(actions)
-    residual = actions[:, : self._residual_action_dim]
-    self._residual_raw_actions.copy_(residual)
-    self._processed_actions.copy_(residual * self._scale + self._offset)
-    if self.cfg.clip is not None:
-      self._processed_actions.copy_(
-        torch.clamp(
-          self._processed_actions,
-          min=self._clip[:, :, 0],
-          max=self._clip[:, :, 1],
-        )
-      )
-
-    if self._recovery_authority is not None:
-      self._last_gate.copy_(self._recovery_authority.update())
-    self._actor_update_gate.copy_(self._last_gate)
-
-    self._process_action_extensions(actions)
-
-    if self._print_every:
-      self._print_pending = True
-
-  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
-    super().reset(env_ids=env_ids)
-
-    self._collect_controller_output()
-
-    if env_ids is None:
-      env_ids = slice(None)
-
-    self._torque_peak[env_ids] = 0.0
-    self._last_gate[env_ids] = 0.0 if self._recovery_authority is not None else 1.0
-    self._previous_gate[env_ids] = self._last_gate[env_ids]
-    # PPO reads the transition gate after terminal environments auto-reset.
-    self._executed_physical[env_ids] = 0.0
-    self._previous_executed_physical[env_ids] = 0.0
-    self._residual_raw_actions[env_ids] = 0.0
-    self._previous_residual_raw_actions[env_ids] = 0.0
-    self._projection_mask[env_ids] = False
-    self._reset_action_extensions(env_ids)
-
-    if self._recovery_authority is not None:
-      self._recovery_authority.reset(env_ids)
-
-    if isinstance(env_ids, slice):
-      env_indices = list(range(self.num_envs))[env_ids]
-    else:
-      env_indices = env_ids.tolist()
-
-    self._manager.respawn(env_indices)
-    self._pending_reset[env_indices] = True
-
-    # Seed interpolation (subclass-specific rest value per channel) and discard
-    # any staged output for the reset envs; they restart from that seed.
-    rows = torch.tensor(env_indices, device=self.device, dtype=torch.long)
-    self._seed_interpolation(rows)
-    self._has_staged_control[rows] = False
-
-    for readouts in (self._datastore_vector_outputs, self._datastore_scalar_outputs):
-      for values in readouts.values():
-        values[rows] = 0.0
-    self._datastore_output_fresh[rows] = False
-
-    # Episode latches clear now; the queued native reset still has to complete.
-    self.controller_failed[rows] = False
-    self.controller_worker_failed[rows] = False
-
-  def apply_actions(self) -> None:
-    substep_in_period = self._substep % self.cfg.frameskip
-    self._substep += 1
-    if substep_in_period == 0:
-      self._advance_control_period()
-
-    # coef=1 on the last substep gives the full new target, matching mc_mujoco.
-    interpolation_coef = (substep_in_period + 1) / self.cfg.frameskip
-    interpolated_control = {}
-    for channel in self.output_channels:
-      torch.lerp(
-        self._previous_control[channel],
-        self._next_control[channel],
-        interpolation_coef,
-        out=self._interpolated[channel],
-      )
-      interpolated_control[channel] = self._interpolated[channel]
-
-    # Peak-held across the decimation window: what sizes an actuator is the worst
-    # instant, and apply_actions runs before sim.step so this trails by a substep.
-    torch.maximum(
-      self._torque_peak,
-      self._entity.data.qfrc_actuator[:, self._target_ids].abs(),
-      out=self._torque_peak,
-    )
-
-    residual = self._processed_actions * self._last_gate.unsqueeze(-1)
-    if self._residual_ids is not None:
-      # Scatter into the full target width; non-matched joints get 0, i.e. pure
-      # mc_rtc tracking.
-      self._residual_full.zero_()
-      self._residual_full[:, self._residual_ids] = residual
-      residual = self._residual_full
-
-    executed, projected = self._apply_control(interpolated_control, residual)
-    if self._residual_ids is None:
-      self._executed_physical.copy_(executed)
-      self._projection_mask.copy_(projected)
-    else:
-      self._executed_physical.copy_(executed[:, self._residual_ids])
-      self._projection_mask.copy_(projected[:, self._residual_ids])
-
-    if self._print_pending:
-      self._print_residual()
-      self._print_pending = False
-
-  def _advance_control_period(self) -> None:
-    """Collect the finished solve, roll the ramp endpoints and dispatch the next."""
-    assert self._manager is not None
-    assert self._in_np is not None and self._out_np is not None
-
-    # Collect the previous period's dispatch (it solved while the intervening
-    # sim substeps ran) before reusing the shared I/O blocks.
-    self._collect_controller_output()
-
-    # Masked, not indexed: a boolean gather's data-dependent shape would sync.
-    fresh = self._has_staged_control.unsqueeze(-1)
-    for channel in self.output_channels:
-      scratch = self._swap_scratch[channel]
-      torch.where(
-        fresh, self._next_control[channel], self._previous_control[channel], out=scratch
-      )
-      self._previous_control[channel].copy_(scratch)
-      torch.where(
-        fresh, self._staged_control[channel], self._next_control[channel], out=scratch
-      )
-      self._next_control[channel].copy_(scratch)
-    self._has_staged_control.zero_()
-
-    # Sample the current state and dispatch this period's solve without
-    # blocking; it overlaps the next `frameskip` substeps of sim.
-    self._bridge.fill_controller_input(self._in_np)
-    write_inputs(
-      self._in_np,
-      self._datastore_scalar_input_columns,
-      self._datastore_scalar_input_feed,
-      "scalar",
-    )
-    write_inputs(
-      self._in_np,
-      self._datastore_vector_input_columns,
-      self._datastore_vector_input_feed,
-      "vector3",
-    )
-
-    self._dispatch_resets[:] = self._pending_reset
-    self._in_np[:, self._bridge.layout.input.reset_offset()] = self._dispatch_resets
-    # An unserviced row must never look like a fresh successful result.
-    self._out_np[:, self._bridge.layout.output.status_offset()] = int(
-      native.OutputLayout.Status.WORKER_FAILED
-    )
-    self._manager.dispatch(native.Command.Step)
-    self._pending_dispatch = True
-
-  def _collect_controller_output(self) -> None:
-    """Await the outstanding async step (if any) and stage its outputs."""
-    if not self._pending_dispatch:
-      return
-    assert self._manager is not None and self._out_np is not None
-
-    failed = self._manager.collect()
-    self._pending_dispatch = False
-
-    # Merge the worker failures into the block itself, so the single upload
-    # below carries the final status and no mask has to cross separately.
-    status_column = self._out_np[:, self._bridge.layout.output.status_offset()]
-    status_column[failed] = int(native.OutputLayout.Status.WORKER_FAILED)
-    status = status_column.copy()
-
-    worker_failed = status == int(native.OutputLayout.Status.WORKER_FAILED)
-    self._pending_reset[self._dispatch_resets & ~worker_failed] = False
-    self._pending_reset[worker_failed] = True
-
-    block = self._bridge.upload_controller_output(self._out_np)
-    status_t = block[:, self._bridge.layout.output.status_offset()]
-    ok = status_t == int(native.OutputLayout.Status.OK)
-    self.controller_failed |= status_t == int(native.OutputLayout.Status.QP_FAILED)
-    self.controller_worker_failed |= status_t == int(
-      native.OutputLayout.Status.WORKER_FAILED
-    )
-
-    # Every status is OK, QP_FAILED or WORKER_FAILED: fresh output means OK.
-    self._has_staged_control.copy_(ok)
-    fresh = ok.unsqueeze(-1)
-    for channel, values in self._bridge.read_controller_output(block).items():
-      staged = self._staged_control[channel]
-      staged.copy_(torch.where(fresh, values, staged))
-
-    self._latch_datastore_outputs(block, ok)
-
-  def _print_residual(self) -> None:
-    """One line of env 0's residual, throttled by ``print_residual_every``."""
-    if self._print_countdown:
-      self._print_countdown -= 1
-      return
-    self._print_countdown = self._print_every - 1
-
-    values = self._executed_physical[0].detach().cpu().tolist()
-    if self._print_header_pending:
-      # Lazily, on the first line: a header printed at construction would be
-      # buried under mc_rtc's own startup logging long before the first frame.
-      unit = f" [{self.residual_unit}]" if self.residual_unit else ""
-      print(
-        f"[residual] env 0, every {self._print_every} policy step(s){unit}; * = clipped"
-      )
-      print("[residual] " + " ".join(f"{n:>6s} " for n in self._print_names) + "   |r|")
-      self._print_header_pending = False
-
-    limit = self._print_limit
-    cells = [
-      f"{v:+.3f}" + ("*" if limit is not None and abs(v) >= 0.999 * limit[j] else " ")
-      for j, v in enumerate(values)
-    ]
-    norm = sum(v * v for v in values) ** 0.5
-    # Flushed: Python block-buffers into a pipe while spdlog writes to fd 1, so
-    # unflushed the two interleave wrongly. docs/coupling.md#console-output
-    print("[residual] " + " ".join(cells) + f" {norm:6.3f}", flush=True)
