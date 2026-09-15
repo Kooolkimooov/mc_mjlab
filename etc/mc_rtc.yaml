@@ -1,8 +1,8 @@
-MainRobot: HRP5P # RHPS1_MuJoCo #
+MainRobot: JVRC1
 Timestep: 0.002
 
 # mc_rtc's built-in posture-holding controller.
-Enabled: LogisticController_ismpc
+Enabled: Posture
 
 # disable GUIServer is needed to be able to run several controller concurrently
 GUIServer:
