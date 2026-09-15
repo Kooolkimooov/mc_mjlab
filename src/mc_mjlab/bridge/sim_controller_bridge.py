@@ -10,7 +10,7 @@ import torch
 from mjlab.utils.lab_api.math import quat_apply, quat_from_angle_axis, quat_mul
 
 import mc_rtc_interface as native
-from mc_mjlab.robots import mc_rtc_robot_configuration as robots
+from mc_mjlab.robots import robot_module as robots
 
 if TYPE_CHECKING:
   from mjlab.entity import Entity

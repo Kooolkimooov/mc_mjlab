@@ -22,8 +22,8 @@ from mc_mjlab.actions.walking_reference_action import (
   GatedWalkingReferenceDeltaAction,
   GatedWalkingReferenceDeltaActionCfg,
 )
-from mc_mjlab.residual_printer import ResidualPrinter
-from mc_mjlab.sim_controller_bridge import SimControllerBridge
+from mc_mjlab.bridge.sim_controller_bridge import SimControllerBridge
+from mc_mjlab.residuals.printer import ResidualPrinter
 
 
 def verify_layout() -> tuple[SimControllerBridge, NS, NS]:
@@ -70,15 +70,16 @@ def verify_layout() -> tuple[SimControllerBridge, NS, NS]:
   )
   with (
     patch(
-      "mc_mjlab.sim_controller_bridge.robots.get_ref_joint_order",
+      "mc_mjlab.bridge.sim_controller_bridge.robots.get_ref_joint_order",
       return_value=("a", "missing", "b"),
     ),
     patch(
-      "mc_mjlab.sim_controller_bridge.robots.get_default_joint_positions",
+      "mc_mjlab.bridge.sim_controller_bridge.robots.get_default_joint_positions",
       return_value={"missing": 0.7},
     ),
     patch(
-      "mc_mjlab.sim_controller_bridge.robots.get_robot_module", return_value=module
+      "mc_mjlab.bridge.sim_controller_bridge.robots.get_robot_module",
+      return_value=module,
     ),
   ):
     bridge = SimControllerBridge(

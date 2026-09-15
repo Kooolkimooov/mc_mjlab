@@ -36,13 +36,13 @@ from mc_mjlab.actions.walking_reference_action import (
   WALKING_REF_VEL_GETTER,
   GatedWalkingReferenceDeltaActionCfg,
 )
-from mc_mjlab.controller_datastore import (
+from mc_mjlab.bridge.controller_datastore import (
   CONTROL_COM,
   CONTROL_COM_VEL,
   PLANNED_ZMP,
 )
-from mc_mjlab.robots import mc_rtc_robot_configuration as mc_rtc
-from mc_mjlab.robots.robots_registry import (
+from mc_mjlab.robots import robot_module as mc_rtc
+from mc_mjlab.robots.registry import (
   get_main_robot_spec,
   prepare_cfg_for_mc_rtc,
 )

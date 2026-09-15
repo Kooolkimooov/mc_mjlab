@@ -1,6 +1,6 @@
 """Runner that refuses checkpoints written under different action semantics."""
 
-from mc_mjlab.residual_mpc import ACTION_SEMANTICS_VERSION
+from mc_mjlab.residuals.mpc_math import ACTION_SEMANTICS_VERSION
 from mc_mjlab.tasks.residual_balance.residual_balance_runner import (
   ResidualBalanceOnPolicyRunner,
 )

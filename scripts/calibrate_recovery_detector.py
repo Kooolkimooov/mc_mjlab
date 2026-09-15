@@ -10,7 +10,7 @@ import torch
 from mjlab.envs import ManagerBasedRlEnv
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
-from mc_mjlab.recovery_authority import (
+from mc_mjlab.residuals.recovery_authority import (
   FEATURE_NAMES,
   RecoveryCalibration,
   RecoveryFeatureExtractor,

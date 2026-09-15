@@ -11,8 +11,8 @@ import torch
 from mjlab.envs import ManagerBasedRlEnv
 
 from mc_mjlab import MC_RTC_YAML_PATH
-from mc_mjlab.robots import mc_rtc_robot_configuration as mc_rtc
-from mc_mjlab.robots.robots_registry import get_main_robot_spec
+from mc_mjlab.robots import robot_module as mc_rtc
+from mc_mjlab.robots.registry import get_main_robot_spec
 from mc_mjlab.tasks import mdp
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   _make_env_cfg,

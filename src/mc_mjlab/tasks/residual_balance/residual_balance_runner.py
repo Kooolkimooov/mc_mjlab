@@ -16,15 +16,16 @@ from mc_mjlab.actions.mc_rtc_residual_action import (
   McRtcResidualActionBase,
   McRtcResidualActionCfg,
 )
-from mc_mjlab.tasks.residual_balance.achievement_curriculum import (
-  AchievementCurriculumBridge,
-)
-from mc_mjlab.tasks.residual_balance.effective_training_manifest import (
+from mc_mjlab.bridge.config import get_controller_name
+from mc_mjlab.rl.effective_training_manifest import (
   build_effective_training_manifest,
   curriculum_runtime_snapshot,
   materialize_effective_training_manifest,
   synchronize_resumed_curriculum,
   validate_effective_training_manifest,
+)
+from mc_mjlab.tasks.residual_balance.achievement_curriculum import (
+  AchievementCurriculumBridge,
 )
 from mc_mjlab.tasks.residual_balance.residual_balance_diagnostics import (
   ppo_diagnostics,
@@ -34,7 +35,6 @@ from mc_mjlab.tasks.residual_balance.training_watchdog import (
   RunnerWatchdogBridge,
   WatchdogStop,
 )
-from utils.mc_rtc_config import get_controller_name
 
 
 def _file_record(role: str, path: Path) -> dict[str, str | bool]:

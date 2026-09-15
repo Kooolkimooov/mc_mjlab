@@ -13,7 +13,7 @@ import torch
 from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 from mjlab.rl import RslRlVecEnvWrapper
 
-from mc_mjlab.tasks.residual_balance.effective_training_manifest import (
+from mc_mjlab.rl.effective_training_manifest import (
   build_effective_training_manifest,
 )
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (

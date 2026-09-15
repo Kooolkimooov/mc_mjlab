@@ -9,13 +9,13 @@ def residual_mpc_ppo_cfg(
 ) -> RslRlOnPolicyRunnerCfg:
   """Build the cited PPO settings with the repository's bounded distribution."""
   model = RslRlModelCfg(
-    class_name="mc_mjlab.tasks.zero_init_actor:ZeroInitMLPModel",
+    class_name="mc_mjlab.rl.zero_init_actor:ZeroInitMLPModel",
     hidden_dims=(256, 256, 256),
     activation="elu",
     obs_normalization=True,
     distribution_cfg={
       # Safety choice: bounded actions and 0.1 initial std. docs/residual-mpc.md
-      "class_name": "mc_mjlab.tasks.squashed_gaussian:SquashedGaussianDistribution",
+      "class_name": "mc_mjlab.rl.squashed_gaussian:SquashedGaussianDistribution",
       "init_std": 0.1,
       # A bound, not a pressure: any entropy bonus walks std to this ceiling, and
       # reward per step falls 29% doing it. docs/residual-mpc.md#std_range

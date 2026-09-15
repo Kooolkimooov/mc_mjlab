@@ -10,7 +10,7 @@ from typing import Any
 import torch
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
-from mc_mjlab.robots import mc_rtc_robot_configuration as mc_rtc
+from mc_mjlab.robots import robot_module as mc_rtc
 from mc_mjlab.tasks import mdp
 
 STRATUM_LABELS = (

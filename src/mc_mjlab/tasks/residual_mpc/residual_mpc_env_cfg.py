@@ -31,8 +31,8 @@ from mc_mjlab.actions.residual_mpc_joint_torque_action import (
   ResidualMpcJointTorqueActionCfg,
 )
 from mc_mjlab.actions.walking_reference_action import WALKING_REF_VEL_GETTER
-from mc_mjlab.robots import mc_rtc_robot_configuration as mc_rtc
-from mc_mjlab.robots.robots_registry import (
+from mc_mjlab.robots import robot_module as mc_rtc
+from mc_mjlab.robots.registry import (
   get_main_robot_spec,
   prepare_cfg_for_mc_rtc,
 )

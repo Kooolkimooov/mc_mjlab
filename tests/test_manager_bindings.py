@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 import mc_rtc_interface as native
-from utils.shared_memory import ShmHandle, create_shm, row_window
+from mc_mjlab.bridge.shared_memory import ShmHandle, create_shm, row_window
 
 SharedIo = tuple[native.WorkerStartMessage, ShmHandle, ShmHandle]
 

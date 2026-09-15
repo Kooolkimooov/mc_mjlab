@@ -12,13 +12,13 @@ from mc_mjlab.actions.walking_reference_action import (
   AbsoluteWalkingReferenceActionCfg,
   AbsoluteWalkingReferenceMixin,
 )
-from mc_mjlab.residual_mpc import (
+from mc_mjlab.residuals.mpc_math import (
   advance_action_history,
   paper_joint_action_scale,
   paper_torque_blend,
 )
-from mc_mjlab.residual_safety import project_residual
-from utils.pd_gains import read_pd_gains, zero_pd_gains
+from mc_mjlab.residuals.safety import project_residual
+from mc_mjlab.robots.pd_gains import read_pd_gains, zero_pd_gains
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv

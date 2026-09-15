@@ -5,13 +5,13 @@ from __future__ import annotations
 import torch
 
 import mc_mjlab.tasks  # noqa: F401
-from mc_mjlab.residual_mpc import (
+from mc_mjlab.residuals.mpc_math import (
   advance_action_history,
   contact_phases,
   paper_joint_action_scale,
   paper_torque_blend,
 )
-from mc_mjlab.residual_safety import project_residual
+from mc_mjlab.residuals.safety import project_residual
 
 
 def test_phases() -> None:

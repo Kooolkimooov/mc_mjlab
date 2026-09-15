@@ -28,7 +28,7 @@ BRIDGE = ex.SRC / "mc_mjlab" / "sim_controller_bridge.py"
 ACTION = ACTIONS / "mc_rtc_residual_action.py"
 POSITION = ACTIONS / "mc_rtc_residual_joint_position_actions.py"
 TORQUE = ACTIONS / "mc_rtc_residual_joint_torque_actions.py"
-REGISTRY = ROBOTS / "robots_registry.py"
+REGISTRY = ROBOTS / "registry.py"
 RB = TASKS / "residual_balance"
 ZR = TASKS / "zero_residual"
 RB_CFG = RB / "residual_balance_env_cfg.py"
@@ -397,7 +397,7 @@ def rate_stack() -> str:
 
 def task_ids(package: Path) -> str:
   """Every id this package builds, resolved through the repo's naming helper."""
-  from utils.task_naming import get_task_name
+  from mc_mjlab.tasks.naming import get_task_name
 
   gates = ex.conditional_imports(package / "__init__.py")
   rows = []
@@ -542,13 +542,11 @@ def robot_registry() -> str:
   """The registry keys, and whether each names a directory of the same name."""
   rows = [
     (f"`{key}`", "yes" if (ROBOTS / key).is_dir() else "no")
-    for key in ex.dict_keys("robots.robots_registry.ROBOTS")
+    for key in ex.dict_keys("robots.registry.ROBOTS")
   ]
   fields = table(
     ("`RobotSpec` field",),
-    [
-      (f"`{name}`",) for name in ex.class_attributes("robots.robots_registry.RobotSpec")
-    ],
+    [(f"`{name}`",) for name in ex.class_attributes("robots.registry.RobotSpec")],
   )
   return table(("`MainRobot`", "Directory of that name"), rows) + "\n\n" + fields
 
@@ -573,7 +571,7 @@ def gain_paths() -> str:
   """The pd_gains_path each registry entry names."""
   rows = [
     (f"`{key}`", f"`{kwargs.get('pd_gains_path', '')}`")
-    for key, kwargs in ex.dict_call_kwargs("robots.robots_registry.ROBOTS").items()
+    for key, kwargs in ex.dict_call_kwargs("robots.registry.ROBOTS").items()
   ]
   return table(("Robot", "`pd_gains_path`"), rows)
 

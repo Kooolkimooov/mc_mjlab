@@ -25,12 +25,31 @@ from rsl_rl.models.mlp_model import MLPModel
 from rsl_rl.storage import RolloutStorage
 from tensordict import TensorDict
 
-from mc_mjlab.recovery_authority import (
+from mc_mjlab.residuals.recovery_authority import (
   RecoveryCalibration,
   RecoveryFilter,
   detector_target,
 )
-from mc_mjlab.residual_safety import project_residual
+from mc_mjlab.residuals.safety import project_residual
+from mc_mjlab.rl.effective_training_manifest import (
+  build_effective_training_manifest,
+  source_drift,
+  synchronize_resumed_curriculum,
+  validate_effective_training_manifest,
+)
+from mc_mjlab.rl.rollout_adaptive_ppo import (
+  RolloutAdaptivePPO,
+  normalize_masked_advantages,
+)
+from mc_mjlab.rl.squashed_gaussian import (
+  LOG_PROB_FLOOR,
+  SquashedGaussianDistribution,
+)
+from mc_mjlab.rl.zero_init_actor import (
+  ZeroInitMLPModel,
+  ZeroInitRNNModel,
+  mean_head_magnitude,
+)
 from mc_mjlab.tasks.mdp import (
   achievement_finite_impulse_curriculum,
   action_l2,
@@ -60,12 +79,6 @@ from mc_mjlab.tasks.residual_balance.curriculum_stages import (
   achievement_contract,
   achievement_contract_sha256,
 )
-from mc_mjlab.tasks.residual_balance.effective_training_manifest import (
-  build_effective_training_manifest,
-  source_drift,
-  synchronize_resumed_curriculum,
-  validate_effective_training_manifest,
-)
 from mc_mjlab.tasks.residual_balance.qualification_strata import classify_strata
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   QUALIFICATION_MATCHED_BANDS,
@@ -94,19 +107,6 @@ from mc_mjlab.tasks.residual_balance.training_watchdog import (
   intervention_for,
   qualification_baseline,
   qualification_regressions,
-)
-from mc_mjlab.tasks.rollout_adaptive_ppo import (
-  RolloutAdaptivePPO,
-  normalize_masked_advantages,
-)
-from mc_mjlab.tasks.squashed_gaussian import (
-  LOG_PROB_FLOOR,
-  SquashedGaussianDistribution,
-)
-from mc_mjlab.tasks.zero_init_actor import (
-  ZeroInitMLPModel,
-  ZeroInitRNNModel,
-  mean_head_magnitude,
 )
 
 
@@ -352,7 +352,7 @@ def verify_zero_initialization() -> None:
     4,
     hidden_dims=(16, 8),
     distribution_cfg={
-      "class_name": ("mc_mjlab.tasks.squashed_gaussian:SquashedGaussianDistribution"),
+      "class_name": ("mc_mjlab.rl.squashed_gaussian:SquashedGaussianDistribution"),
       "init_std": 0.1,
       "std_range": (0.05, 0.30),
     },
@@ -367,7 +367,7 @@ def verify_zero_initialization() -> None:
     rnn_type="gru",
     rnn_hidden_dim=16,
     distribution_cfg={
-      "class_name": ("mc_mjlab.tasks.squashed_gaussian:SquashedGaussianDistribution"),
+      "class_name": ("mc_mjlab.rl.squashed_gaussian:SquashedGaussianDistribution"),
       "init_std": 0.1,
       "std_range": (0.05, 0.30),
     },
@@ -514,7 +514,7 @@ def verify_masked_policy_objective() -> None:
   )
   obs_groups = {"actor": ["actor"], "critic": ["critic"]}
   distribution_cfg = {
-    "class_name": "mc_mjlab.tasks.squashed_gaussian:SquashedGaussianDistribution",
+    "class_name": "mc_mjlab.rl.squashed_gaussian:SquashedGaussianDistribution",
     "init_std": 0.1,
     "std_range": (0.05, 0.30),
   }
@@ -934,7 +934,7 @@ def verify_stratified_impulse() -> None:
   assert gait[0] > matched[0] > hazard[0]
   assert gait[-1] < matched[-1] < hazard[-1]
   # Ankle roll degraded every lateral recovery; the ablation must drop it.
-  from mc_mjlab.robots import mc_rtc_robot_configuration as robot_cfg
+  from mc_mjlab.robots import robot_module as robot_cfg
 
   pitch = residual_balance_position_matched_impulse_env_cfg(
     authority_set="ankle_pitch"

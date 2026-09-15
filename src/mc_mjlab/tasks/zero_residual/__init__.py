@@ -5,12 +5,12 @@ from pathlib import Path
 
 from mjlab.tasks.registry import register_mjlab_task
 
+from mc_mjlab.tasks.naming import get_task_name
 from mc_mjlab.tasks.zero_residual.zero_residual_env_cfg import (
   zero_residual_position_env_cfg,
   zero_residual_rl_cfg,
   zero_residual_torque_env_cfg,
 )
-from utils.task_naming import get_task_name
 
 TASK_DIR: str = Path(__file__).resolve().parent.name
 

@@ -21,7 +21,7 @@ from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
 from mc_mjlab.actions.mc_rtc_residual_joint_torque_actions import (
   McRtcResidualJointTorqueActionCfg,
 )
-from mc_mjlab.robots.robots_registry import (
+from mc_mjlab.robots.registry import (
   get_main_robot_spec,
   prepare_cfg_for_mc_rtc,
 )

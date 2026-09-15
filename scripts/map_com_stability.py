@@ -11,7 +11,7 @@ import torch
 from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
-from mc_mjlab.robots import mc_rtc_robot_configuration as mc_rtc
+from mc_mjlab.robots import robot_module as mc_rtc
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import _make_env_cfg
 
 AXES = {"x": 0, "y": 1, "z": 2}

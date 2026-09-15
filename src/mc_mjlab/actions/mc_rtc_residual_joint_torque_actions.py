@@ -11,8 +11,8 @@ from mc_mjlab.actions.mc_rtc_residual_action import (
   McRtcResidualActionBase,
   McRtcResidualActionCfg,
 )
-from mc_mjlab.residual_safety import project_residual
-from utils.pd_gains import read_pd_gains, zero_pd_gains
+from mc_mjlab.residuals.safety import project_residual
+from mc_mjlab.robots.pd_gains import read_pd_gains, zero_pd_gains
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import mujoco
 import torch
 
-from mc_mjlab.controller_datastore import CONTROL_COM_VEL
+from mc_mjlab.bridge.controller_datastore import CONTROL_COM_VEL
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv

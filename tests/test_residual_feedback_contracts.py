@@ -13,7 +13,7 @@ from mc_mjlab.actions.residual_feedback_action import (
   SUPPORTED_MODALITIES,
   ResidualFeedbackJointTorqueActionCfg,
 )
-from mc_mjlab.sim_controller_bridge import _compose_small_rotation
+from mc_mjlab.bridge.sim_controller_bridge import _compose_small_rotation
 from mc_mjlab.tasks.residual_feedback.residual_feedback_env_cfg import (
   residual_feedback_env_cfg,
 )

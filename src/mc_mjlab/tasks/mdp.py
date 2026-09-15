@@ -18,12 +18,12 @@ from mc_mjlab.actions.walking_reference_action import (
   WALKING_REF_VEL_GETTER,
   WalkingReferenceMixin,
 )
-from mc_mjlab.controller_datastore import (
+from mc_mjlab.bridge.controller_datastore import (
   CONTROL_COM,
   CONTROL_COM_VEL,
   PLANNED_ZMP,
 )
-from mc_mjlab.robots import mc_rtc_robot_configuration as mc_rtc
+from mc_mjlab.robots import robot_module as mc_rtc
 
 if TYPE_CHECKING:
   from collections.abc import Iterable
@@ -366,7 +366,7 @@ def _scalar_sensor_range(
       return torch.arange(adr, adr + dim, device=device, dtype=torch.long)
   raise ValueError(
     f"the MuJoCo model has no sensor named {name!r}; it is added by "
-    f"`robots/additional_sensors_configuration.add_locomotion_sensors`."
+    f"`robots/sensors.add_locomotion_sensors`."
   )
 
 

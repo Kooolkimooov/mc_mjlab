@@ -1,5 +1,5 @@
 from mc_mjlab import MC_RTC_YAML_PATH
-from utils.mc_rtc_config import get_controller_name, get_main_robot_name
+from mc_mjlab.bridge.config import get_controller_name, get_main_robot_name
 
 MC_MJLAB_PREFIX: str = "Mc-Mjlab-"
 

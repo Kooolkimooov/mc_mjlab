@@ -13,8 +13,8 @@ from mjlab.utils.lab_api.math import quat_apply_inverse
 from mc_mjlab.actions.residual_mpc_joint_torque_action import (
   ResidualMpcJointTorqueAction,
 )
-from mc_mjlab.controller_datastore import SUPPORT_FOOT
-from mc_mjlab.residual_mpc import contact_phases
+from mc_mjlab.bridge.controller_datastore import SUPPORT_FOOT
+from mc_mjlab.residuals.mpc_math import contact_phases
 from mc_mjlab.tasks import mdp as shared_mdp
 
 if TYPE_CHECKING:

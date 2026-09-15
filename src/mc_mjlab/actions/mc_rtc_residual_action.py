@@ -15,19 +15,19 @@ from mjlab.envs.mdp.actions.actions import BaseAction, BaseActionCfg
 from mjlab.utils.lab_api.string import resolve_matching_names
 
 import mc_rtc_interface as native
-from mc_mjlab.controller_datastore import (
+from mc_mjlab.bridge.config import get_controller_name
+from mc_mjlab.bridge.controller_datastore import (
   input_columns,
   output_columns,
   read_outputs,
   write_inputs,
 )
-from mc_mjlab.recovery_authority import RecoveryAuthority
-from mc_mjlab.residual_printer import ResidualPrinter
-from mc_mjlab.robots import mc_rtc_robot_configuration as mc_rtc
-from mc_mjlab.sim_controller_bridge import SimControllerBridge
-from utils.mc_rtc_config import get_controller_name
-from utils.pd_gains import apply_reference_pd_gains
-from utils.shared_memory import ShmHandle, create_shm, row_window
+from mc_mjlab.bridge.shared_memory import ShmHandle, create_shm, row_window
+from mc_mjlab.bridge.sim_controller_bridge import SimControllerBridge
+from mc_mjlab.residuals.printer import ResidualPrinter
+from mc_mjlab.residuals.recovery_authority import RecoveryAuthority
+from mc_mjlab.robots import robot_module as mc_rtc
+from mc_mjlab.robots.pd_gains import apply_reference_pd_gains
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv

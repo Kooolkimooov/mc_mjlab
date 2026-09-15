@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from utils.shared_memory import create_shm, row_window
+from mc_mjlab.bridge.shared_memory import create_shm, row_window
 
 BINARY = Path(
   os.environ.get(
