@@ -884,13 +884,3 @@ class McRtcResidualActionBase(BaseAction):
   def residual_scale(self) -> torch.Tensor:
     """Absolute physical authority per normalized residual action column."""
     return self._physical_scale
-
-  @property
-  def residual_effort_ratio(self) -> torch.Tensor:
-    """Current actuator effort divided by the RobotModule limit per residual joint."""
-    effort = self._entity.data.qfrc_actuator[:, self._target_ids].abs()
-    limit = torch.maximum(self._effort_lower.abs(), self._effort_upper.abs())
-    if self._residual_ids is not None:
-      effort = effort[:, self._residual_ids]
-      limit = limit[:, self._residual_ids]
-    return effort / limit.clamp_min(torch.finfo(effort.dtype).eps)

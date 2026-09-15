@@ -10,6 +10,7 @@ from typing import Any
 import torch
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
+from mc_mjlab.robots import mc_rtc_robot_configuration as mc_rtc
 from mc_mjlab.tasks import mdp
 
 STRATUM_LABELS = (
@@ -123,7 +124,19 @@ class StratifiedDiagnostics:
       *joint_shape, len(JOINT_SUM_FIELDS), device=env.device
     )
     self._joint_effort_max = torch.zeros(joint_shape, device=env.device)
+    limits = mc_rtc.get_effort_limits(action.cfg.mc_rtc_robot_name)
+    self._effort_limits = torch.tensor(
+      [limits[name] for name in action.residual_names], device=env.device
+    )
     self._last_stratum = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+
+  def _residual_effort_ratio(self) -> torch.Tensor:
+    """Actuator effort over the RobotModule limit, per residual joint."""
+    term = self.action
+    effort = self.env.scene[term.cfg.entity_name].data.qfrc_actuator[:, term.target_ids]
+    if term.residual_ids is not None:
+      effort = effort[:, term.residual_ids]
+    return effort.abs() / self._effort_limits
 
   def capture(self, active: torch.Tensor) -> None:
     """Accumulate the just-computed step for all still-qualified environments."""
@@ -148,7 +161,7 @@ class StratifiedDiagnostics:
     requested = self.action.requested_normalized_action
     executed_normalized = self.action.executed_normalized_action
     executed_physical = self.action.executed_physical_action
-    effort = self.action.residual_effort_ratio
+    effort = self._residual_effort_ratio()
     joint_values = torch.stack(
       (
         requested.square(),
