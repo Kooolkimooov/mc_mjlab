@@ -171,14 +171,7 @@ class McRtcResidualActionBase(BaseAction):
     )
 
     # After the command pair appended its own getter to the layout.
-    self._datastore_vector_output_columns = output_columns(
-      self._io.layout, cfg.datastore_vectors_outputs, "vector3"
-    )
-
-    self._datastore_scalar_output_columns = output_columns(
-      self._io.layout, cfg.datastore_scalar_outputs, "scalar"
-    )
-
+    self._setup_datastore_outputs(cfg)
     self._setup_datastore_inputs(cfg)
 
     if cfg.pd_gains_path is not None:
@@ -248,7 +241,7 @@ class McRtcResidualActionBase(BaseAction):
   ) -> None:
     """Allocate simulation buffers while native resources remain guarded."""
     self._alloc_interpolation_buffers()
-    self._alloc_controller_readouts()
+    self._alloc_failure_latches()
 
     self._recovery_authority = (
       RecoveryAuthority(env, self, cfg.recovery_detector_path)
@@ -388,6 +381,24 @@ class McRtcResidualActionBase(BaseAction):
       self.num_envs, 0, device=self.device
     )
 
+  def _setup_datastore_outputs(self, cfg: McRtcResidualActionCfg) -> None:
+    """Resolve the collected getter columns and their latched readouts."""
+    self._datastore_vector_output_columns = output_columns(
+      self._io.layout, cfg.datastore_vectors_outputs, "vector3"
+    )
+    self._datastore_scalar_output_columns = output_columns(
+      self._io.layout, cfg.datastore_scalar_outputs, "scalar"
+    )
+    # Whole-controller vectors: latched as collected, no ramp (see the cfg).
+    self._datastore_vector_outputs = {
+      getter: torch.zeros(self.num_envs, 3, device=self.device)
+      for getter in self._datastore_vector_output_columns
+    }
+    self._datastore_scalar_outputs = {
+      getter: torch.zeros(self.num_envs, device=self.device)
+      for getter in self._datastore_scalar_output_columns
+    }
+
   def _setup_datastore_inputs(self, cfg: McRtcResidualActionCfg) -> None:
     """Resolve the unconditionally fed setter columns and their value buffers."""
     self._datastore_scalar_input_columns = input_columns(
@@ -502,18 +513,8 @@ class McRtcResidualActionBase(BaseAction):
       self.num_envs, dtype=torch.bool, device=self.device
     )
 
-  def _alloc_controller_readouts(self) -> None:
-    """Latched datastore readouts and the per-episode controller failure flags."""
-    # Whole-controller vectors: latched as collected, no ramp (see the cfg).
-    self._datastore_vector_outputs = {
-      getter: torch.zeros(self.num_envs, 3, device=self.device)
-      for getter in self.cfg.datastore_vectors_outputs
-    }
-    self._datastore_scalar_outputs = {
-      getter: torch.zeros(self.num_envs, device=self.device)
-      for getter in self.cfg.datastore_scalar_outputs
-    }
-
+  def _alloc_failure_latches(self) -> None:
+    """Allocate the per-episode controller and worker failure flags."""
     # Latched per env until reset; read by the `controller_failed` termination
     # term so a QP giving up ends that episode instead of the whole run.
     self.controller_failed = torch.zeros(
