@@ -10,6 +10,7 @@ import torch
 from mjlab.utils.lab_api.math import quat_apply, quat_from_angle_axis, quat_mul
 
 import mc_rtc_interface as native
+from mc_mjlab.bridge.controller_objects import ControllerObjects
 from mc_mjlab.robots import robot_module as robots
 
 if TYPE_CHECKING:
@@ -62,6 +63,7 @@ class SimControllerBridge:
     robot_name: str,
     channels: tuple[str, ...],
     entity_name: str,
+    controller_objects: dict[str, str] | None = None,
   ) -> None:
     self._env = env
     self._entity = entity
@@ -73,6 +75,7 @@ class SimControllerBridge:
     self._resolve_joint_columns(robot_name, entity, target_names)
     self._resolve_root_joint()
     self._resolve_sensor_routes(robot_name)
+    self._resolve_object_feedback(env, controller_objects or {})
     self._clear_state_feedback_offsets()
     self._alloc_device_buffers(env.num_envs)
 
@@ -88,6 +91,7 @@ class SimControllerBridge:
     ro = self.layout.input.root_offset()
     block[:, ro + 3 : ro + 7] = block[:, self._quat_xyzw_t]
 
+    self._objects.fill(block, self.layout.input.objects_offset())
     self._host_view(rows, "input")[:, : self._input_width].copy_(block)
 
   def upload_controller_output(self, rows: np.ndarray) -> torch.Tensor:
@@ -293,6 +297,13 @@ class SimControllerBridge:
           self._sensor_adr(name + suffix),
           layout.force_sensors_offset() + _SENSOR_STRIDE * i + _TRIPLE * j,
         )
+
+  def _resolve_object_feedback(
+    self, env: ManagerBasedRlEnv, mapping: dict[str, str]
+  ) -> None:
+    """Declare the measured objects, whose state is sampled at dispatch."""
+    self._objects = ControllerObjects(env, mapping)
+    self.layout.input.objects = list(mapping)
 
   def _sensor_adr(self, suffix: str) -> int:
     """Find a sensor within this entity's namespace, or -1 when it has none."""

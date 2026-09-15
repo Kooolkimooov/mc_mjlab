@@ -5,7 +5,7 @@ from __future__ import annotations
 import abc
 import os
 import weakref
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -69,6 +69,9 @@ class McRtcResidualActionCfg(BaseActionCfg):
 
   datastore_vectors_outputs: tuple[str, ...] = ()
   """Native Vector3d getters collected each period, without interpolation."""
+
+  controller_objects: dict[str, str] = field(default_factory=dict)
+  """Measured mc_rtc object names mapped to free-body scene entities."""
 
   controller_timeout_ms: int = 60000
   """Native collection timeout, in milliseconds."""
@@ -477,6 +480,7 @@ class McRtcResidualActionBase(BaseAction):
       cfg.mc_rtc_robot_name,
       self.output_channels,
       cfg.entity_name,
+      cfg.controller_objects,
     )
 
     self._bridge.layout.output.datastore_scalar = list(

@@ -85,7 +85,9 @@ testpaths = ["tests"]
 pythonpath = ["scripts"]
 
 [tool.ty.environment]
-extra-paths = ["scripts"]
+# `tests` too: pytest puts the test directory on `sys.path` itself, so a suite
+# importing another suite's helpers resolves there but not for ty.
+extra-paths = ["scripts", "tests"]
 
 [tool.ruff]
 src = ["src"]

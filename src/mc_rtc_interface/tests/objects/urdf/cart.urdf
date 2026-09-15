@@ -1,0 +1,8 @@
+<robot name="cart">
+  <link name="body">
+    <inertial>
+      <mass value="10"/>
+      <inertia ixx="1" iyy="1" izz="1" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+</robot>
