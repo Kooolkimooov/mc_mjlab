@@ -30,6 +30,7 @@ from mc_mjlab import MC_RTC_YAML_PATH
 from mc_mjlab.actions.residual_mpc_joint_torque_action import (
   ResidualMpcJointTorqueActionCfg,
 )
+from mc_mjlab.actions.walking_reference_action import WALKING_REF_VEL_GETTER
 from mc_mjlab.robots import mc_rtc_robot_configuration as mc_rtc
 from mc_mjlab.robots.robots_registry import (
   get_main_robot_spec,
@@ -124,7 +125,7 @@ def residual_mpc_env_cfg(
       scale=1.0,
       blend_factor=BLEND_FACTOR,
       action_scale_blend_factor=BLEND_FACTOR,
-      controller_scalars=(
+      datastore_scalar_outputs=(
         mdp.QP_OBJECTIVE_CALLBACK,
         mdp.STEP_TIME_CALLBACK,
         mdp.STEP_DURATION_CALLBACK,
@@ -132,7 +133,7 @@ def residual_mpc_env_cfg(
       ),
       walking_velocity_command_name=COMMAND_NAME,
       # Read back so a run shows the reference the controller actually holds.
-      controller_vectors=("walking_ref_vel",),
+      datastore_vectors_outputs=(WALKING_REF_VEL_GETTER,),
       console_output="single" if play else console_output,
       print_residual_every=10 if play else 0,
     )

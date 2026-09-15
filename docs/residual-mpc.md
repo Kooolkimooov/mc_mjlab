@@ -172,7 +172,7 @@ measurement.
 The first sweep used `3 s` inside a `12 s` episode and was wrong.
 
 **The ISMPC realises a reference over many gait cycles, not immediately.** Reading
-`ismpc_walking::get_ref_vel` back through the `walking_ref_vel` vector output,
+`ismpc_walking::get_ref_vel` back through the vector datastore output,
 with `+0.600 m/s` commanded:
 
 | t | `get_ref_vel` | measured `vx` |

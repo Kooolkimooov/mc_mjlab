@@ -1,6 +1,7 @@
 """Verify native action wiring and scheduling without external controller adapters."""
 
 from types import SimpleNamespace as NS
+from typing import Any
 from unittest.mock import patch
 
 import mujoco
@@ -17,30 +18,30 @@ from mc_mjlab.controller_datastore import (
   output_columns,
   read_outputs,
 )
-from mc_mjlab.controller_io import ControllerIoBinding
+from mc_mjlab.sim_controller_bridge import SimControllerBridge
 
 
 class UsageInput:
   """Test the forthcoming per-callback flags without modifying native bindings."""
 
-  def __init__(self):
+  def __init__(self) -> None:
     self.datastore_scalar = []
     self.datastore_vector3 = []
 
-  def datastore_scalar_offset(self):
+  def datastore_scalar_offset(self) -> int:
     return 10
 
-  def datastore_vector3_offset(self):
+  def datastore_vector3_offset(self) -> int:
     return 20
 
-  def use_datastore_scalar_offset(self):
+  def use_datastore_scalar_offset(self) -> int:
     return 40
 
-  def use_datastore_vector3_offset(self):
+  def use_datastore_vector3_offset(self) -> int:
     return 50
 
 
-def verify_layout():
+def verify_layout() -> tuple[SimControllerBridge, NS, NS]:
   """Exercise reference-order scatter, quaternion conversion and sensor routing."""
   model = mujoco.MjModel.from_xml_string("""
   <mujoco><worldbody><body name="robot/base"><freejoint name="robot/root"/>
@@ -75,7 +76,7 @@ def verify_layout():
     ),
   )
 
-  def sensor(name):
+  def sensor(name: str) -> NS:
     return NS(name=lambda: name)
 
   module = NS(
@@ -84,18 +85,20 @@ def verify_layout():
   )
   with (
     patch(
-      "mc_mjlab.controller_io.robots.get_ref_joint_order",
+      "mc_mjlab.sim_controller_bridge.robots.get_ref_joint_order",
       return_value=("a", "missing", "b"),
     ),
     patch(
-      "mc_mjlab.controller_io.robots.get_default_joint_positions",
+      "mc_mjlab.sim_controller_bridge.robots.get_default_joint_positions",
       return_value={"missing": 0.7},
     ),
-    patch("mc_mjlab.controller_io.robots.get_robot_module", return_value=module),
+    patch(
+      "mc_mjlab.sim_controller_bridge.robots.get_robot_module", return_value=module
+    ),
   ):
-    io = ControllerIoBinding(
-      env,
-      entity,
+    io = SimControllerBridge(
+      env,  # ty: ignore[invalid-argument-type]
+      entity,  # ty: ignore[invalid-argument-type]
       ["b", "a"],
       torch.tensor([0, 1]),
       "test",
@@ -136,7 +139,7 @@ def verify_layout():
   return io, env, entity
 
 
-def verify_datastore_commands():
+def verify_datastore_commands() -> None:
   """Check independent gates, live getters, restoration and reset warmup."""
   layout = NS(input=UsageInput(), output=native.OutputLayout())
   scalar = DatastoreCommands(
@@ -166,9 +169,9 @@ def verify_datastore_commands():
   assert rows[:, 40:42].all()
   scalar.write(rows, ~active, values * 2)
   np.testing.assert_array_equal(rows[:, 40:42], ~active)
-  columns = output_columns(layout, {"public": "get_a"}, "scalar")
+  columns = output_columns(layout, ("get_a",), "scalar")
   scalars = read_outputs(torch.from_numpy(out), columns, "scalar")
-  np.testing.assert_allclose(scalars["public"], [4, 50])
+  np.testing.assert_allclose(scalars["get_a"], [4, 50])
   vector.write(rows, torch.ones(2, 2, dtype=torch.bool), torch.ones(2, 6) * 9)
   np.testing.assert_array_equal(rows[:, 50:52], [[0, 1]] * 2)
   np.testing.assert_allclose(rows[:, 23:26], 9)
@@ -193,45 +196,46 @@ def verify_datastore_commands():
 class Manager:
   """Deterministic manager that distinguishes failed rows from completed rows."""
 
-  def __init__(self, action):
+  def __init__(self, action: Any) -> None:
     self.action = action
     self.calls = 0
     self.failure = []
     self.inputs = []
     self.resets = []
 
-  def dispatch(self, command):
+  def dispatch(self, command: native.Command) -> None:
     assert command == native.Command.Step
     self.calls += 1
     self.inputs.append(self.action._in_np.copy())
 
-  def collect(self):
+  def collect(self) -> list[int]:
     out = self.action._out_np
     out[:] = self.calls * 4
     out[:, self.action._io.layout.output.status_offset()] = 0
     return self.failure
 
-  def respawn(self, reset_row_ids):
+  def respawn(self, reset_row_ids: list[int]) -> None:
     self.resets.append(list(reset_row_ids))
 
 
-def verify_pipeline():
+def verify_pipeline() -> None:
   """Keep interpolation delayed through partial resets and exclude failed rows."""
   io, env, entity = verify_layout()
   action = object.__new__(McRtcResidualJointPositionAction)
-  action._env = env
-  action._entity = entity
-  action.cfg = NS(frameskip=2, controller_vectors=(), controller_scalars=())
+  action._env = env  # ty: ignore[invalid-assignment]
+  action._entity = entity  # ty: ignore[invalid-assignment]
+  action.cfg = NS(  # ty: ignore[invalid-assignment]
+    frameskip=2, datastore_vectors_outputs=(), datastore_scalar_outputs=()
+  )
   action._num_targets = 2
   action._target_ids = torch.tensor([0, 1])
   action._io = io
   io._output_channels = action.output_channels
-  action._vector_aliases = action._scalar_aliases = {}
   action._datastore_scalar_commands = ()
   action._vector_commands = DatastoreCommands(io.layout, 2, (), "vector3")
   action._scalar_commands = DatastoreCommands(io.layout, 2, (), "scalar")
-  action._vector_columns = output_columns(io.layout, {}, "vector3")
-  action._scalar_columns = output_columns(io.layout, {}, "scalar")
+  action._vector_columns = output_columns(io.layout, (), "vector3")
+  action._scalar_columns = output_columns(io.layout, (), "scalar")
   action._alloc_interpolation_buffers()
   action._in_np = np.zeros((2, io.layout.input_size))
   action._out_np = np.zeros((2, io.layout.output_size))
@@ -240,8 +244,8 @@ def verify_pipeline():
   action._pending_reset = np.zeros(2, dtype=bool)
   action._dispatch_resets = np.zeros(2, dtype=bool)
   action._substep = 0
-  action._walking_reference_active = torch.zeros(2, dtype=torch.bool)
-  action._walking_reference_executed = torch.empty(2, 0)
+  action._vector_command_active = torch.zeros(2, 0, dtype=torch.bool)
+  action._vector_command_values = torch.empty(2, 0)
   action._datastore_scalar_active = torch.empty(2, 0, dtype=torch.bool)
   action._datastore_scalar_delta = torch.empty(2, 0)
   action._processed_actions = torch.zeros(2, 2)
@@ -264,11 +268,13 @@ def verify_pipeline():
   action._recovery_authority = None
   applied = []
 
-  def apply(control, residual):
+  def apply(
+    control: dict[str, torch.Tensor], residual: torch.Tensor
+  ) -> tuple[torch.Tensor, torch.Tensor]:
     applied.append(control["q"].clone())
     return residual, torch.zeros_like(residual, dtype=torch.bool)
 
-  action._apply_control = apply
+  action._apply_control = apply  # ty: ignore[invalid-assignment]
   for _ in range(4):
     action.apply_actions()
   np.testing.assert_allclose([v[0, 0] for v in applied], [0, 0, 2, 4])
@@ -307,7 +313,7 @@ def verify_pipeline():
   assert not action._has_staged_control.any()
 
 
-def main():
+def main() -> None:
   """Run contracts that do not require native recovery or adapter callbacks."""
   verify_layout()
   verify_datastore_commands()

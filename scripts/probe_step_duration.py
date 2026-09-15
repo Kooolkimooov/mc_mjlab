@@ -37,19 +37,23 @@ class DurationResult:
   max_restore_error_s: float
 
 
-def dcm_error_vector(env, sensors, term) -> tuple[torch.Tensor, torch.Tensor]:
+def dcm_error_vector(
+  env: ManagerBasedRlEnv, sensors: mdp._ZmpSensors, term: McRtcResidualActionBase
+) -> tuple[torch.Tensor, torch.Tensor]:
   """Return command-relative horizontal DCM error and grounded mask."""
   root = env.scene["robot"].indexing.root_body_id
   measured, normal_force = sensors.measured_offset(env)
   com = env.sim.data.subtree_com[:, root]
   com_vel = env.sim.data.subtree_linvel[:, root]
-  commanded = term.controller_vector("control_com_vel")[:, :2]
+  commanded = term.controller_vector(mdp.CONTROL_COM_VEL)[:, :2]
   omega = torch.sqrt(mdp.GRAVITY / com[:, 2].clamp(min=mdp.MIN_COM_HEIGHT))
   error = (com_vel[:, :2] - commanded) / omega.unsqueeze(-1) - measured
   return error, normal_force >= 20.0
 
 
-def apply_fixed_impulse(env, speed: float, height: float, duration_s: float) -> None:
+def apply_fixed_impulse(
+  env: ManagerBasedRlEnv, speed: float, height: float, duration_s: float
+) -> None:
   """Install one identical sagittal force-equivalent impulse in every world."""
   push = cast(mdp.finite_impulse_curriculum, mdp._push_term(env, "push_robot"))
   ids = torch.arange(env.num_envs, device=env.device)

@@ -32,6 +32,15 @@ from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
 from mc_mjlab.actions.mc_rtc_residual_joint_torque_actions import (
   McRtcResidualJointTorqueActionCfg,
 )
+from mc_mjlab.actions.walking_reference_action import (
+  WALKING_REF_VEL_GETTER,
+  GatedWalkingReferenceDeltaActionCfg,
+)
+from mc_mjlab.controller_datastore import (
+  CONTROL_COM,
+  CONTROL_COM_VEL,
+  PLANNED_ZMP,
+)
 from mc_mjlab.robots import mc_rtc_robot_configuration as mc_rtc
 from mc_mjlab.robots.robots_registry import (
   get_main_robot_spec,
@@ -178,8 +187,15 @@ def _make_env_cfg(
   )
   residual_clip = {pattern: (-v, v) for pattern, v in residual_scales.items()}
 
+  walks = walking_reference_velocity_scale is not None
+  if walks and control != "position":
+    raise ValueError("walking-reference deltas ride the position residual only")
   action_cls = (
-    McRtcResidualJointPositionActionCfg
+    (
+      GatedWalkingReferenceDeltaActionCfg
+      if walks
+      else McRtcResidualJointPositionActionCfg
+    )
     if control == "position"
     else McRtcResidualJointTorqueActionCfg
   )
@@ -192,11 +208,11 @@ def _make_env_cfg(
       mc_rtc_robot_name=robot_name,
       frameskip=2,
       num_workers=num_workers,
-      controller_vectors=(
-        "planned_zmp",
-        "control_com",
-        "control_com_vel",
-        *(("walking_ref_vel",) if walking_reference_velocity_scale else ()),
+      datastore_vectors_outputs=(
+        PLANNED_ZMP,
+        CONTROL_COM,
+        CONTROL_COM_VEL,
+        *((WALKING_REF_VEL_GETTER,) if walks else ()),
       ),
       pd_gains_path=str(robot.pd_gains_path),
       scale=residual_scales,
@@ -206,7 +222,11 @@ def _make_env_cfg(
       ),
       console_output=console_output,
       print_residual_every=print_residual_every,
-      walking_reference_velocity_scale=walking_reference_velocity_scale,
+      **(
+        {"walking_reference_velocity_scale": walking_reference_velocity_scale}
+        if walks
+        else {}
+      ),
     )
   }
 

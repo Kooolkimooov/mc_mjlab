@@ -1,26 +1,36 @@
-"""Numeric datastore aliases and independently gated baseline-relative commands."""
+"""Numeric datastore getters and independently gated baseline-relative commands."""
 
 from __future__ import annotations
+
+from collections.abc import Iterable, Sequence
+from typing import Literal
 
 import numpy as np
 import torch
 
-VECTOR_CALLBACKS = {
-  "planned_zmp": "mc_mjlab::planned_zmp",
-  "control_com": "mc_mjlab::control_com",
-  "control_com_vel": "mc_mjlab::control_com_vel",
-  "walking_ref_vel": "ismpc_walking::get_ref_vel",
-}
-SCALAR_CALLBACKS = {
-  "ismpc_walking::support_foot_name": "mc_mjlab::support_foot",
-  "support_foot": "mc_mjlab::support_foot",
-}
+import mc_rtc_interface as native
+
+DatastoreKind = Literal["vector3", "scalar"]
+
+# Getters the mc_mjlab adapter registers on every controller build; a task names
+# them directly, there is no alias layer. docs/coupling.md
+PLANNED_ZMP = "mc_mjlab::planned_zmp"
+CONTROL_COM = "mc_mjlab::control_com"
+CONTROL_COM_VEL = "mc_mjlab::control_com_vel"
+SUPPORT_FOOT = "mc_mjlab::support_foot"
 
 
 class DatastoreCommands:
   """Capture collected baselines and restore each setter once on deactivation."""
 
-  def __init__(self, layout, count, pairs, kind, absolute=()):
+  def __init__(
+    self,
+    layout: native.IoLayout,
+    count: int,
+    pairs: Sequence[tuple[str, str]],
+    kind: DatastoreKind,
+    absolute: Sequence[bool] = (),
+  ) -> None:
     self.pairs = tuple(pairs)
     self.width = 3 if kind == "vector3" else 1
     self.absolute = np.array(absolute or (False,) * len(pairs), dtype=bool)
@@ -47,13 +57,13 @@ class DatastoreCommands:
         "datastore setters; install the native usage-flags dependency"
       )
 
-  def reset(self, indices):
+  def reset(self, indices: list[int]) -> None:
     """Forget baselines when the native controller is rebuilt."""
     self.ready[indices] = False
     self.active[indices] = False
     self.baseline[indices] = 0.0
 
-  def collect(self, rows, indices):
+  def collect(self, rows: np.ndarray, indices: list[int]) -> None:
     """Accept fresh getter outputs even when no setter is active."""
     off = getattr(self.layout.output, "datastore_" + self.kind + "_offset")()
     for i, getter in enumerate(self.getter_indices):
@@ -63,7 +73,7 @@ class DatastoreCommands:
       self.baseline[inactive, i] = self.latest[inactive, i]
     self.ready[indices] = True
 
-  def write(self, rows, active, values):
+  def write(self, rows: np.ndarray, active: torch.Tensor, values: torch.Tensor) -> None:
     """Send absolute values with a usage flag for each callback and environment."""
     count, commands = self.active.shape
     if not commands:
@@ -83,21 +93,23 @@ class DatastoreCommands:
     self.active[:] = enabled
 
 
-def output_columns(layout, aliases, kind):
-  """Resolve public aliases to supported native getter columns, once."""
+def output_columns(
+  layout: native.IoLayout, names: Iterable[str], kind: DatastoreKind
+) -> dict[str, int]:
+  """Resolve configured getter names to their native output columns, once."""
   callbacks = list(getattr(layout.output, "datastore_" + kind))
   off = getattr(layout.output, "datastore_" + kind + "_offset")()
   width = 3 if kind == "vector3" else 1
-  return {alias: off + width * callbacks.index(cb) for alias, cb in aliases.items()}
+  return {name: off + width * callbacks.index(name) for name in names}
 
 
-def read_outputs(block, columns, kind):
-  """Slice the uploaded output block into public alias tensors."""
+def read_outputs(
+  block: torch.Tensor, columns: dict[str, int], kind: DatastoreKind
+) -> dict[str, torch.Tensor]:
+  """Slice the uploaded output block into one tensor per configured getter."""
   width = 3 if kind == "vector3" else 1
   dtype = torch.get_default_dtype()
   return {
-    alias: (block[:, start : start + width] if width == 3 else block[:, start]).to(
-      dtype
-    )
-    for alias, start in columns.items()
+    name: (block[:, start : start + width] if width == 3 else block[:, start]).to(dtype)
+    for name, start in columns.items()
   }

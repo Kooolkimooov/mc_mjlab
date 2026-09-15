@@ -13,15 +13,19 @@ from mjlab.utils.lab_api.math import quat_apply_inverse
 from mc_mjlab.actions.residual_mpc_joint_torque_action import (
   ResidualMpcJointTorqueAction,
 )
+from mc_mjlab.controller_datastore import SUPPORT_FOOT
 from mc_mjlab.residual_mpc import contact_phases
 from mc_mjlab.tasks import mdp as shared_mdp
 
 if TYPE_CHECKING:
   from mjlab.entity import Entity
   from mjlab.envs import ManagerBasedRlEnv
+  from mjlab.managers.manager_base import ManagerTermBaseCfg
 
 ACTION_NAME = "mc_rtc_residual"
-SUPPORT_FOOT_CALLBACK = "ismpc_walking::support_foot_name"
+# ismpc's own getter is a string; the adapter's numeric equivalent is what the
+# shared-memory layout can carry. docs/coupling.md
+SUPPORT_FOOT_CALLBACK = SUPPORT_FOOT
 STEP_TIME_CALLBACK = "ismpc_walking::t"
 STEP_DURATION_CALLBACK = "ismpc_walking::get_ts_target"
 QP_OBJECTIVE_CALLBACK = "ismpc_walking::qp_objective"
@@ -255,7 +259,7 @@ def projection_fraction(env: ManagerBasedRlEnv) -> torch.Tensor:
 class survival_kick_curriculum:
   """Move the kick's difficulty on smoothed survival, as Ranjbar's curriculum does."""
 
-  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
     kick = env.event_manager.get_term_cfg(
       cfg.params.get("term_name", "initial_base_velocity")
     ).func

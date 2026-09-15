@@ -353,11 +353,11 @@ than one distributed across leg encoders.
 
 **Rotation is composed, not added.** The root block carries a `wxyz` quaternion;
 adding to it yields something that is not a rotation.
-`ControllerIoBinding._compose_small_rotation` builds a unit quaternion from the
-residual's rotation vector, multiplies in the body frame, and renormalises.
+`_compose_small_rotation` builds a unit quaternion from the residual's rotation
+vector and right-multiplies it in the body frame.
 
-**Applied after both branches.** `_fill_root_and_sensor_columns` writes the root
-block in either the named-routing or the fallback path, and the IMU columns are
+**Applied after both branches.** `_fill_root_columns` writes the root block in
+either the named-routing or the fallback path, and the IMU columns are
 overwritten afterwards, so the offset is applied last rather than inside a branch.
 
 **All three channels work once they reach the right columns.** `root_pose` was
@@ -504,7 +504,7 @@ against `0.06957`). Episode length tracks the no-curriculum run throughout
 ## feedback_scale
 
 **Current:** `0.02` rad (about `1.15` degrees) at a saturated action, applied per
-residual joint to the encoder vector in `ControllerIoBinding._fill_joint_columns`.
+residual joint to the encoder vector in `SimControllerBridge._fill_joint_columns`.
 
 **It is a lie told to a balance controller, so it is bounded.** The offset makes
 mc_rtc believe a joint is somewhere it is not; too large a value and the

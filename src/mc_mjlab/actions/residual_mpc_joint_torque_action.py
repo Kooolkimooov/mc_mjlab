@@ -7,9 +7,10 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from mc_mjlab.actions.mc_rtc_residual_action import (
-  McRtcResidualActionBase,
-  McRtcResidualActionCfg,
+from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
+from mc_mjlab.actions.walking_reference_action import (
+  AbsoluteWalkingReferenceActionCfg,
+  AbsoluteWalkingReferenceMixin,
 )
 from mc_mjlab.residual_mpc import (
   advance_action_history,
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(kw_only=True)
-class ResidualMpcJointTorqueActionCfg(McRtcResidualActionCfg):
+class ResidualMpcJointTorqueActionCfg(AbsoluteWalkingReferenceActionCfg):
   """Configuration for paper-style joint-action to torque blending."""
 
   blend_factor: float = 0.1
@@ -37,14 +38,18 @@ class ResidualMpcJointTorqueActionCfg(McRtcResidualActionCfg):
     return ResidualMpcJointTorqueAction(self, env)
 
 
-class ResidualMpcJointTorqueAction(McRtcResidualActionBase):
+class ResidualMpcJointTorqueAction(
+  AbsoluteWalkingReferenceMixin, McRtcResidualActionBase
+):
   """Blend paper-style leg posture torques onto the mc_rtc nominal effort."""
 
   cfg: ResidualMpcJointTorqueActionCfg
   output_channels = ("q", "alpha", "tau")
   residual_unit = "Nm"
 
-  def __init__(self, cfg: ResidualMpcJointTorqueActionCfg, env: ManagerBasedRlEnv):
+  def __init__(
+    self, cfg: ResidualMpcJointTorqueActionCfg, env: ManagerBasedRlEnv
+  ) -> None:
     if not 0.0 <= cfg.blend_factor <= 1.0:
       raise ValueError("blend_factor must be in [0, 1]")
     if cfg.action_scale_blend_factor <= 0.0:

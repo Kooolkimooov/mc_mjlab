@@ -185,7 +185,7 @@ error = norm( (com_vel_xy - commanded_com_vel_xy) / omega - (CoP - com)_xy )
 ```
 
 with the command taken from the controller's own control robot
-(`controller_vector("control_com_vel")`, the same reference `com_velocity_error`
+(`controller_vector(CONTROL_COM_VEL)`, the same reference `com_velocity_error`
 uses). The reward is `exp(-(error/std)^2)`, gated on the feet carrying load
 exactly as `zmp_tracking` is. Standing is unaffected by the correction — its
 command is zero to four decimals — so this is purely a walking-side change.

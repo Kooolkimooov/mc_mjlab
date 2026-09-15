@@ -121,7 +121,7 @@ def run_regime(
       measured, normal_force = sensors.measured_offset(env)
       com = env.sim.data.subtree_com[:, root]
       com_vel = env.sim.data.subtree_linvel[:, root]
-      commanded = term.controller_vector("control_com_vel")[:, :2]
+      commanded = term.controller_vector(mdp.CONTROL_COM_VEL)[:, :2]
       omega = torch.sqrt(mdp.GRAVITY / com[:, 2].clamp(min=mdp.MIN_COM_HEIGHT))
       capture = com_vel[:, :2] / omega.unsqueeze(-1)
       grounded = normal_force >= 20.0

@@ -21,7 +21,7 @@ before dispatch so stale successful payloads cannot be mistaken for fresh output
 native migration. [Earlier measurements](coupling-history.md) retain their sample
 sizes and original values; they do not validate this integration.
 
-## ControllerIoBinding
+## SimControllerBridge
 
 **Current:** input and output columns use native offset methods. Python scatters
 all simulated reference-order joints, including passive joints, and retains
@@ -90,14 +90,22 @@ measurements and failure evidence are in [the historical notes](coupling-history
 
 ## DatastoreCommands
 
-**Current:** public scalar/vector accessors retain their names; configuration maps
-aliases to native callback names. Default vector aliases are `planned_zmp` →
-`mc_mjlab::planned_zmp`, `control_com` → `mc_mjlab::control_com`,
-`control_com_vel` → `mc_mjlab::control_com_vel`, and `walking_ref_vel` →
-`ismpc_walking::get_ref_vel`. Both `support_foot` and the historical public
-`ismpc_walking::support_foot_name` alias select numeric `mc_mjlab::support_foot`
-(right=0, left=1). Unknown names are treated as explicit callback names and must
-validate successfully in native initialization. Missing callbacks are errors.
+**Current:** there is no alias layer. A task names native callbacks directly in
+`datastore_vectors_outputs` / `datastore_scalar_outputs`, and `controller_vector`
+/ `controller_scalar` read them back under the same names. The adapter's four
+getters are constants in `mc_mjlab/controller_datastore.py` (`PLANNED_ZMP`,
+`CONTROL_COM`, `CONTROL_COM_VEL`, `SUPPORT_FOOT`); a controller's own getters are
+constants in the task that reads them, as `residual_mpc/mdp.py` holds the
+`ismpc_walking::` ones. `SUPPORT_FOOT` is numeric (right=0, left=1) — ismpc's own
+`ismpc_walking::support_foot_name` returns a string the layout cannot carry, so
+the plugin converts it. Every configured name must validate in native
+initialization; missing callbacks are errors.
+
+**History:**
+- 2026-09-15 — the two alias maps were deleted with the walking-reference move.
+  They mapped four vector and two scalar public names onto these callbacks, and
+  the one mapping that was not cosmetic (`ismpc_walking::support_foot_name` →
+  `mc_mjlab::support_foot`) is now written out at its single use site.
 
 Setters require one usage flag per callback per environment, addressed by
 `use_datastore_scalar_offset()` and `use_datastore_vector3_offset()`. Missing

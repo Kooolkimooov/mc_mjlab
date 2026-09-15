@@ -20,7 +20,7 @@ src/mc_mjlab/
   recovery_authority.py       # recovery detector and authority gating
   residual_mpc.py             # MPC-side residual plumbing
   residual_safety.py          # residual clipping and feasibility guards
-  controller_io.py            # simulation joints, root and sensors in native layout
+  sim_controller_bridge.py    # simulation joints, root and sensors in native layout
   controller_datastore.py     # numeric aliases, gated commands and baselines
 src/mc_rtc_interface/
   cpp/                        # native manager, worker, host and controller instance

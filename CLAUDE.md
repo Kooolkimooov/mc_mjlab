@@ -178,7 +178,7 @@ From mjlab down to mc_rtc:
   `mc_rtc_residual_joint_torque_actions.py` →
   `McRtcResidualJointTorqueAction(Cfg)` (adds channel `tau` → effort targets,
   residual on torque).
-- `mc_mjlab/controller_io.py` — simulation-side reference-order scatter/gather,
+- `mc_mjlab/sim_controller_bridge.py` — simulation-side reference-order scatter/gather,
   biased encoders, measured effort, local root coordinates, wxyz-to-xyzw
   conversion and named sensors. Use native layout offset methods throughout.
 - `mc_mjlab/controller_datastore.py` — numeric output aliases and independently

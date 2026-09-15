@@ -53,6 +53,7 @@ class ResidualFeedbackJointTorqueActionCfg(ResidualMpcJointTorqueActionCfg):
 
   def __post_init__(self) -> None:
     """Reject an unusable feedback spec here, not minutes into a training run."""
+    super().__post_init__()
     if self.feedback_scale <= 0.0:
       raise ValueError("feedback_scale must be positive")
     if not self.feedback_modalities:
@@ -72,7 +73,9 @@ class ResidualFeedbackJointTorqueAction(ResidualMpcJointTorqueAction):
 
   cfg: ResidualFeedbackJointTorqueActionCfg
 
-  def __init__(self, cfg: ResidualFeedbackJointTorqueActionCfg, env: ManagerBasedRlEnv):
+  def __init__(
+    self, cfg: ResidualFeedbackJointTorqueActionCfg, env: ManagerBasedRlEnv
+  ) -> None:
     super().__init__(cfg, env)
     ids = self._residual_ids
     joint_dim = self._num_targets if ids is None else int(ids.numel())

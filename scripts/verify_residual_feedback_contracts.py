@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 import torch
 
@@ -12,7 +14,7 @@ from mc_mjlab.actions.residual_feedback_action import (
   SUPPORTED_MODALITIES,
   ResidualFeedbackJointTorqueActionCfg,
 )
-from mc_mjlab.controller_io import ControllerIoBinding
+from mc_mjlab.sim_controller_bridge import _compose_small_rotation
 from mc_mjlab.tasks.residual_feedback.residual_feedback_env_cfg import (
   residual_feedback_env_cfg,
 )
@@ -23,8 +25,8 @@ from mc_mjlab.tasks.residual_mpc.residual_mpc_env_cfg import residual_mpc_env_cf
 def verify_rotation_composition() -> None:
   """A composed rotation stays a unit quaternion; adding one would not."""
 
-  def compose(quat, rotvec):
-    return ControllerIoBinding._compose_small_rotation(
+  def compose(quat: torch.Tensor, rotvec: Sequence[Sequence[float]]) -> np.ndarray:
+    return _compose_small_rotation(
       quat, torch.tensor(rotvec, dtype=torch.float64).expand(3, 3)
     ).numpy()
 

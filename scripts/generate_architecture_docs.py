@@ -7,7 +7,7 @@ import difflib
 import re
 import sys
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,7 +24,7 @@ HOST = NATIVE / "cpp" / "controllers_host.cpp"
 LAYOUT = NATIVE / "hpp" / "io_layout.hpp"
 PROTOCOL = NATIVE / "hpp" / "ipc_socket.hpp"
 POOL = NATIVE / "cpp" / "controllers_manager.cpp"
-BINDING = ex.SRC / "mc_mjlab" / "controller_io.py"
+BRIDGE = ex.SRC / "mc_mjlab" / "sim_controller_bridge.py"
 ACTION = ACTIONS / "mc_rtc_residual_action.py"
 POSITION = ACTIONS / "mc_rtc_residual_joint_position_actions.py"
 TORQUE = ACTIONS / "mc_rtc_residual_joint_torque_actions.py"
@@ -168,7 +168,7 @@ def node_id(name: str) -> str:
   return re.sub(r"[^A-Za-z0-9]", "_", name)
 
 
-def tick(items) -> str:
+def tick(items: Iterable[str]) -> str:
   """A comma-separated backticked list."""
   return ", ".join(f"`{item}`" for item in items)
 
@@ -265,7 +265,7 @@ def collaboration_diagram() -> str:
   """Methods each class calls on the collaborators it constructs."""
   owners = (
     (ACTION, "McRtcResidualActionBase"),
-    (BINDING, "ControllerIoBinding"),
+    (BRIDGE, "SimControllerBridge"),
   )
   worker_side = {
     name.rsplit(".", 1)[-1]

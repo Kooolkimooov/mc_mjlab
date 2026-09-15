@@ -39,6 +39,27 @@ or disturbance profile changes.
   controller failure; these are exploration bounds, not promoted hardware
   limits.
 
+## GatedWalkingReferenceDeltaActionCfg
+
+**Current:** the recovery-gated delta channel is its own action term in
+`actions/walking_reference_action.py`, not a pair of optional fields on the
+shared mc_rtc residual action. Its `__post_init__` reads `Enabled` out of the
+configured mc_rtc yaml and refuses to build unless the walking controller named
+by `walking_controller` is the one enabled, because
+`ismpc_walking::set_ref_vel` exists only there. `AbsoluteWalkingReferenceMixin`
+is the second drive mode (`residual_mpc`): a command-manager term sent as an
+absolute target, adding no action dimensions.
+
+**Re-measure if:** n/a — structural.
+
+**History:**
+- 2026-09-15 — split out of `McRtcResidualActionCfg`. The two modes had been
+  mutually exclusive fields guarded by a runtime `ValueError`; they are now two
+  classes, and the base action carries three generic extension hooks
+  (`_setup_datastore_vector_commands`, `_setup_action_extensions`,
+  `_process_action_extensions`, `_reset_action_extensions`) instead of any
+  walking state.
+
 ## walking_reference_velocity_slew_rate
 
 **Current:** `(2.0, 1.5, 3.0)` per second reaches any action bound in at least

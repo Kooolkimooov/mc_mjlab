@@ -14,10 +14,22 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.utils.lab_api.math import quat_apply, quat_apply_inverse
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
+from mc_mjlab.actions.walking_reference_action import (
+  WALKING_REF_VEL_GETTER,
+  WalkingReferenceMixin,
+)
+from mc_mjlab.controller_datastore import (
+  CONTROL_COM,
+  CONTROL_COM_VEL,
+  PLANNED_ZMP,
+)
 from mc_mjlab.robots import mc_rtc_robot_configuration as mc_rtc
 
 if TYPE_CHECKING:
+  from collections.abc import Iterable
+
   from mjlab.envs import ManagerBasedRlEnv
+  from mjlab.managers.manager_base import ManagerTermBaseCfg
   from mjlab.managers.reward_manager import RewardTermCfg
 
 
@@ -99,6 +111,16 @@ def requested_action_rate_l2(
   return torch.sum(torch.square(delta), dim=1) * paired
 
 
+def _walking_term(env: ManagerBasedRlEnv, action_name: str) -> WalkingReferenceMixin:
+  term = env.action_manager.get_term(action_name)
+  if not isinstance(term, WalkingReferenceMixin):
+    raise TypeError(
+      f"action term {action_name!r} does not drive the walking reference, "
+      f"got {type(term).__name__}"
+    )
+  return term
+
+
 def _restrict(term: McRtcResidualActionBase, values: torch.Tensor) -> torch.Tensor:
   """Keep only the columns carrying the residual (see ``residual_ids``)."""
   ids = term.residual_ids
@@ -116,14 +138,14 @@ def walking_reference_velocity(
   env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
 ) -> torch.Tensor:
   """Executed walking-reference delta in normalized action coordinates."""
-  return _residual_term(env, action_name).walking_reference_normalized
+  return _walking_term(env, action_name).walking_reference_normalized
 
 
 def walking_reference_l2(
   env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
 ) -> torch.Tensor:
   """Squared normalized walking-reference delta delivered this step."""
-  action = _residual_term(env, action_name).walking_reference_normalized
+  action = _walking_term(env, action_name).walking_reference_normalized
   return torch.sum(torch.square(action), dim=1)
 
 
@@ -131,7 +153,7 @@ def walking_reference_rate_l2(
   env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
 ) -> torch.Tensor:
   """Squared policy-step change in the normalized walking-reference delta."""
-  term = _residual_term(env, action_name)
+  term = _walking_term(env, action_name)
   delta = term.walking_reference_normalized - term.previous_walking_reference_normalized
   return torch.sum(torch.square(delta), dim=1)
 
@@ -273,14 +295,14 @@ def controller_planned_com_velocity(
   env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
 ) -> torch.Tensor:
   """The CoM velocity the controller's plan calls for."""
-  return _residual_term(env, action_name).controller_vector("control_com_vel")
+  return _residual_term(env, action_name).controller_vector(CONTROL_COM_VEL)
 
 
 def controller_walking_reference_velocity(
   env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
 ) -> torch.Tensor:
   """Current ``(vx, vy, yaw_rate)`` command reported by the walking controller."""
-  return _residual_term(env, action_name).controller_vector("walking_ref_vel")
+  return _residual_term(env, action_name).controller_vector(WALKING_REF_VEL_GETTER)
 
 
 def base_progress_tanh(
@@ -310,7 +332,9 @@ GRAVITY = 9.81
 MIN_COM_HEIGHT = 0.1
 
 
-def _wrench_sensor(mj_model, suffix: str, sensor_type: int) -> tuple[int, int]:
+def _wrench_sensor(
+  mj_model: mujoco.MjModel, suffix: str, sensor_type: int
+) -> tuple[int, int]:
   """``(sensordata offset, site id)`` of the model sensor named ``*suffix``."""
   for i in range(mj_model.nsensor):
     sensor = mj_model.sensor(i)
@@ -322,7 +346,9 @@ def _wrench_sensor(mj_model, suffix: str, sensor_type: int) -> tuple[int, int]:
   )
 
 
-def _scalar_sensor_range(mj_model, name: str, dim: int, device) -> torch.Tensor:
+def _scalar_sensor_range(
+  mj_model: mujoco.MjModel, name: str, dim: int, device: torch.device | str
+) -> torch.Tensor:
   """``sensordata`` columns of the ``dim``-wide model sensor named exactly ``name``."""
   # Entity-prefixed in the compiled model ("robot/root_angmom"), bare in the spec.
   for i in range(mj_model.nsensor):
@@ -444,7 +470,7 @@ class _ZmpSensors:
     data = env.sim.data
     com = data.subtree_com[:, self.root_body_id]
     com_vel = data.subtree_linvel[:, self.root_body_id]
-    commanded = _residual_term(env, action_name).controller_vector("control_com_vel")
+    commanded = _residual_term(env, action_name).controller_vector(CONTROL_COM_VEL)
     omega = torch.sqrt(GRAVITY / com[:, 2].clamp(min=MIN_COM_HEIGHT)).unsqueeze(-1)
     offset = (com_vel[:, :2] - commanded[:, :2]) / omega - measured
     return torch.linalg.vector_norm(offset, dim=1), normal_force
@@ -473,9 +499,9 @@ def planned_zmp_offset(
 ) -> torch.Tensor:
   """The controller's own CoM-to-ZMP offset, the target side of the comparison."""
   term = _residual_term(env, action_name)
-  return (
-    term.controller_vector("planned_zmp") - term.controller_vector("control_com")
-  )[:, :2]
+  return (term.controller_vector(PLANNED_ZMP) - term.controller_vector(CONTROL_COM))[
+    :, :2
+  ]
 
 
 def foot_load_share(
@@ -492,7 +518,7 @@ def foot_load_share(
 class gait_phase:
   """``(cos, sin)`` of gait phase, inferred from the foot-load phase plane."""
 
-  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
     self._sensors = _zmp_sensors(
       env, cfg.params["sensor_names"], cfg.params["asset_cfg"].name
     )
@@ -550,7 +576,7 @@ class zmp_error:
 
   # Read as `zmp_error / zmp_grounded`; alone it falls when the feet lift.
 
-  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
     self._sensors = _zmp_sensors(
       env, cfg.params["sensor_names"], cfg.params["asset_cfg"].name
     )
@@ -574,7 +600,7 @@ class zmp_error:
 class zmp_grounded:
   """Share of steps whose feet carry enough load for a centre of pressure."""
 
-  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
     self._sensors = _zmp_sensors(
       env, cfg.params["sensor_names"], cfg.params["asset_cfg"].name
     )
@@ -639,7 +665,7 @@ class com_velocity_tracking:
     del asset_cfg  # Resolved at init.
     term = _residual_term(env, action_name)
     error = env.sim.data.subtree_linvel[:, self._root_body_id] - term.controller_vector(
-      "control_com_vel"
+      CONTROL_COM_VEL
     )
     horizontal = torch.linalg.vector_norm(error[:, :2], dim=1)
     vertical = error[:, 2].abs()
@@ -655,7 +681,7 @@ class com_velocity_error:
   # The one term negative in every comparison: keep it as the canary for a policy
   # fighting the plan. docs/reward-shaping.md#com_velocity_error
 
-  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
     self._root_body_id = env.scene[cfg.params["asset_cfg"].name].indexing.root_body_id
 
   def __call__(
@@ -667,7 +693,7 @@ class com_velocity_error:
     del asset_cfg  # Resolved at init.
     term = _residual_term(env, action_name)
     error = env.sim.data.subtree_linvel[:, self._root_body_id] - term.controller_vector(
-      "control_com_vel"
+      CONTROL_COM_VEL
     )
     return torch.linalg.vector_norm(error, dim=1)
 
@@ -677,7 +703,7 @@ class dcm_error:
 
   # Read as `dcm_error / zmp_grounded`, for the same reason `zmp_error` is.
 
-  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
     self._sensors = _zmp_sensors(
       env, cfg.params["sensor_names"], cfg.params["asset_cfg"].name
     )
@@ -808,7 +834,7 @@ class torque_margin:
 class max_effort_ratio:
   """Maximum residual-joint actuator effort divided by its hardware limit."""
 
-  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
     term = _residual_term(env, cfg.params.get("action_name", "mc_rtc_residual"))
     ids = term.residual_ids
     cols = list(range(len(term.target_names))) if ids is None else ids.tolist()
@@ -832,7 +858,7 @@ class recorded_disturbance:
   #: Monotone counter, so this reads as "no push yet" for any run length.
   NEVER = -(1 << 30)
 
-  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
     del cfg
     self.last_push_step = torch.full(
       (env.num_envs,), self.NEVER, dtype=torch.long, device=env.device
@@ -889,7 +915,7 @@ class push_and_record(recorded_disturbance):
 class finite_impulse_curriculum(recorded_disturbance):
   """Apply finite, mass-scaled torso impulses with a global-step curriculum."""
 
-  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
     super().__init__(cfg, env)
     self._env = env
     self.asset = env.scene[cfg.params.get("asset_cfg", SceneEntityCfg("robot")).name]
@@ -1084,7 +1110,7 @@ class gradual_finite_impulse_curriculum(finite_impulse_curriculum):
 class stratified_finite_impulse_curriculum(finite_impulse_curriculum):
   """Draw each reset cohort from a stationary standing-plus-band mixture."""
 
-  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
     super().__init__(cfg, env)
     self.bands = tuple(tuple(band) for band in cfg.params["bands"])
     weights = self.validated_weights(cfg.params["band_weights"])
@@ -1099,7 +1125,7 @@ class stratified_finite_impulse_curriculum(finite_impulse_curriculum):
       (env.num_envs,), -1, dtype=torch.long, device=env.device
     )
 
-  def validated_weights(self, weights) -> tuple[float, ...]:
+  def validated_weights(self, weights: Iterable[float]) -> tuple[float, ...]:
     """Return one reset-time mixture, rejecting a malformed one."""
     values = tuple(float(value) for value in weights)
     if len(values) != len(self.bands) + 1:
@@ -1108,7 +1134,7 @@ class stratified_finite_impulse_curriculum(finite_impulse_curriculum):
       raise ValueError("band weights must be nonnegative and sum to one")
     return values
 
-  def set_band_weights(self, weights) -> None:
+  def set_band_weights(self, weights: Iterable[float]) -> None:
     """Replace the mixture drawn by cohorts resetting from now on."""
     values = self.validated_weights(weights)
     self.band_weights = values
@@ -1153,7 +1179,7 @@ class achievement_finite_impulse_curriculum(finite_impulse_curriculum):
 
   is_achievement_curriculum = True
 
-  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
     super().__init__(cfg, env)
     self.rehearsal_weights = cfg.params["rehearsal_weights"]
     self.current_stage = int(cfg.params.get("initial_stage", 0))
@@ -1243,7 +1269,7 @@ def _push_term(env: ManagerBasedRlEnv, term_name: str) -> recorded_disturbance:
 class episode_length_impulse_curriculum:
   """Move a stratified impulse mixture on smoothed terminal episode length."""
 
-  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
     push = _push_term(env, cfg.params.get("term_name", "push_robot"))
     if not isinstance(push, stratified_finite_impulse_curriculum):
       raise TypeError("episode-length curriculum needs a stratified impulse term")
@@ -1403,7 +1429,7 @@ class recovery_dcm:
 class recovery_dcm_error:
   """Command-relative DCM error during a recorded recovery window."""
 
-  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
     self._sensors = _zmp_sensors(
       env, cfg.params["sensor_names"], cfg.params["asset_cfg"].name
     )
@@ -1432,7 +1458,7 @@ class recovery_dcm_error:
 class recovery_authority_coverage:
   """Recovery-window steps that carried authority; read over ``recovery_active``."""
 
-  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
     self._sensors = _zmp_sensors(
       env, cfg.params["sensor_names"], cfg.params["asset_cfg"].name
     )
@@ -1459,7 +1485,7 @@ class recovery_authority_coverage:
 class recovery_active:
   """Grounded indicator for the recorded post-disturbance recovery window."""
 
-  def __init__(self, cfg, env: ManagerBasedRlEnv) -> None:
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
     self._sensors = _zmp_sensors(
       env, cfg.params["sensor_names"], cfg.params["asset_cfg"].name
     )

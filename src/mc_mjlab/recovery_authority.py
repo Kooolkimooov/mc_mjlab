@@ -11,15 +11,21 @@ from typing import TYPE_CHECKING
 import mujoco
 import torch
 
+from mc_mjlab.controller_datastore import CONTROL_COM_VEL
+
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
+
+  from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
 
 
 FEATURE_NAMES = ("dcm_error", "base_ang_speed", "tilt", "load_deviation")
 mjtSensor = vars(mujoco)["mjtSensor"]
 
 
-def _wrench_sensor(mj_model, suffix: str, sensor_type: int) -> tuple[int, int]:
+def _wrench_sensor(
+  mj_model: mujoco.MjModel, suffix: str, sensor_type: int
+) -> tuple[int, int]:
   """Resolve the data offset and site id of one suffix-matched wrench sensor."""
   for index in range(mj_model.nsensor):
     sensor = mj_model.sensor(index)
@@ -34,7 +40,7 @@ class RecoveryFeatureExtractor:
   def __init__(
     self,
     env: ManagerBasedRlEnv,
-    controller_term,
+    controller_term: McRtcResidualActionBase,
     sensor_names: tuple[str, ...] = ("LeftFootForceSensor", "RightFootForceSensor"),
   ) -> None:
     self.env = env
@@ -70,7 +76,7 @@ class RecoveryFeatureExtractor:
     total_force = force_w.sum(dim=1)
     com = data.subtree_com[:, self.root_body_id]
     com_vel = data.subtree_linvel[:, self.root_body_id]
-    commanded = self.term.controller_vector("control_com_vel")
+    commanded = self.term.controller_vector(CONTROL_COM_VEL)
     normal_force = total_force[:, 2].clamp(min=20.0)
     site_pos = data.site_xpos[:, self.site_ids]
     lever = site_pos - com.unsqueeze(1)
@@ -234,7 +240,12 @@ class RecoveryFilter:
 class RecoveryAuthority:
   """Stateful calibrated detector producing one residual-authority value per env."""
 
-  def __init__(self, env, controller_term, calibration_path: str | Path) -> None:
+  def __init__(
+    self,
+    env: ManagerBasedRlEnv,
+    controller_term: McRtcResidualActionBase,
+    calibration_path: str | Path,
+  ) -> None:
     self.calibration = RecoveryCalibration.from_json(calibration_path)
     self.extractor = RecoveryFeatureExtractor(env, controller_term)
     self.dt = env.step_dt

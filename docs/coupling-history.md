@@ -8,7 +8,7 @@ integration. Use [coupling.md](coupling.md) for current behavior.
 
 How one mc_rtc whole-body controller per environment gets stepped from a batched
 GPU sim. Code in `src/mc_mjlab/actions/`: the action term owns the control law,
-`ControllerPool` the transport, `ControllerIoBinding` the sim-side wiring, and
+`ControllerPool` the transport, `SimControllerBridge` the sim-side wiring, and
 `ControllerHost` the worker-side mc_rtc calls.
 
 The coupling replicates mc_mujoco's fidelity — real PD gains, force/IMU sensor
