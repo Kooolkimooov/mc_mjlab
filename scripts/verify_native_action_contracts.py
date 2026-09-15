@@ -13,12 +13,12 @@ import mc_rtc_interface as native
 from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionAction,
 )
-from mc_mjlab.actions.residual_printer import ResidualPrinter
 from mc_mjlab.actions.walking_reference_action import (
   WALKING_REF_VEL_GETTER,
   WALKING_REF_VEL_SETTER,
   GatedWalkingReferenceDeltaAction,
 )
+from mc_mjlab.residual_printer import ResidualPrinter
 from mc_mjlab.sim_controller_bridge import SimControllerBridge
 
 
