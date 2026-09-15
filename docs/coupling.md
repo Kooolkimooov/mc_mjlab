@@ -103,13 +103,14 @@ The action term owns one value buffer per kind, zero until a task writes it.
 `set_datastore_vector_input(setter, values)` takes `(num_envs, 3)`;
 `datastore_scalar_input` / `datastore_vector_input` read the fed value back.
 A value holds until set again, across episode resets, because a fed setter is a
-property of the task and not of the episode — the same rule as
-`datastore_scalar_input_holds`.
+property of the task and not of the episode — the rule the removed scalar holds
+followed. docs/controller-timing.md#removed-datastore_scalar_input_commands
 
-Two ordering hazards. The declared columns precede the command setters in the
-input block (`_build_bridge` assigns the layout lists before constructing
-`DatastoreCommands`, which appends to them), so declaring the same setter on
-both paths is rejected rather than written twice. And a declared setter is
+Two ordering hazards. The declared columns precede the `vector3` command
+setters in the input block (`_build_bridge` assigns the layout lists before
+constructing `DatastoreCommands`, which appends to them), so declaring the same
+setter on both paths is rejected rather than written twice. And a declared
+setter is
 written from the very first controller step, before any task code has run, so
 its zero default reaches the controller unless the task feeds it during
 construction.
@@ -149,7 +150,9 @@ baseline-plus-residual values. Deactivation restores that baseline once, then
 clears usage. Each callback is independently gated; getters remain populated
 while setters are inactive. After reset, relative commands wait for fresh getter
 output from the first step and apply in the following control period. Explicit
-absolute commands may apply immediately. Held scalar offsets survive resets.
+absolute commands may apply immediately. Only `vector3` pairs remain: the
+scalar ones were removed on 2026-09-15.
+docs/controller-timing.md#removed-datastore_scalar_input_commands
 
 The native interface accepts only `double` and `Eigen::Vector3d` callbacks.
 Getters return values or const references; setters accept values or const

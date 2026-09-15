@@ -65,12 +65,6 @@ class McRtcResidualActionCfg(BaseActionCfg):
   datastore_vectors_outputs: tuple[str, ...] = ()
   """Native Vector3d getters collected each period, without interpolation."""
 
-  datastore_scalar_input_commands: tuple[tuple[str, str], ...] = ()
-  """Probe-only paired scalar getter/setters; values are baseline-relative."""
-
-  datastore_scalar_input_holds: tuple[float, ...] = ()
-  """Constant offsets held across episodes, one per scalar command pair."""
-
   controller_timeout_ms: int = 60000
   """Native collection timeout, in milliseconds."""
 
@@ -109,7 +103,6 @@ class McRtcResidualActionBase(BaseAction):
     self._setup_residual(cfg)
     self._setup_datastore_vector_input_commands(cfg)
     self._setup_action_extensions(cfg)
-    self._setup_datastore_scalar_input_commands(cfg)
     self._setup_residual_printing(cfg)
 
     self._build_bridge(cfg)
@@ -177,14 +170,7 @@ class McRtcResidualActionBase(BaseAction):
       self._datastore_vector_input_command_is_absolute,
     )
 
-    self._datastore_scalar_input_commands = DatastoreCommands(
-      self._io.layout,
-      self.num_envs,
-      self._datastore_scalar_input_command_pairs,
-      "scalar",
-    )
-
-    # After the command pairs appended their own getters to the layout.
+    # After the command pair appended its own getter to the layout.
     self._datastore_vector_output_columns = output_columns(
       self._io.layout, cfg.datastore_vectors_outputs, "vector3"
     )
@@ -256,7 +242,6 @@ class McRtcResidualActionBase(BaseAction):
 
     all_envs = list(range(self.num_envs))
     self._datastore_vector_input_commands.collect(self._out_np, all_envs)
-    self._datastore_scalar_input_commands.collect(self._out_np, all_envs)
 
   def _finish_initialization(
     self, env: ManagerBasedRlEnv, cfg: McRtcResidualActionCfg
@@ -470,35 +455,6 @@ class McRtcResidualActionBase(BaseAction):
       )
     self._datastore_vector_input_feed[:, index].copy_(values)
 
-  def _setup_datastore_scalar_input_commands(self, cfg: McRtcResidualActionCfg) -> None:
-    """Allocate probe-controlled scalar datastore deltas without policy actions."""
-    self._datastore_scalar_input_command_pairs = tuple(
-      cfg.datastore_scalar_input_commands
-    )
-    count = len(self._datastore_scalar_input_command_pairs)
-    self._datastore_scalar_input_active = torch.zeros(
-      self.num_envs, count, dtype=torch.bool, device=self.device
-    )
-    self._datastore_scalar_input_delta = torch.zeros(
-      self.num_envs, count, device=self.device
-    )
-
-    holds = tuple(cfg.datastore_scalar_input_holds)
-    self._datastore_scalar_input_holds = holds
-    self._datastore_scalar_input_hold_values = torch.zeros(count, device=self.device)
-    if not holds:
-      return
-
-    if len(holds) != count:
-      raise ValueError(
-        f"datastore_scalar_input_holds has {len(holds)} values for {count} commands"
-      )
-    # Held for the whole run rather than pulsed, so a task can retune a
-    # controller parameter it cannot reach through configuration.
-    self._datastore_scalar_input_hold_values = torch.tensor(holds, device=self.device)
-    self._datastore_scalar_input_delta[:] = self._datastore_scalar_input_hold_values
-    self._datastore_scalar_input_active[:] = True
-
   def _setup_residual_printing(self, cfg: McRtcResidualActionCfg) -> None:
     """Resolve the printout interval and the column labels it prints once."""
     every = cfg.print_residual_every
@@ -555,14 +511,7 @@ class McRtcResidualActionBase(BaseAction):
     }
     self._datastore_scalar_outputs = {
       getter: torch.zeros(self.num_envs, device=self.device)
-      for getter in (
-        *self.cfg.datastore_scalar_outputs,
-        *(pair[0] for pair in self._datastore_scalar_input_command_pairs),
-      )
-    }
-    self._datastore_scalar_output_baselines = {
-      getter: torch.zeros(self.num_envs, device=self.device)
-      for getter, _ in self._datastore_scalar_input_command_pairs
+      for getter in self.cfg.datastore_scalar_outputs
     }
 
     # Latched per env until reset; read by the `controller_failed` termination
@@ -621,38 +570,6 @@ class McRtcResidualActionBase(BaseAction):
         f"action term's `datastore_scalar_outputs` "
         f"(have: {sorted(self._datastore_scalar_outputs)})"
       ) from None
-
-  def datastore_scalar_output_baseline(self, getter: str) -> torch.Tensor:
-    """Baseline captured when a scalar datastore command became active."""
-    try:
-      return self._datastore_scalar_output_baselines[getter]
-    except KeyError:
-      raise KeyError(
-        f"datastore scalar output {getter!r} is not configured; have: "
-        f"{sorted(self._datastore_scalar_output_baselines)}"
-      ) from None
-
-  def set_datastore_scalar_input_delta(
-    self, getter: str, active: torch.Tensor, delta: torch.Tensor
-  ) -> None:
-    """Set one probe-only scalar command as a delta from its live baseline."""
-    getters = [pair[0] for pair in self._datastore_scalar_input_command_pairs]
-    try:
-      index = getters.index(getter)
-    except ValueError:
-      raise KeyError(
-        f"datastore scalar input command {getter!r} is not configured; have: {getters}"
-      ) from None
-
-    expected = (self.num_envs,)
-    if tuple(active.shape) != expected or tuple(delta.shape) != expected:
-      raise ValueError(
-        f"datastore scalar input shapes {tuple(active.shape)} and {tuple(delta.shape)}, "
-        f"expected {expected}"
-      )
-
-    self._datastore_scalar_input_active[:, index].copy_(active)
-    self._datastore_scalar_input_delta[:, index].copy_(delta)
 
   def consume_torque_peak(self) -> torch.Tensor:
     """Peak |joint torque| since the last call, over the target joints; resets it."""
@@ -802,15 +719,6 @@ class McRtcResidualActionBase(BaseAction):
     self._projection_mask[env_ids] = False
     self._reset_action_extensions(env_ids)
 
-    # A held offset is a property of the task, not of the episode, so a reset
-    # must restore it rather than clear it.
-    self._datastore_scalar_input_active[env_ids] = bool(
-      self._datastore_scalar_input_holds
-    )
-    self._datastore_scalar_input_delta[env_ids] = (
-      self._datastore_scalar_input_hold_values
-    )
-
     if self._recovery_authority is not None:
       self._recovery_authority.reset(env_ids)
 
@@ -822,7 +730,6 @@ class McRtcResidualActionBase(BaseAction):
     self._manager.respawn(env_indices)
     self._pending_reset[env_indices] = True
     self._datastore_vector_input_commands.reset(env_indices)
-    self._datastore_scalar_input_commands.reset(env_indices)
 
     # Seed interpolation (subclass-specific rest value per channel) and discard
     # any staged output for the reset envs; they restart from that seed.
@@ -830,11 +737,7 @@ class McRtcResidualActionBase(BaseAction):
     self._seed_interpolation(rows)
     self._has_staged_control[rows] = False
 
-    for readouts in (
-      self._datastore_vector_outputs,
-      self._datastore_scalar_outputs,
-      self._datastore_scalar_output_baselines,
-    ):
+    for readouts in (self._datastore_vector_outputs, self._datastore_scalar_outputs):
       for values in readouts.values():
         values[rows] = 0.0
 
@@ -931,11 +834,6 @@ class McRtcResidualActionBase(BaseAction):
       self._datastore_vector_input_active,
       self._datastore_vector_input_values,
     )
-    self._datastore_scalar_input_commands.write(
-      self._in_np,
-      self._datastore_scalar_input_active,
-      self._datastore_scalar_input_delta,
-    )
 
     self._dispatch_resets[:] = self._pending_reset
     self._in_np[:, self._io.layout.input.reset_offset()] = self._dispatch_resets
@@ -967,7 +865,6 @@ class McRtcResidualActionBase(BaseAction):
 
     failed_indices = np.flatnonzero(worker_failed).tolist()
     self._datastore_vector_input_commands.reset(failed_indices)
-    self._datastore_scalar_input_commands.reset(failed_indices)
     env_indices = np.flatnonzero(status == int(native.OutputLayout.Status.OK)).tolist()
 
     block = self._io.upload_controller_output(self._out_np)
@@ -998,28 +895,6 @@ class McRtcResidualActionBase(BaseAction):
         destination[name].copy_(torch.where(mask, value, destination[name]))
 
     self._datastore_vector_input_commands.collect(self._out_np, env_indices)
-    self._datastore_scalar_input_commands.collect(self._out_np, env_indices)
-    self._upload_datastore_scalar_command_outputs(env_indices)
-
-  def _upload_datastore_scalar_command_outputs(self, env_indices: list[int]) -> None:
-    """Mirror the host-side scalar command values into the device readouts."""
-    if not self._datastore_scalar_input_command_pairs:
-      return
-    # Command state is host-side numpy, so these rows still have to be uploaded.
-    rows = torch.as_tensor(env_indices, device=self.device, dtype=torch.long)
-    for i, (getter, _) in enumerate(self._datastore_scalar_input_command_pairs):
-      for destination, source in (
-        (self._datastore_scalar_outputs, self._datastore_scalar_input_commands.latest),
-        (
-          self._datastore_scalar_output_baselines,
-          self._datastore_scalar_input_commands.baseline,
-        ),
-      ):
-        destination[getter][rows] = torch.tensor(
-          source[env_indices, i, 0],
-          device=self.device,
-          dtype=torch.get_default_dtype(),
-        )
 
   def _print_residual(self) -> None:
     """One line of env 0's residual, throttled by ``print_residual_every``."""

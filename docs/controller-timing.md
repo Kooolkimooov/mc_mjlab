@@ -30,9 +30,20 @@ datastore binding changes.
 - 2026-08-25 — enumerated 43 total datastore entries and 31 walking entries
   from the live installed controller without invoking a setter.
 
-## datastore_scalar_input_commands
+## Removed datastore_scalar_input_commands
 
-**Current:** the shared-memory transport accepts paired scalar getter/setters.
+**Removed 2026-09-15** from `McRtcResidualActionBase`, with
+`datastore_scalar_input_holds`, the baseline readouts and
+`set_datastore_scalar_input_delta`. No registered task ever declared a pair, the
+one probe below had already answered its question, and the path could not run
+under the native workers at all: `DatastoreCommands` requires
+`InputLayout.use_datastore_scalar_offset()`, which `io_layout.hpp` does not
+define. Unconditional setters remain, as
+[datastore_scalar_inputs](coupling.md#datastore_scalar_inputs); the gated pair
+transport survives for `vector3` only, where the walking reference uses it.
+What it did:
+
+the shared-memory transport accepts paired scalar getter/setters.
 Each active command is a delta from a baseline captured inside its worker. The
 host checks that the getter is finite and the setter takes `double`, publishes
 both the applied value and captured baseline, and restores the baseline when

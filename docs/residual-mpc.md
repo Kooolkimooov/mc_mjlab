@@ -1289,3 +1289,6 @@ resolved.
 **History:**
 - 2026-08-31 — added the scalar entries and `datastore_scalar_input_holds`; the
   runtime path works standalone and fails inside the worker pool.
+- 2026-09-15 — the scalar hold path was removed from the action base, so this
+  sweep is no longer reproducible as written.
+  docs/controller-timing.md#removed-datastore_scalar_input_commands
