@@ -596,7 +596,7 @@ then drives nonzero action to assert exact inactive residual zeroing.
 Three scripts assert the Python side of the action without starting a
 controller: `verify_native_action_contracts.py` (reference-order scatter and
 gather, quaternion conversion, sensor routing, datastore commands, dispatch
-pipeline), `verify_residual_mpc_contracts.py` (bridge and blending) and
+pipeline, `required_controller`), `verify_residual_mpc_contracts.py` (bridge and blending) and
 `verify_residual_feedback_contracts.py` (modality widths, parity with
 ResidualMPC, kick-curriculum gating). The native tests under
 `src/mc_rtc_interface/tests/` cover the other side of the boundary; these cover

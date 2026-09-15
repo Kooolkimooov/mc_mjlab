@@ -1,5 +1,7 @@
 """Verify native action wiring and scheduling without external controller adapters."""
 
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace as NS
 from typing import Any
 from unittest.mock import patch
@@ -12,11 +14,13 @@ import mc_mjlab.tasks  # noqa: F401
 import mc_rtc_interface as native
 from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionAction,
+  McRtcResidualJointPositionActionCfg,
 )
 from mc_mjlab.actions.walking_reference_action import (
   WALKING_REF_VEL_GETTER,
   WALKING_REF_VEL_SETTER,
   GatedWalkingReferenceDeltaAction,
+  GatedWalkingReferenceDeltaActionCfg,
 )
 from mc_mjlab.residual_printer import ResidualPrinter
 from mc_mjlab.sim_controller_bridge import SimControllerBridge
@@ -172,6 +176,47 @@ def verify_walking_reference_feed() -> None:
   torch.testing.assert_close(fed, torch.tensor([[0.02, 0.0, 0.0]] * 2))
 
 
+def verify_required_controller() -> None:
+  """Check that a term declaring a controller rejects a config enabling another."""
+  action = object.__new__(McRtcResidualJointPositionAction)
+  action._env = NS(cfg=NS(decimation=4))  # ty: ignore[invalid-assignment]
+
+  def cfg(cls: Any, path: Path, **kwargs: Any) -> Any:
+    return cls(
+      entity_name="robot",
+      actuator_names=(".*",),
+      mc_rtc_config_path=str(path),
+      frameskip=2,
+      **kwargs,
+    )
+
+  with tempfile.TemporaryDirectory() as directory:
+    other = Path(directory) / "other.yaml"
+    other.write_text("MainRobot: HRP5P\nEnabled: [OtherController]\n")
+    ismpc = Path(directory) / "ismpc.yaml"
+    ismpc.write_text("MainRobot: HRP5P\nEnabled: [LogisticController_ismpc]\n")
+
+    # The walking terms declare their controller by default, not per task.
+    walking = cfg(GatedWalkingReferenceDeltaActionCfg, other)
+    assert walking.required_controller == "LogisticController_ismpc"
+    try:
+      action._validate_cfg(walking)
+    except ValueError as error:
+      assert "required_controller" in str(error), error
+      assert "OtherController" in str(error), error
+    else:
+      raise AssertionError("a foreign controller must not validate")
+
+    action._validate_cfg(cfg(GatedWalkingReferenceDeltaActionCfg, ismpc))
+    # None is the escape hatch the error names, and every plain term's default.
+    action._validate_cfg(
+      cfg(GatedWalkingReferenceDeltaActionCfg, other, required_controller=None)
+    )
+    plain = cfg(McRtcResidualJointPositionActionCfg, other)
+    assert plain.required_controller is None
+    action._validate_cfg(plain)
+
+
 class Manager:
   """Deterministic manager that distinguishes failed rows from completed rows."""
 
@@ -291,6 +336,7 @@ def verify_pipeline() -> None:
 def main() -> None:
   """Run contracts that do not require native recovery or adapter callbacks."""
   verify_layout()
+  verify_required_controller()
   verify_walking_reference_feed()
   verify_pipeline()
   print("Native action deterministic contracts: PASS")
