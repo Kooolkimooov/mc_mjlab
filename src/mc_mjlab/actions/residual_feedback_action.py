@@ -113,16 +113,6 @@ class ResidualFeedbackJointTorqueAction(ResidualMpcJointTorqueAction):
       f"{'' if cfg.torque_channel else '; torque residual disabled'}."
     )
 
-  def _modality_slices(self, feedback: torch.Tensor) -> dict[str, torch.Tensor]:
-    """Split the trailing feedback block into its modalities, in cfg order."""
-    out: dict[str, torch.Tensor] = {}
-    start = 0
-    for name in self._modalities:
-      width = self._modality_dims[name]
-      out[name] = feedback[:, start : start + width]
-      start += width
-    return out
-
   def process_actions(self, actions: torch.Tensor) -> None:
     actions = actions.clamp(-1.0, 1.0)
     head = actions[:, : -self._feedback_dim]
@@ -173,6 +163,16 @@ class ResidualFeedbackJointTorqueAction(ResidualMpcJointTorqueAction):
     self._root_translation[env_ids] = 0.0
     self._root_rotation[env_ids] = 0.0
     self._wrench_offset[env_ids] = 0.0
+
+  def _modality_slices(self, feedback: torch.Tensor) -> dict[str, torch.Tensor]:
+    """Split the trailing feedback block into its modalities, in cfg order."""
+    out: dict[str, torch.Tensor] = {}
+    start = 0
+    for name in self._modalities:
+      width = self._modality_dims[name]
+      out[name] = feedback[:, start : start + width]
+      start += width
+    return out
 
   @property
   def feedback_offset(self) -> torch.Tensor:

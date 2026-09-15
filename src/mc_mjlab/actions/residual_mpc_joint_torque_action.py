@@ -83,6 +83,30 @@ class ResidualMpcJointTorqueAction(
       f"{zeroed} joint(s); lambda={cfg.blend_factor:.3f}."
     )
 
+  def process_actions(self, actions: torch.Tensor) -> None:
+    # A policy step begins, so the previous window's effort accumulator is spent.
+    self._effort_sq_sum.zero_()
+    self._effort_substeps = 0
+    previous, second_previous = advance_action_history(
+      self._processed_actions, self._previous_joint_action
+    )
+    self._previous_joint_action.copy_(previous)
+    self._second_previous_joint_action.copy_(second_previous)
+    super().process_actions(actions.clamp(-1.0, 1.0))
+
+  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+    super().reset(env_ids)
+    if env_ids is None:
+      env_ids = slice(None)
+    self._processed_actions[env_ids] = 0.0
+    self._previous_joint_action[env_ids] = 0.0
+    self._second_previous_joint_action[env_ids] = 0.0
+    self._residual_torque[env_ids] = 0.0
+    self._blended_residual_torque[env_ids] = 0.0
+    self._nominal_torque[env_ids] = 0.0
+    self._final_effort[env_ids] = 0.0
+    self._effort_sq_sum[env_ids] = 0.0
+
   def refresh_effort_limits_and_action_scale(self) -> None:
     """Sync randomized limits and recompute the paper's per-joint radian scale."""
     lower = self._effort_lower.expand(self.num_envs, -1).clone()
@@ -115,30 +139,6 @@ class ResidualMpcJointTorqueAction(
     ):
       raise ValueError("blend factor values must be finite and in [0, 1]")
     self.blend_factor[env_ids] = values
-
-  def process_actions(self, actions: torch.Tensor) -> None:
-    # A policy step begins, so the previous window's effort accumulator is spent.
-    self._effort_sq_sum.zero_()
-    self._effort_substeps = 0
-    previous, second_previous = advance_action_history(
-      self._processed_actions, self._previous_joint_action
-    )
-    self._previous_joint_action.copy_(previous)
-    self._second_previous_joint_action.copy_(second_previous)
-    super().process_actions(actions.clamp(-1.0, 1.0))
-
-  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
-    super().reset(env_ids)
-    if env_ids is None:
-      env_ids = slice(None)
-    self._processed_actions[env_ids] = 0.0
-    self._previous_joint_action[env_ids] = 0.0
-    self._second_previous_joint_action[env_ids] = 0.0
-    self._residual_torque[env_ids] = 0.0
-    self._blended_residual_torque[env_ids] = 0.0
-    self._nominal_torque[env_ids] = 0.0
-    self._final_effort[env_ids] = 0.0
-    self._effort_sq_sum[env_ids] = 0.0
 
   def _seed_interpolation(self, env_ids: torch.Tensor) -> None:
     stance = self._entity.data.joint_pos_biased[:, self._target_ids]

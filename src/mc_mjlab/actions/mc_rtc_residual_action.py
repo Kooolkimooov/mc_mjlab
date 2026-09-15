@@ -260,6 +260,76 @@ class McRtcResidualActionBase(BaseAction):
         memory.unlink()
         setattr(self, name, None)
 
+  def controller_reference(self, channel: str) -> torch.Tensor:
+    """Latest raw controller output for ``channel``, residual excluded."""
+    return self._next_control[channel]
+
+  def datastore_scalar_output(self, getter: str) -> torch.Tensor:
+    """Latest scalar datastore getter value collected from each controller."""
+    try:
+      return self._datastore_scalar_outputs[getter]
+    except KeyError:
+      raise KeyError(
+        f"datastore scalar output {getter!r} is not configured; add it to the "
+        f"action term's `datastore_scalar_outputs` "
+        f"(have: {sorted(self._datastore_scalar_outputs)})"
+      ) from None
+
+  def datastore_vector_output(self, getter: str) -> torch.Tensor:
+    """Latest ``(num_envs, 3)`` value of one collected vector datastore getter."""
+    try:
+      return self._datastore_vector_outputs[getter]
+    except KeyError:
+      raise KeyError(
+        f"datastore vector output {getter!r} is not collected; add it to the "
+        f"action term's `datastore_vectors_outputs` "
+        f"(have: {sorted(self._datastore_vector_outputs)})"
+      ) from None
+
+  def datastore_scalar_input(self, setter: str) -> torch.Tensor:
+    """Value currently fed to one configured scalar datastore setter."""
+    index = self._datastore_input_index(
+      self._datastore_scalar_input_columns, setter, "scalar"
+    )
+    return self._datastore_scalar_input_feed[:, index]
+
+  def datastore_vector_input(self, setter: str) -> torch.Tensor:
+    """Value currently fed to one configured vector datastore setter."""
+    index = self._datastore_input_index(
+      self._datastore_vector_input_columns, setter, "vectors"
+    )
+    return self._datastore_vector_input_feed[:, index]
+
+  def set_datastore_scalar_input(self, setter: str, values: torch.Tensor) -> None:
+    """Feed one scalar datastore setter; the value holds until set again."""
+    index = self._datastore_input_index(
+      self._datastore_scalar_input_columns, setter, "scalar"
+    )
+    if tuple(values.shape) != (self.num_envs,):
+      raise ValueError(
+        f"datastore scalar input shape {tuple(values.shape)}, "
+        f"expected {(self.num_envs,)}"
+      )
+    self._datastore_scalar_input_feed[:, index].copy_(values)
+
+  def set_datastore_vector_input(self, setter: str, values: torch.Tensor) -> None:
+    """Feed one vector datastore setter; the value holds until set again."""
+    index = self._datastore_input_index(
+      self._datastore_vector_input_columns, setter, "vectors"
+    )
+    if tuple(values.shape) != (self.num_envs, 3):
+      raise ValueError(
+        f"datastore vector input shape {tuple(values.shape)}, "
+        f"expected {(self.num_envs, 3)}"
+      )
+    self._datastore_vector_input_feed[:, index].copy_(values)
+
+  def consume_torque_peak(self) -> torch.Tensor:
+    """Peak |joint torque| since the last call, over the target joints; resets it."""
+    peak = self._torque_peak.clone()
+    self._torque_peak.zero_()
+    return peak
+
   def _advance_control_period(self) -> None:
     """Collect the finished solve, roll the ramp endpoints and dispatch the next."""
     assert self._manager is not None
@@ -370,76 +440,6 @@ class McRtcResidualActionBase(BaseAction):
 
   def _reset_action_extensions(self, env_ids: torch.Tensor | slice) -> None:
     """Clear extension state for the given (reset) envs."""
-
-  def controller_reference(self, channel: str) -> torch.Tensor:
-    """Latest raw controller output for ``channel``, residual excluded."""
-    return self._next_control[channel]
-
-  def datastore_scalar_output(self, getter: str) -> torch.Tensor:
-    """Latest scalar datastore getter value collected from each controller."""
-    try:
-      return self._datastore_scalar_outputs[getter]
-    except KeyError:
-      raise KeyError(
-        f"datastore scalar output {getter!r} is not configured; add it to the "
-        f"action term's `datastore_scalar_outputs` "
-        f"(have: {sorted(self._datastore_scalar_outputs)})"
-      ) from None
-
-  def datastore_vector_output(self, getter: str) -> torch.Tensor:
-    """Latest ``(num_envs, 3)`` value of one collected vector datastore getter."""
-    try:
-      return self._datastore_vector_outputs[getter]
-    except KeyError:
-      raise KeyError(
-        f"datastore vector output {getter!r} is not collected; add it to the "
-        f"action term's `datastore_vectors_outputs` "
-        f"(have: {sorted(self._datastore_vector_outputs)})"
-      ) from None
-
-  def datastore_scalar_input(self, setter: str) -> torch.Tensor:
-    """Value currently fed to one configured scalar datastore setter."""
-    index = self._datastore_input_index(
-      self._datastore_scalar_input_columns, setter, "scalar"
-    )
-    return self._datastore_scalar_input_feed[:, index]
-
-  def datastore_vector_input(self, setter: str) -> torch.Tensor:
-    """Value currently fed to one configured vector datastore setter."""
-    index = self._datastore_input_index(
-      self._datastore_vector_input_columns, setter, "vectors"
-    )
-    return self._datastore_vector_input_feed[:, index]
-
-  def set_datastore_scalar_input(self, setter: str, values: torch.Tensor) -> None:
-    """Feed one scalar datastore setter; the value holds until set again."""
-    index = self._datastore_input_index(
-      self._datastore_scalar_input_columns, setter, "scalar"
-    )
-    if tuple(values.shape) != (self.num_envs,):
-      raise ValueError(
-        f"datastore scalar input shape {tuple(values.shape)}, "
-        f"expected {(self.num_envs,)}"
-      )
-    self._datastore_scalar_input_feed[:, index].copy_(values)
-
-  def set_datastore_vector_input(self, setter: str, values: torch.Tensor) -> None:
-    """Feed one vector datastore setter; the value holds until set again."""
-    index = self._datastore_input_index(
-      self._datastore_vector_input_columns, setter, "vectors"
-    )
-    if tuple(values.shape) != (self.num_envs, 3):
-      raise ValueError(
-        f"datastore vector input shape {tuple(values.shape)}, "
-        f"expected {(self.num_envs, 3)}"
-      )
-    self._datastore_vector_input_feed[:, index].copy_(values)
-
-  def consume_torque_peak(self) -> torch.Tensor:
-    """Peak |joint torque| since the last call, over the target joints; resets it."""
-    peak = self._torque_peak.clone()
-    self._torque_peak.zero_()
-    return peak
 
   def _validate_cfg(self, cfg: McRtcResidualActionCfg) -> None:
     """Reject configurations the shared-memory pipeline cannot honour."""
