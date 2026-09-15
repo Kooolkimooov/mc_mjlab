@@ -758,3 +758,32 @@ draws.
 **History:**
 - 2026-09-01 — added after unmatched randomization was found to be the confound
   behind a result that reversed sign between 16 and 64 environments.
+
+## agent.seed
+
+**Current:** `42` everywhere, including `--nominal` runs, the probes and both
+contract suites. Every reported number is therefore one seed, and a policy that
+only clears a gate at seed 42 has not been shown to clear it at all.
+
+**`--agent.seed -1` is the lever that randomizes it.** `mjlab/scripts/train.py`
+copies `agent.seed` into `env.seed`, and `ManagerBasedRlEnv.__init__` calls its
+own `seed()`, whose `-1` branch draws `np.random.randint(0, 10_000)`, seeds
+python, numpy, torch and warp from it, and writes the drawn value back into
+`cfg.env.seed`. The draw is printed (`Setting seed: N`) and appears in the
+startup info table, so the seed behind a run stays recoverable from its log.
+`seed=None` is not the same lever: it skips the seeding call entirely. rsl-rl
+never reads `agent.seed` itself, so this one call is the whole mechanism.
+
+Use it when a checkpoint looks promising and the question has become whether the
+result is the policy or the seed: re-run the screen under two or three drawn
+seeds before spending a qualification on it.
+
+**Two hazards.** A run started at `-1` draws a *different* seed when it resumes,
+and `seed` is not in `_OPERATIONAL_ENV_KEYS`, so the drawn value sits inside the
+training contract and `validate_effective_training_manifest` refuses the resume
+on `environment.seed`. Pass the seed the log recorded instead, or move `seed`
+into the operational keys if randomized runs should stay resumable. And under
+multi-GPU the seed is `agent.seed + rank`, so `-1` randomizes rank 0 only and
+hands ranks `1, 2, 3` the fixed seeds `0, 1, 2`.
+
+**Re-measure if:** n/a — structural.

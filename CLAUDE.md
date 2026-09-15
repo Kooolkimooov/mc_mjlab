@@ -334,6 +334,11 @@ Cross-cutting invariants:
 - `fell_over` and `collapsed` are mutually exclusive labels (tilt wins), so their
   shares add up; their *union* is unchanged, and hazard is still computed from the
   union rather than by summing the two.
+- Every run is seed 42 unless told otherwise; `--agent.seed -1` is the lever that
+  draws one instead, and is how a promising checkpoint gets re-screened off its
+  training seed. The drawn seed enters the training contract, so such a run
+  cannot be resumed without passing the seed its log printed.
+  docs/evaluation.md#agentseed
 - Neither logged family of curves means what it looks like. Every
   `Episode_Reward/*` is an episode *sum*, and those correlate with episode
   length at r = +0.98 — they move when the robot survives longer, not when it
