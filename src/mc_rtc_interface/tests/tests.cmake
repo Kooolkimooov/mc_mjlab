@@ -109,6 +109,8 @@ target_link_libraries(
   InstanceProbe PRIVATE
   mc_rtc::mc_control
 )
+target_compile_definitions(InstanceProbe PRIVATE
+  MC_RTC_TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/objects")
 
 set_target_properties(
   InstanceProbe PROPERTIES

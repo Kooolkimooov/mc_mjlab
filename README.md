@@ -199,6 +199,7 @@ viewer.
 
 ```sh
 scripts/demos/run_test_mc_rtc.sh                    # viser viewer, 1 env
+scripts/demos/run_locomanip.sh                      # HRP5P cart push demo
 scripts/demos/run_test_mc_rtc.sh --num-envs 8       # extra args go to `play`
 scripts/demos/run_test_mc_rtc.sh --viewer native    # native viewer instead
 MC_MJLAB_CONTROL=torque scripts/demos/run_test_mc_rtc.sh   # torque control mode
@@ -270,6 +271,8 @@ uv run python scripts/compare_to_baseline.py --checkpoint <path/to/model_*.pt>
 uv run python scripts/audit_rewards.py --checkpoint <path/to/model_*.pt>
 # Can a constant residual move the centre of pressure at all?
 uv run python scripts/probe_residual_authority.py --level 1.0
+uv run python scripts/verify_locomanip.py            # five reset cycles
+uv run python scripts/verify_locomanip.py --cycles 1 --isolation
 uv run python scripts/probe_walking_reference.py
 uv run python scripts/inspect_controller_datastore.py
 uv run python scripts/probe_step_duration.py

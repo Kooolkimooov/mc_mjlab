@@ -16,6 +16,7 @@
  *  3 * nbs body sensor accelerometer
  *  3 * nfs force sensor force
  *  3 * nfs force sensor torque
+ *  13 * no  object position, xyzw quaternion and world linear/angular velocity
  *  nds     datastore scalars
  *  3 * ndv datastore vectors
  *  1       reset bool
@@ -34,6 +35,7 @@ struct InputLayout
         std::vector<std::string> joint_order;
         std::vector<std::string> body_sensors;
         std::vector<std::string> force_sensors;
+        std::vector<std::string> objects;
 
         std::vector<std::string> datastore_scalar;
         std::vector<std::string> datastore_vector3;
@@ -42,6 +44,7 @@ struct InputLayout
         inline static constexpr std::size_t root_state_size   = 3 + 4 + 3;
         inline static constexpr std::size_t body_sensor_size  = 3 + 3;
         inline static constexpr std::size_t force_sensor_size = 3 + 3;
+        inline static constexpr std::size_t object_state_size = 3 + 4 + 3 + 3;
 
         inline static const std::string floating_base_sensor = "FloatingBase";
 
@@ -75,9 +78,14 @@ struct InputLayout
             return body_sensors_offset() + body_sensor_size * body_sensors.size();
         }
 
-        std::size_t datastore_scalar_offset() const
+        std::size_t objects_offset() const
         {
             return force_sensors_offset() + force_sensor_size * force_sensors.size();
+        }
+
+        std::size_t datastore_scalar_offset() const
+        {
+            return objects_offset() + object_state_size * objects.size();
         }
 
         std::size_t datastore_vector3_offset() const

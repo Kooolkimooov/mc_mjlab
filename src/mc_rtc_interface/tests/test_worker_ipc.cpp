@@ -75,6 +75,7 @@ namespace
         IPCSocket  channel(endpoint, IPCSocket::Mode::Connect);
         const auto configuration = channel.receive<WorkerStartMessage>(5000);
         assert(configuration.layout.input.joint_order.size() == 4000);
+        assert(configuration.layout.input.objects == std::vector<std::string>({"cart", "box"}));
         assert(configuration.input.offset == 64);
         channel.send(Reply{});
         while (true)
@@ -101,6 +102,7 @@ int main(int argc, char **argv)
     layout.output.joint_order       = layout.input.joint_order;
     layout.input.body_sensors       = {"FloatingBase"};
     layout.input.force_sensors      = {"LeftFoot"};
+    layout.input.objects            = {"cart", "box"};
     layout.input.datastore_scalar   = {"set_scalar"};
     layout.input.datastore_vector3  = {"set_vector"};
     layout.output.datastore_scalar  = {"get_scalar"};

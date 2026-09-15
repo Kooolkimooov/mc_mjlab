@@ -36,8 +36,12 @@ void ControllerInstance::initialize(IoInput input, IoOutput output)
         m_io_to_mbc.push_back(match == to.end() ? invalid_index : static_cast<std::size_t>(match - to.begin()));
     }
 
-    const auto pose = prepare_reset(input);
-    m_controller->init(m_q, pose);
+    const auto pose  = prepare_reset(input);
+    auto       poses = object_poses(input);
+    const auto name  = m_controller->controller().robot().name();
+    poses[name]      = pose;
+    apply_objects(input, true);
+    m_controller->init({{name, m_q}}, poses);
 
     finish_reset(input, pose);
     apply_output(output);
@@ -54,9 +58,11 @@ void ControllerInstance::reset(IoInput input, IoOutput output)
         return;
     }
 
-    const auto pose = prepare_reset(input);
-    const auto name = m_controller->controller().robot().name();
-    m_controller->reset({{name, m_q}}, {{name, pose}});
+    const auto pose  = prepare_reset(input);
+    const auto name  = m_controller->controller().robot().name();
+    auto       poses = object_poses(input);
+    poses[name]      = pose;
+    m_controller->reset({{name, m_q}}, poses);
     finish_reset(input, pose);
     apply_output(output);
 
@@ -79,6 +85,7 @@ void ControllerInstance::finish_reset(IoInput input, const sva::PTransformd &pos
     controller.realRobot().posW(pose);
 
     apply_input(input);
+    apply_objects(input, true);
 
     controller.reset({controller.robot().mbc().q});
     controller.resetObserverPipelines();
@@ -172,6 +179,49 @@ void ControllerInstance::apply_input(IoInput input)
     }
 
     m_controller->setWrenches(wrenches);
+    apply_objects(input);
+}
+
+std::map<std::string, sva::PTransformd> ControllerInstance::object_poses(IoInput input) const
+{
+    std::map<std::string, sva::PTransformd> poses;
+    const auto                             &controller = m_controller->controller();
+    for (std::size_t i = 0; i < m_layout.input.objects.size(); ++i)
+    {
+        const auto &name = m_layout.input.objects[i];
+        if (name == controller.robot().name() || !controller.robots().hasRobot(name) ||
+            !controller.realRobots().hasRobot(name))
+            throw std::invalid_argument("invalid controller object: " + name);
+        const auto state = input.subspan(
+            m_layout.input.objects_offset() + InputLayout::object_state_size * i, InputLayout::object_state_size);
+        poses.emplace(
+            name,
+            sva::PTransformd(
+                utils::geometry::quaternion_xyzw(state.subspan<3, 4>()).inverse(), utils::geometry::vector3(state, 0)));
+    }
+    return poses;
+}
+
+void ControllerInstance::apply_objects(IoInput input, bool seed_reference)
+{
+    auto      &controller = m_controller->controller();
+    const auto poses      = object_poses(input);
+    for (std::size_t i = 0; i < m_layout.input.objects.size(); ++i)
+    {
+        const auto &name  = m_layout.input.objects[i];
+        const auto  state = input.subspan(
+            m_layout.input.objects_offset() + InputLayout::object_state_size * i, InputLayout::object_state_size);
+        const sva::MotionVecd velocity(utils::geometry::vector3(state, 10), utils::geometry::vector3(state, 7));
+        auto                  update = [&](mc_rbdyn::Robot &robot)
+        {
+            robot.posW(poses.at(name));
+            robot.velW(velocity);
+            robot.forwardKinematics();
+            robot.forwardVelocity();
+        };
+        update(controller.realRobot(name));
+        if (seed_reference) update(controller.robot(name));
+    }
 }
 
 void ControllerInstance::apply_output(IoOutput output)

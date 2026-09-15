@@ -7,6 +7,7 @@ import numpy as np
 import torch
 
 import mc_rtc_interface as native
+from mc_mjlab.controller_objects import ControllerObjects
 from mc_mjlab.robots import mc_rtc_robot_configuration as robots
 
 
@@ -24,7 +25,15 @@ class ControllerIoBinding:
   """Resolve reference-order joints and named sensors once, then transfer batches."""
 
   def __init__(
-    self, env, entity, target_names, target_ids, robot_name, channels, entity_name
+    self,
+    env,
+    entity,
+    target_names,
+    target_ids,
+    robot_name,
+    channels,
+    entity_name,
+    controller_objects=None,
   ):
     self._env = env
     self._entity = entity
@@ -60,6 +69,8 @@ class ControllerIoBinding:
     # mc_rbdyn sensor names come back as bytes; the native setter wants str.
     self.layout.input.body_sensors = [_text(s.name()) for s in module.bodySensors()]
     self.layout.input.force_sensors = [_text(s.name()) for s in module.forceSensors()]
+    self._objects = ControllerObjects(env, controller_objects or {})
+    self.layout.input.objects = list(controller_objects or {})
     self._sens_src_cols = []
     self._sens_dst_cols = []
     for i, name in enumerate(self.layout.input.body_sensors):
@@ -161,6 +172,7 @@ class ControllerIoBinding:
       if feedback is not None:
         block[:, offset + self._target_cols_t] += _f64(feedback)
     self._fill_root_and_sensor_columns(block)
+    self._objects.fill(block, layout.objects_offset())
     self._host_view(rows, "input")[:, : self._input_width].copy_(block)
 
   def _fill_root_and_sensor_columns(self, block):

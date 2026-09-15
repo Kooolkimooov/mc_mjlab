@@ -62,6 +62,9 @@ class McRtcResidualActionCfg(BaseActionCfg):
   controller_vectors: tuple[str, ...] = ()
   """Vector aliases collected each period without substep interpolation."""
 
+  controller_objects: dict[str, str] = field(default_factory=dict)
+  """Measured mc_rtc object names mapped to free-body scene entities."""
+
   controller_vector_callbacks: dict[str, str] = field(
     default_factory=lambda: dict(VECTOR_CALLBACKS)
   )
@@ -146,6 +149,7 @@ class McRtcResidualActionBase(BaseAction):
       cfg.mc_rtc_robot_name,
       self.output_channels,
       cfg.entity_name,
+      cfg.controller_objects,
     )
     self._vector_aliases = {
       name: cfg.controller_vector_callbacks.get(name, name)

@@ -1,0 +1,66 @@
+MainRobot: HRP5P
+Enabled: LocomanipController
+Timestep: 0.002
+GUIServer:
+  Enable: false
+Log: false
+
+OverwriteConfigKeys: [MjlabCartDemo]
+OverwriteConfigList:
+  MjlabCartDemo:
+    HandTaskList:
+      - {type: impedance, hand: Left, frame: LeftHandCloseContact, stiffness: 1000.0, weight: 1000.0}
+      - {type: impedance, hand: Right, frame: RightHandCloseContact, stiffness: 1000.0, weight: 1000.0}
+    CentroidalManager:
+      method: PreviewControlExtZmp
+    ManipManager:
+      enableRos: false
+      objToHandTranss:
+        Left:
+          translation: [-0.35, 0.3, 1.0]
+          rotation: [0.560986, -0.430459, 0.430459, 0.560986]
+        Right:
+          translation: [-0.35, -0.3, 1.0]
+          rotation: [0.560986, 0.430459, 0.430459, -0.560986]
+      preReachTranss:
+        Left:
+          translation: [0, 0, 0.15]
+        Right:
+          translation: [0, 0, 0.15]
+    CompletionState: LMC::DemoHold
+    DemoFSM:
+      Managed: false
+      StepByStep: false
+      init: LMC::DemoInitial
+      states:
+        LMC::DemoInitial:
+          base: LMC::Initial
+          configs:
+            autoStartTime: 0.0
+            gripperCommands:
+              - {name: l_gripper, opening: 1.0}
+              - {name: r_gripper, opening: 1.0}
+        LMC::DemoPush:
+          base: LMC::ConfigManip
+          configs:
+            reach: true
+            release: true
+            waypointList:
+              - duration: 30.0
+                relPose:
+                  translation: [1.0, 0, 0]
+            preHandWrenches:
+              Left: {force: [0, 0, 0], couple: [0, 0, 0]}
+              Right: {force: [0, 0, 0], couple: [0, 0, 0]}
+        LMC::DemoHold:
+          base: Pause
+          duration: 3600
+      transitions:
+        - [LMC::DemoInitial, OK, LMC::DemoPush, Auto]
+        - [LMC::DemoPush, OK, LMC::DemoHold, Auto]
+
+robots:
+  obj:
+    module: LMC/Cart
+    init_pos:
+      translation: [0.75, 0, 0]

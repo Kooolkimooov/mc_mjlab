@@ -1,5 +1,6 @@
 #include <chrono>
 #include <mc_control/mc_controller.h>
+#include <mc_rbdyn/RobotLoader.h>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -7,8 +8,27 @@
 
 struct ProbeController : mc_control::MCController
 {
-        ProbeController(mc_rbdyn::RobotModulePtr module, double dt) : MCController(module, dt)
+        ProbeController(mc_rbdyn::RobotModulePtr module, double dt, const mc_rtc::Configuration &config)
+            : MCController(module, dt)
         {
+            if (config("ProbeObject", false))
+            {
+                loadRobot(mc_rbdyn::RobotLoader::get_robot_module("object", MC_RTC_TEST_ASSET_DIR, "cart"), "obj");
+                datastore().make_call(
+                    "object_measured", [this]() -> Eigen::Vector3d { return realRobot("obj").posW().translation(); });
+                datastore().make_call(
+                    "object_reference", [this]() -> Eigen::Vector3d { return robot("obj").posW().translation(); });
+                datastore().make_call(
+                    "object_velocity", [this]() -> Eigen::Vector3d { return realRobot("obj").velW().linear(); });
+                datastore().make_call(
+                    "object_angular", [this]() -> Eigen::Vector3d { return realRobot("obj").velW().angular(); });
+                datastore().make_call(
+                    "object_axis", [this]() -> Eigen::Vector3d { return realRobot("obj").posW().rotation().row(0); });
+                datastore().make_call(
+                    "object_reset_reference", [this]() -> Eigen::Vector3d { return reset_object_reference; });
+                datastore().make_call(
+                    "object_reset_measured", [this]() -> Eigen::Vector3d { return reset_object_measured; });
+            }
             auto &ds = datastore();
             ds.make_call("set_scalar", [this](double value) { scalar = value; });
             ds.make_call(
@@ -88,6 +108,11 @@ struct ProbeController : mc_control::MCController
         {
             if (ProbeControl::instance().fail_reset) throw std::runtime_error("probe reset failure");
             reset_pose = realRobot().posW();
+            if (robots().hasRobot("obj"))
+            {
+                reset_object_reference = robot("obj").posW().translation();
+                reset_object_measured  = realRobot("obj").posW().translation();
+            }
         }
 
         bool run() override
@@ -109,8 +134,10 @@ struct ProbeController : mc_control::MCController
         std::string      support_foot_name = "LeftFootCenter";
         double           scalar            = 0.0;
         bool             throw_step = false, throw_output = false;
-        Eigen::Vector3d  vector     = Eigen::Vector3d::Zero();
-        sva::PTransformd reset_pose = sva::PTransformd::Identity();
+        Eigen::Vector3d  vector                 = Eigen::Vector3d::Zero();
+        sva::PTransformd reset_pose             = sva::PTransformd::Identity();
+        Eigen::Vector3d  reset_object_reference = Eigen::Vector3d::Zero();
+        Eigen::Vector3d  reset_object_measured  = Eigen::Vector3d::Zero();
 };
 
-SIMPLE_CONTROLLER_CONSTRUCTOR("InstanceProbe", ProbeController)
+CONTROLLER_CONSTRUCTOR("InstanceProbe", ProbeController)

@@ -37,10 +37,12 @@ class ControllerInstance
 
         inline static constexpr std::size_t invalid_index = std::numeric_limits<std::size_t>::max();
 
-        sva::PTransformd prepare_reset(IoInput input);
-        void             finish_reset(IoInput input, const sva::PTransformd &pose);
-        void             apply_input(IoInput input);
-        void             apply_output(IoOutput output);
-        void             io_to_encoders(IoInput io, std::vector<double> &encoders);
-        void             mbc_to_io(IoOutput io, const std::vector<std::vector<double>> &mbc);
+        sva::PTransformd                        prepare_reset(IoInput input);
+        void                                    finish_reset(IoInput input, const sva::PTransformd &pose);
+        void                                    apply_input(IoInput input);
+        void                                    apply_objects(IoInput input, bool seed_reference = false);
+        std::map<std::string, sva::PTransformd> object_poses(IoInput input) const;
+        void                                    apply_output(IoOutput output);
+        void                                    io_to_encoders(IoInput io, std::vector<double> &encoders);
+        void                                    mbc_to_io(IoOutput io, const std::vector<std::vector<double>> &mbc);
 };

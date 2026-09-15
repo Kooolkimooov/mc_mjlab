@@ -1,0 +1,94 @@
+--- a/include/LocomanipController/ManipManager.h
++++ b/include/LocomanipController/ManipManager.h
+@@ -77,6 +77,8 @@
+     double objHorizon = 2.0;
+ 
+     //! Object pose topic name (not subscribe if empty)
++    bool enableRos = true;
++
+     std::string objPoseTopic;
+ 
+     //! Object velocity topic name (not subscribe if empty)
+@@ -297,6 +299,12 @@
+   {
+     return static_cast<bool>(objPoseOffsetFunc_);
+   };
++
++  double numericPhase(const Hand & hand) const
++  {
++    auto it = manipPhases_.find(hand);
++    return it == manipPhases_.end() ? 0.0 : static_cast<double>(it->second->label());
++  }
+ 
+   /** \brief Get manipulation phase. */
+   inline const std::shared_ptr<ManipPhase::Base> & manipPhase(const Hand & hand) const
+--- a/src/ManipManager.cpp
++++ b/src/ManipManager.cpp
+@@ -19,6 +19,7 @@
+   mcRtcConfig("name", name);
+   mcRtcConfig("objPoseInterpolator", objPoseInterpolator);
+   mcRtcConfig("objHorizon", objHorizon);
++  mcRtcConfig("enableRos", enableRos);
+   mcRtcConfig("objPoseTopic", objPoseTopic);
+   mcRtcConfig("objVelTopic", objVelTopic);
+   mcRtcConfig("handTaskStiffness", handTaskStiffness);
+@@ -80,11 +81,11 @@
+ void ManipManager::reset()
+ {
+   // Setup ROS
+-  if(nh_)
++  if(config_.enableRos && nh_)
+   {
+     mc_rtc::log::error("[ManipManager] ROS node is already instantiated.");
+   }
+-  else
++  else if(config_.enableRos)
+   {
+     nh_ = std::make_shared<rclcpp::Node>(config_.name);
+     // Use a dedicated callback group so as not to call callbacks of other modules
+@@ -158,7 +159,7 @@
+ void ManipManager::update()
+ {
+   // Call ROS callback
+-  rclcpp::spin_some(nh_->get_node_base_interface());
++  if(nh_) { rclcpp::spin_some(nh_->get_node_base_interface()); }
+ 
+   if(velModeData_.enabled_)
+   {
+--- a/src/LocomanipController.cpp
++++ b/src/LocomanipController.cpp
+@@ -65,6 +65,24 @@
+     mc_rtc::log::warning("[LocomanipController] ManipManager configuration is missing.");
+   }
+ 
++  if(config().has("DemoFSM"))
++  {
++    const auto demo = config()("DemoFSM");
++    factory_.load(demo("states"));
++    executor_.init(*this, demo);
++  }
++  datastore().make_call("Locomanip::objectReferencePosition", [this]() -> Eigen::Vector3d
++                       { return obj().posW().translation(); });
++  datastore().make_call("Locomanip::objectReferenceRpy", [this]() -> Eigen::Vector3d
++                       { return mc_rbdyn::rpyFromMat(obj().posW().rotation()); });
++  datastore().make_call("Locomanip::leftPhase", [this]() -> double
++                       { return manipManager_ ? manipManager_->numericPhase(Hand::Left) : 0.0; });
++  datastore().make_call("Locomanip::rightPhase", [this]() -> double
++                       { return manipManager_ ? manipManager_->numericPhase(Hand::Right) : 0.0; });
++  const auto completion = config()("CompletionState", std::string{});
++  datastore().make_call("Locomanip::complete", [this, completion]() -> double
++                       { return !completion.empty() && executor_.state() == completion ? 1.0 : 0.0; });
++
+   mc_rtc::log::success("[LocomanipController] Constructed.");
+ }
+ 
+--- a/include/LocomanipController/ManipManager.h
++++ b/include/LocomanipController/ManipManager.h
+@@ -17,6 +17,7 @@
+ 
+ #include <LocomanipController/FootTypes.h>
+ #include <LocomanipController/HandTypes.h>
++#include <LocomanipController/ManipPhase.h>
+ 
+ namespace LMC
+ {
