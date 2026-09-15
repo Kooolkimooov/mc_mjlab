@@ -13,6 +13,7 @@ import mc_rtc_interface as native
 from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionAction,
 )
+from mc_mjlab.actions.residual_printer import ResidualPrinter
 from mc_mjlab.actions.walking_reference_action import (
   WALKING_REF_VEL_GETTER,
   WALKING_REF_VEL_SETTER,
@@ -219,7 +220,7 @@ def verify_pipeline() -> None:
   action._residual_ids = None
   action._executed_physical = torch.zeros(2, 2)
   action._projection_mask = torch.zeros(2, 2, dtype=torch.bool)
-  action._print_pending = False
+  action._printer = ResidualPrinter(0, [], None, "")
   action._raw_actions = torch.zeros(2, 2)
   action._previous_executed_physical = torch.zeros(2, 2)
   action._residual_raw_actions = torch.zeros(2, 2)

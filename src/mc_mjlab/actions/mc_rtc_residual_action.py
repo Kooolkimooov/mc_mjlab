@@ -14,6 +14,7 @@ from mjlab.envs.mdp.actions.actions import BaseAction, BaseActionCfg
 from mjlab.utils.lab_api.string import resolve_matching_names
 
 import mc_rtc_interface as native
+from mc_mjlab.actions.residual_printer import ResidualPrinter
 from mc_mjlab.controller_datastore import (
   input_columns,
   output_columns,
@@ -101,7 +102,7 @@ class McRtcResidualActionBase(BaseAction):
 
     self._setup_residual(cfg)
     self._setup_action_extensions(cfg)
-    self._setup_residual_printing(cfg)
+    self._setup_residual_printer(cfg)
 
     self._build_bridge(cfg)
 
@@ -144,8 +145,7 @@ class McRtcResidualActionBase(BaseAction):
 
     self._process_action_extensions(actions)
 
-    if self._print_every:
-      self._print_pending = True
+    self._printer.request()
 
   def apply_actions(self) -> None:
     substep_in_period = self._substep % self.cfg.frameskip
@@ -189,9 +189,7 @@ class McRtcResidualActionBase(BaseAction):
       self._executed_physical.copy_(executed[:, self._residual_ids])
       self._projection_mask.copy_(projected[:, self._residual_ids])
 
-    if self._print_pending:
-      self._print_residual()
-      self._print_pending = False
+    self._printer.emit(self._executed_physical)
 
   def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
     super().reset(env_ids=env_ids)
@@ -683,30 +681,15 @@ class McRtcResidualActionBase(BaseAction):
       self.num_envs, len(self._datastore_vector_input_columns), 3, device=self.device
     )
 
-  def _setup_residual_printing(self, cfg: McRtcResidualActionCfg) -> None:
-    """Resolve the printout interval and the column labels it prints once."""
-    every = cfg.print_residual_every
-    override = os.environ.get("MC_MJLAB_PRINT_RESIDUAL")
-    if override is not None:
-      every = int(override)
-
-    self._print_every = max(0, every)
-    self._print_countdown = 0
-    self._print_header_pending = True
-    self._print_pending = False
-    if not self._print_every:
-      return
-
-    ids = self._residual_ids
-    self._print_names = (
-      list(self._target_names)
-      if ids is None
-      else [self._target_names[i] for i in ids.tolist()]
-    )
+  def _setup_residual_printer(self, cfg: McRtcResidualActionCfg) -> None:
+    """Hand the residual column labels and clip magnitudes to the printer."""
     # Per-joint clip magnitude, for the saturation marker. The tasks set a
     # symmetric bound from `residual_scale`, so the upper one describes both.
-    self._print_limit = (
-      self._clip[0, :, 1].abs().cpu().tolist() if cfg.clip is not None else None
+    self._printer = ResidualPrinter(
+      cfg.print_residual_every,
+      list(self.residual_names),
+      self._clip[0, :, 1].abs().cpu().tolist() if cfg.clip is not None else None,
+      self.residual_unit,
     )
 
   def _zero_channels(self) -> dict[str, torch.Tensor]:
@@ -768,34 +751,6 @@ class McRtcResidualActionBase(BaseAction):
         f"datastore {kind} input {setter!r} is not configured; add it to the "
         f"action term's `datastore_{kind}_inputs` (have: {sorted(columns)})"
       ) from None
-
-  def _print_residual(self) -> None:
-    """One line of env 0's residual, throttled by ``print_residual_every``."""
-    if self._print_countdown:
-      self._print_countdown -= 1
-      return
-    self._print_countdown = self._print_every - 1
-
-    values = self._executed_physical[0].detach().cpu().tolist()
-    if self._print_header_pending:
-      # Lazily, on the first line: a header printed at construction would be
-      # buried under mc_rtc's own startup logging long before the first frame.
-      unit = f" [{self.residual_unit}]" if self.residual_unit else ""
-      print(
-        f"[residual] env 0, every {self._print_every} policy step(s){unit}; * = clipped"
-      )
-      print("[residual] " + " ".join(f"{n:>6s} " for n in self._print_names) + "   |r|")
-      self._print_header_pending = False
-
-    limit = self._print_limit
-    cells = [
-      f"{v:+.3f}" + ("*" if limit is not None and abs(v) >= 0.999 * limit[j] else " ")
-      for j, v in enumerate(values)
-    ]
-    norm = sum(v * v for v in values) ** 0.5
-    # Flushed: Python block-buffers into a pipe while spdlog writes to fd 1, so
-    # unflushed the two interleave wrongly. docs/coupling.md#console-output
-    print("[residual] " + " ".join(cells) + f" {norm:6.3f}", flush=True)
 
   @staticmethod
   def _release_controller(
