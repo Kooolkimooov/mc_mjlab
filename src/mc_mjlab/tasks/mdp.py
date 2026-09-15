@@ -235,14 +235,20 @@ def detector_score(
   env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
 ) -> torch.Tensor:
   """Calibrated transparent recovery score before temporal filtering."""
-  return _residual_term(env, action_name).detector_score
+  authority = _residual_term(env, action_name).recovery_authority
+  if authority is None:
+    return torch.zeros(env.num_envs, device=env.device)
+  return authority.score
 
 
 def recovery_dcm_error_vector(
   env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
 ) -> torch.Tensor:
   """Signed deployable DCM error used by the recovery detector."""
-  return _residual_term(env, action_name).recovery_dcm_error_vector
+  authority = _residual_term(env, action_name).recovery_authority
+  if authority is None:
+    return torch.zeros(env.num_envs, 2, device=env.device)
+  return authority.dcm_error
 
 
 def inactive_residual_violation(

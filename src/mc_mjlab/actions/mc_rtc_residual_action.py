@@ -864,18 +864,9 @@ class McRtcResidualActionBase(BaseAction):
     return self._actor_update_gate
 
   @property
-  def detector_score(self) -> torch.Tensor:
-    """Most recent calibrated detector score, zeros when disabled."""
-    if self._recovery_authority is None:
-      return torch.zeros_like(self._last_gate)
-    return self._recovery_authority.score
-
-  @property
-  def recovery_dcm_error_vector(self) -> torch.Tensor:
-    """Latest deployable signed horizontal DCM error, in metres."""
-    if self._recovery_authority is None:
-      return torch.zeros(self.num_envs, 2, device=self.device)
-    return self._recovery_authority.dcm_error
+  def recovery_authority(self) -> RecoveryAuthority | None:
+    """The gate's source, for terms reading its features; ``None`` when disabled."""
+    return self._recovery_authority
 
   @property
   def residual_ids(self) -> torch.Tensor | None:
