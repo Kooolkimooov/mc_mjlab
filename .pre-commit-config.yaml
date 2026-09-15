@@ -27,9 +27,18 @@ repos:
         types: [python]
         files: ^(src|scripts|tests)/
 
-      - id: ctest
-        name: ctest (C++ and python)
-        entry: cmake --build build --target check
+      # A Python-only commit never builds the C++ side. The native hook below
+      # excludes ctest's `python` test, which this one already ran.
+      - id: pytest
+        name: pytest (tests/)
+        entry: uv run pytest -q
         language: system
         types_or: [python, c++, c, cmake]
+        pass_filenames: false
+
+      - id: ctest
+        name: ctest (C++)
+        entry: cmake --build build --target check-native
+        language: system
+        types_or: [c++, c, cmake]
         pass_filenames: false

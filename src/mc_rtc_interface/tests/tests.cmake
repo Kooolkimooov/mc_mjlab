@@ -273,15 +273,25 @@ add_custom_target(
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 
-add_dependencies(
-  check
-  test_controllers_manager
-  test_shared_memory
-  mc_rtc_interface
-  InstanceProbe
-  test_output_guard
-  test_host_reset_outputs
-  test_host_failures
-  test_host_io
-  test_worker_ipc
+# What the C++ pre-commit hook builds and runs: pytest has its own hook there,
+# and running the `python` test from both doubles it onto every mixed commit.
+add_custom_target(
+  check-native
+  COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -E "^python$"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
+
+foreach(check_target check check-native)
+  add_dependencies(
+    ${check_target}
+    test_controllers_manager
+    test_shared_memory
+    mc_rtc_interface
+    InstanceProbe
+    test_output_guard
+    test_host_reset_outputs
+    test_host_failures
+    test_host_io
+    test_worker_ipc
+  )
+endforeach()

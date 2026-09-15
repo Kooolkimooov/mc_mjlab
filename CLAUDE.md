@@ -70,6 +70,7 @@ uv run ty check                                  # type check (91 pre-existing
                                                  # mc_rtc bindings + mujoco stubs)
 uv run pytest                                    # tests/: bindings + action contracts
 cd build && ctest                                # C++ tests, worker recovery, and pytest
+                                                 # (--target check-native skips pytest)
 python3 scripts/check_prose.py src scripts tests # prose budget + docs/ links
 ```
 
