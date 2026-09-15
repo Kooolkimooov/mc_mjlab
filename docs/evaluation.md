@@ -223,6 +223,35 @@ and arm; wall time never decides which episodes enter the result. The robust
 scenario is invalid for promotion if more than 5% of its baseline episodes fail
 before the first disturbance.
 
+### Saturated hazard cannot discriminate
+
+**Measured 2026-09-15.** In the `finite_impulse` scenario at the default
+`--episode-length-s 90`, disturbances start at 10 s and repeat every 6 s, so an
+episode absorbs about thirteen of them. Over five checkpoints x 2 seeds x 32
+envs, **both arms' hazard read 1.000** — the zero-residual baseline falls in
+essentially every episode, and so does every policy.
+
+`hazard_ratio` is therefore exactly `1.000`, and the `> 0.90` gate in
+`promotion()` fails **by construction**: passing it would require cutting falls
+by 10% against a baseline already pinned at the ceiling. The gate reports a
+number about the scenario, not about the policy, and no policy can pass it at
+this episode length. It is the same defect class as a threshold written for one
+quantity and applied to another — the criterion is real, measured, and
+uninformative.
+
+The companion case is `foot_slip` on the `nominal` scenario, where the gate is a
+*relative* upper-CI regression against a baseline of ~6.7e-5. Measured ratios
+were 0.046, 0.003, 0.051, 0.053 and 0.062 against a 0.050 limit, so three
+checkpoints failed — on mean differences of about **1e-6**, physically
+negligible. A relative gate on a near-zero baseline is dominated by its
+denominator.
+
+**What to do about it:** neither gate should be read as a policy verdict until
+the scenario is re-sized — a shorter episode, or fewer disturbances per episode,
+so baseline hazard sits away from both 0 and 1 and the ratio has room to move.
+Until then, judge recovery on `recovery_dcm_error` and read the hazard gate as
+"not discriminating here".
+
 ### Unmeasured is not a verdict
 
 A criterion whose metric is missing must report **NOT MEASURED**, never PASS and
