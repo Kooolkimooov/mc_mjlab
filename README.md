@@ -157,6 +157,17 @@ then run:
 uv sync
 ```
 
+The ROS workspace's own dependencies are Debian packages under
+`/usr/lib/python3/dist-packages`, which a plain venv hides. If that bites — a
+bare `pytest` aborts importing `launch_testing` — create the venv with them
+(a `uv venv` flag only; uv has no setting for it):
+
+```sh
+uv venv --system-site-packages && uv sync
+```
+
+or flip the option in `.venv/pyvenv.cfg`.
+
 ### mc_rtc dependency
 
 Refer to the superbuild tutorial
