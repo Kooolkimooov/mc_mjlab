@@ -15,7 +15,6 @@ from mjlab.utils.lab_api.string import resolve_matching_names
 
 import mc_rtc_interface as native
 from mc_mjlab.controller_datastore import (
-  DatastoreCommands,
   input_columns,
   output_columns,
   read_outputs,
@@ -101,7 +100,6 @@ class McRtcResidualActionBase(BaseAction):
     self._validate_cfg(cfg)
 
     self._setup_residual(cfg)
-    self._setup_datastore_vector_input_commands(cfg)
     self._setup_action_extensions(cfg)
     self._setup_residual_printing(cfg)
 
@@ -162,15 +160,6 @@ class McRtcResidualActionBase(BaseAction):
       dict.fromkeys(cfg.datastore_vectors_inputs)
     )
 
-    self._datastore_vector_input_commands = DatastoreCommands(
-      self._io.layout,
-      self.num_envs,
-      self._datastore_vector_input_command_pairs,
-      "vector3",
-      self._datastore_vector_input_command_is_absolute,
-    )
-
-    # After the command pair appended its own getter to the layout.
     self._setup_datastore_outputs(cfg)
     self._setup_datastore_inputs(cfg)
 
@@ -233,8 +222,10 @@ class McRtcResidualActionBase(BaseAction):
         f"scalars={list(self._bridge.layout.output.datastore_scalar)})"
       )
 
-    all_envs = list(range(self.num_envs))
-    self._datastore_vector_input_commands.collect(self._out_np, all_envs)
+    self._latch_datastore_outputs(
+      self._bridge.upload_controller_output(self._out_np),
+      torch.ones(self.num_envs, dtype=torch.bool, device=self.device),
+    )
 
   def _finish_initialization(
     self, env: ManagerBasedRlEnv, cfg: McRtcResidualActionCfg
@@ -370,16 +361,20 @@ class McRtcResidualActionBase(BaseAction):
       ).unsqueeze(0),
     )
 
-  def _setup_datastore_vector_input_commands(self, cfg: McRtcResidualActionCfg) -> None:
-    """Declare no vector datastore commands; an extension may replace these."""
-    self._datastore_vector_input_command_pairs: tuple[tuple[str, str], ...] = ()
-    self._datastore_vector_input_command_is_absolute: tuple[bool, ...] = ()
-    self._datastore_vector_input_active = torch.zeros(
-      self.num_envs, 0, dtype=torch.bool, device=self.device
-    )
-    self._datastore_vector_input_values = torch.zeros(
-      self.num_envs, 0, device=self.device
-    )
+  def _latch_datastore_outputs(self, block: torch.Tensor, ok: torch.Tensor) -> None:
+    """Latch the collected getters of every environment the block is fresh for."""
+    self._datastore_output_fresh.copy_(ok)
+    for kind, columns, destination in (
+      (
+        "vector3",
+        self._datastore_vector_output_columns,
+        self._datastore_vector_outputs,
+      ),
+      ("scalar", self._datastore_scalar_output_columns, self._datastore_scalar_outputs),
+    ):
+      mask = ok.unsqueeze(-1) if kind == "vector3" else ok
+      for name, value in read_outputs(block, columns, kind).items():
+        destination[name].copy_(torch.where(mask, value, destination[name]))
 
   def _setup_datastore_outputs(self, cfg: McRtcResidualActionCfg) -> None:
     """Resolve the collected getter columns and their latched readouts."""
@@ -398,6 +393,11 @@ class McRtcResidualActionBase(BaseAction):
       getter: torch.zeros(self.num_envs, device=self.device)
       for getter in self._datastore_scalar_output_columns
     }
+    # Read by a term feeding a setter relative to its getter: a reset zeroes the
+    # readouts, so the value only means something once this says so.
+    self._datastore_output_fresh = torch.zeros(
+      self.num_envs, dtype=torch.bool, device=self.device
+    )
 
   def _setup_datastore_inputs(self, cfg: McRtcResidualActionCfg) -> None:
     """Resolve the unconditionally fed setter columns and their value buffers."""
@@ -730,7 +730,6 @@ class McRtcResidualActionBase(BaseAction):
 
     self._manager.respawn(env_indices)
     self._pending_reset[env_indices] = True
-    self._datastore_vector_input_commands.reset(env_indices)
 
     # Seed interpolation (subclass-specific rest value per channel) and discard
     # any staged output for the reset envs; they restart from that seed.
@@ -741,6 +740,7 @@ class McRtcResidualActionBase(BaseAction):
     for readouts in (self._datastore_vector_outputs, self._datastore_scalar_outputs):
       for values in readouts.values():
         values[rows] = 0.0
+    self._datastore_output_fresh[rows] = False
 
     # Episode latches clear now; the queued native reset still has to complete.
     self.controller_failed[rows] = False
@@ -830,11 +830,6 @@ class McRtcResidualActionBase(BaseAction):
       self._datastore_vector_input_feed,
       "vector3",
     )
-    self._datastore_vector_input_commands.write(
-      self._in_np,
-      self._datastore_vector_input_active,
-      self._datastore_vector_input_values,
-    )
 
     self._dispatch_resets[:] = self._pending_reset
     self._in_np[:, self._bridge.layout.input.reset_offset()] = self._dispatch_resets
@@ -864,10 +859,6 @@ class McRtcResidualActionBase(BaseAction):
     self._pending_reset[self._dispatch_resets & ~worker_failed] = False
     self._pending_reset[worker_failed] = True
 
-    failed_indices = np.flatnonzero(worker_failed).tolist()
-    self._datastore_vector_input_commands.reset(failed_indices)
-    env_indices = np.flatnonzero(status == int(native.OutputLayout.Status.OK)).tolist()
-
     block = self._bridge.upload_controller_output(self._out_np)
     status_t = block[:, self._bridge.layout.output.status_offset()]
     ok = status_t == int(native.OutputLayout.Status.OK)
@@ -883,19 +874,7 @@ class McRtcResidualActionBase(BaseAction):
       staged = self._staged_control[channel]
       staged.copy_(torch.where(fresh, values, staged))
 
-    for kind, columns, destination in (
-      (
-        "vector3",
-        self._datastore_vector_output_columns,
-        self._datastore_vector_outputs,
-      ),
-      ("scalar", self._datastore_scalar_output_columns, self._datastore_scalar_outputs),
-    ):
-      mask = fresh if kind == "vector3" else ok
-      for name, value in read_outputs(block, columns, kind).items():
-        destination[name].copy_(torch.where(mask, value, destination[name]))
-
-    self._datastore_vector_input_commands.collect(self._out_np, env_indices)
+    self._latch_datastore_outputs(block, ok)
 
   def _print_residual(self) -> None:
     """One line of env 0's residual, throttled by ``print_residual_every``."""

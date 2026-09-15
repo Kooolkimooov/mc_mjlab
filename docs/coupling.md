@@ -92,8 +92,7 @@ measurements and failure evidence are in [the historical notes](coupling-history
 
 **Current:** `datastore_scalar_inputs` and `datastore_vectors_inputs` name
 `double` and `Eigen::Vector3d` datastore *setters*. They are the unconditional
-counterpart of the gated [DatastoreCommands](#datastorecommands) pairs: the
-native step writes every declared input column into the controller's datastore
+setter path: the native step writes every declared input column into the controller's datastore
 before `run()`, on every control period, with no usage flag, no baseline and no
 restore — which is why they work on the current native interface, while the
 gated pairs still need usage flags it does not expose.
@@ -106,11 +105,7 @@ A value holds until set again, across episode resets, because a fed setter is a
 property of the task and not of the episode — the rule the removed scalar holds
 followed. docs/controller-timing.md#removed-datastore_scalar_input_commands
 
-Two ordering hazards. The declared columns precede the `vector3` command
-setters in the input block (`_build_bridge` assigns the layout lists before
-constructing `DatastoreCommands`, which appends to them), so declaring the same
-setter on both paths is rejected rather than written twice. And a declared
-setter is
+One hazard: a declared setter is
 written from the very first controller step, before any task code has run, so
 its zero default reaches the controller unless the task feeds it during
 construction.
@@ -121,8 +116,9 @@ stops writing datastore columns every step.
 **History:**
 - 2026-09-15 — both fields existed on the cfg with output-shaped docstrings and
   no reader; wired to the layout, the value buffers and the per-period write.
+  The walking reference moved onto them when the gated pairs were removed.
 
-## DatastoreCommands
+## Datastore callbacks
 
 **Current:** there is no alias layer. A task names native callbacks directly in
 `datastore_vectors_outputs` / `datastore_scalar_outputs`, and
@@ -142,17 +138,16 @@ initialization; missing callbacks are errors.
   the one mapping that was not cosmetic (`ismpc_walking::support_foot_name` →
   `mc_mjlab::support_foot`) is now written out at its single use site.
 
-Setters require one usage flag per callback per environment, addressed by
-`use_datastore_scalar_offset()` and `use_datastore_vector3_offset()`. Missing
-methods raise a clear prerequisite error before workers start. Python captures
-the latest collected getter value on activation and sends absolute
-baseline-plus-residual values. Deactivation restores that baseline once, then
-clears usage. Each callback is independently gated; getters remain populated
-while setters are inactive. After reset, relative commands wait for fresh getter
-output from the first step and apply in the following control period. Explicit
-absolute commands may apply immediately. Only `vector3` pairs remain: the
-scalar ones were removed on 2026-09-15.
-docs/controller-timing.md#removed-datastore_scalar_input_commands
+**Removed 2026-09-15: the gated `DatastoreCommands` pairs.** They carried one
+usage flag per callback per environment, captured a baseline on activation, sent
+absolute baseline-plus-offset values and restored the baseline once on
+deactivation. None of it ever ran here: the flags needed
+`use_datastore_scalar_offset()` / `use_datastore_vector3_offset()`, which the
+native `InputLayout` does not define, so constructing a non-empty pair list
+raised — including for the walking reference, whose action term therefore failed
+in `__init__`. Setters now go through `datastore_scalar_inputs` /
+`datastore_vectors_inputs` above, and a term that wants a baseline latches the
+getter itself (docs/walking-reference.md#_feed_walking_reference).
 
 The native interface accepts only `double` and `Eigen::Vector3d` callbacks.
 Getters return values or const references; setters accept values or const
@@ -172,7 +167,7 @@ references. Unsupported inventory:
 An external controller adapter must expose required values using supported
 numeric callbacks. The `mc_mjlab::` names are supplied in-process by
 [instance_datastore_plugin](#instance_datastore_plugin) rather than by a
-controller; native usage flags remain a prerequisite for the setter path.
+controller.
 
 **Re-measure if:** callback signatures, usage-flag semantics or adapter values change.
 

@@ -13,33 +13,16 @@ import mc_rtc_interface as native
 from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionAction,
 )
+from mc_mjlab.actions.walking_reference_action import (
+  WALKING_REF_VEL_GETTER,
+  WALKING_REF_VEL_SETTER,
+  GatedWalkingReferenceDeltaAction,
+)
 from mc_mjlab.controller_datastore import (
-  DatastoreCommands,
   input_columns,
   output_columns,
-  read_outputs,
 )
 from mc_mjlab.sim_controller_bridge import SimControllerBridge
-
-
-class UsageInput:
-  """Test the forthcoming per-callback flags without modifying native bindings."""
-
-  def __init__(self) -> None:
-    self.datastore_scalar = []
-    self.datastore_vector3 = []
-
-  def datastore_scalar_offset(self) -> int:
-    return 10
-
-  def datastore_vector3_offset(self) -> int:
-    return 20
-
-  def use_datastore_scalar_offset(self) -> int:
-    return 40
-
-  def use_datastore_vector3_offset(self) -> int:
-    return 50
 
 
 def verify_layout() -> tuple[SimControllerBridge, NS, NS]:
@@ -140,58 +123,44 @@ def verify_layout() -> tuple[SimControllerBridge, NS, NS]:
   return io, env, entity
 
 
-def verify_datastore_commands() -> None:
-  """Check independent gates, live getters, restoration and reset warmup."""
-  layout = NS(input=UsageInput(), output=native.OutputLayout())
-  scalar = DatastoreCommands(
-    layout, 2, (("get_a", "set_a"), ("get_b", "set_b")), "scalar"
-  )
-  vector = DatastoreCommands(
-    layout, 2, (("get_v", "set_v"), ("get_abs", "set_abs")), "vector3", (False, True)
-  )
-  rows = np.zeros((2, 60))
-  out = np.zeros((2, layout.output.size()))
-  off = layout.output.datastore_scalar_offset()
-  out[:, off : off + 2] = [[3, 4], [5, 6]]
-  vo = layout.output.datastore_vector3_offset()
-  out[:, vo : vo + 6] = [[1, 2, 3, 4, 5, 6]] * 2
-  active = torch.tensor([[True, False], [False, True]])
-  values = torch.ones(2, 2)
-  scalar.write(rows, active, values)
-  assert not rows[:, 40:42].any()
-  scalar.collect(out, [0, 1])
-  scalar.write(rows, active, values)
-  np.testing.assert_array_equal(rows[:, 40:42], active)
-  np.testing.assert_allclose(rows[[0, 1], [10, 11]], [4, 7])
-  out[:, off : off + 2] = [[4, 40], [50, 7]]
-  scalar.collect(out, [0, 1])
-  scalar.write(rows, ~active, values * 2)
-  np.testing.assert_allclose(rows[:, 10:12], [[3, 42], [52, 6]])
-  assert rows[:, 40:42].all()
-  scalar.write(rows, ~active, values * 2)
-  np.testing.assert_array_equal(rows[:, 40:42], ~active)
-  columns = output_columns(layout, ("get_a",), "scalar")
-  scalars = read_outputs(torch.from_numpy(out), columns, "scalar")
-  np.testing.assert_allclose(scalars["get_a"], [4, 50])
-  vector.write(rows, torch.ones(2, 2, dtype=torch.bool), torch.ones(2, 6) * 9)
-  np.testing.assert_array_equal(rows[:, 50:52], [[0, 1]] * 2)
-  np.testing.assert_allclose(rows[:, 23:26], 9)
-  vector.collect(out, [0, 1])
-  vector.write(rows, torch.ones(2, 2, dtype=torch.bool), torch.ones(2, 6))
-  np.testing.assert_allclose(rows[:, 20:26], [[2, 3, 4, 1, 1, 1]] * 2)
-  scalar.reset([0])
-  scalar.write(rows, torch.ones(2, 2, dtype=torch.bool), values)
-  assert not rows[0, 40:42].any()
-  out[0, :2] = [100, 200]
-  scalar.collect(out, [0])
-  scalar.write(rows, torch.ones(2, 2, dtype=torch.bool), values)
-  np.testing.assert_allclose(rows[0, 10:12], [101, 201])
-  try:
-    DatastoreCommands(native.IoLayout(), 1, (("get", "set"),), "scalar")
-  except RuntimeError as error:
-    assert "use_datastore_scalar_offset" in str(error)
-  else:
-    assert hasattr(native.InputLayout(), "use_datastore_scalar_offset")
+def verify_walking_reference_feed() -> None:
+  """Check the nominal latch, the hold while perturbing and the absolute mode."""
+  action = object.__new__(GatedWalkingReferenceDeltaAction)
+  action._env = NS(num_envs=2)  # ty: ignore[invalid-assignment]
+  zero = torch.zeros(2, 3)
+  action._walking_reference_executed = zero.clone()
+  action._previous_walking_reference_executed = zero.clone()
+  action._walking_reference_nominal = zero.clone()
+  action._datastore_output_fresh = torch.ones(2, dtype=torch.bool)
+  nominal = torch.tensor([[0.1, 0.0, 0.0]] * 2)
+  action._datastore_vector_outputs = {WALKING_REF_VEL_GETTER: nominal.clone()}
+  action._datastore_vector_input_columns = {WALKING_REF_VEL_SETTER: 0}
+  action._datastore_vector_input_feed = torch.zeros(2, 1, 3)
+
+  fed = action._datastore_vector_input_feed[:, 0]
+  action._walking_reference_executed.copy_(torch.tensor([[0.05, 0.0, 0.0]] * 2))
+  action._feed_walking_reference()
+  torch.testing.assert_close(fed, torch.tensor([[0.15, 0.0, 0.0]] * 2))
+
+  # The getter mirrors what the term wrote, so the nominal must not follow it.
+  action._previous_walking_reference_executed.copy_(action._walking_reference_executed)
+  action._datastore_vector_outputs[WALKING_REF_VEL_GETTER].copy_(fed)
+  action._walking_reference_executed.copy_(torch.tensor([[0.02, 0.0, 0.0]] * 2))
+  action._feed_walking_reference()
+  torch.testing.assert_close(action._walking_reference_nominal, nominal)
+
+  # A reset zeroes the readouts; without fresh output the nominal still holds.
+  action._previous_walking_reference_executed.zero_()
+  action._datastore_output_fresh.zero_()
+  action._datastore_vector_outputs[WALKING_REF_VEL_GETTER].zero_()
+  action._feed_walking_reference()
+  torch.testing.assert_close(action._walking_reference_nominal, nominal)
+
+  absolute = type("Absolute", (GatedWalkingReferenceDeltaAction,), {})
+  absolute.walking_reference_is_absolute = True
+  action.__class__ = absolute
+  action._feed_walking_reference()
+  torch.testing.assert_close(fed, torch.tensor([[0.02, 0.0, 0.0]] * 2))
 
 
 class Manager:
@@ -232,11 +201,9 @@ def verify_pipeline() -> None:
   action._target_ids = torch.tensor([0, 1])
   action._io = io
   io._output_channels = action.output_channels
-  action._datastore_vector_input_commands = DatastoreCommands(
-    io.layout, 2, (), "vector3"
-  )
   action._datastore_vector_output_columns = output_columns(io.layout, (), "vector3")
   action._datastore_scalar_output_columns = output_columns(io.layout, (), "scalar")
+  action._datastore_output_fresh = torch.zeros(2, dtype=torch.bool)
   action._datastore_vector_input_columns = input_columns(io.layout, (), "vector3")
   action._datastore_scalar_input_columns = input_columns(io.layout, (), "scalar")
   action._datastore_vector_input_feed = torch.empty(2, 0, 3)
@@ -249,8 +216,6 @@ def verify_pipeline() -> None:
   action._pending_reset = np.zeros(2, dtype=bool)
   action._dispatch_resets = np.zeros(2, dtype=bool)
   action._substep = 0
-  action._datastore_vector_input_active = torch.zeros(2, 0, dtype=torch.bool)
-  action._datastore_vector_input_values = torch.empty(2, 0)
   action._processed_actions = torch.zeros(2, 2)
   action._last_gate = torch.ones(2)
   action._torque_peak = torch.zeros(2, 2)
@@ -317,7 +282,7 @@ def verify_pipeline() -> None:
 def main() -> None:
   """Run contracts that do not require native recovery or adapter callbacks."""
   verify_layout()
-  verify_datastore_commands()
+  verify_walking_reference_feed()
   verify_pipeline()
   print("Native action deterministic contracts: PASS")
 

@@ -79,7 +79,7 @@ class ResidualFeedbackJointTorqueAction(ResidualMpcJointTorqueAction):
     super().__init__(cfg, env)
     ids = self._residual_ids
     joint_dim = self._num_targets if ids is None else int(ids.numel())
-    wrench_dim = 6 * len(self._io.layout.input.force_sensors)
+    wrench_dim = 6 * len(self._bridge.layout.input.force_sensors)
     self._modality_dims = {
       "joint_position": joint_dim,
       "joint_velocity": joint_dim,
@@ -104,7 +104,7 @@ class ResidualFeedbackJointTorqueAction(ResidualMpcJointTorqueAction):
     # sixes. docs/residual-feedback.md#feedback_modalities
     self._wrench_scale = torch.tensor(
       ([cfg.wrench_force_scale] * 3 + [cfg.wrench_torque_scale] * 3)
-      * len(self._io.layout.input.force_sensors),
+      * len(self._bridge.layout.input.force_sensors),
       device=self.device,
     )
     print(
@@ -138,7 +138,7 @@ class ResidualFeedbackJointTorqueAction(ResidualMpcJointTorqueAction):
       else:
         self._feedback_offset.zero_()
         self._feedback_offset[:, self._residual_ids] = gated
-      self._io.set_feedback_offset(self._feedback_offset)
+      self._bridge.set_feedback_offset(self._feedback_offset)
 
     if "joint_velocity" in blocks:
       gated = blocks["joint_velocity"] * self.cfg.joint_velocity_scale * gate
@@ -147,17 +147,17 @@ class ResidualFeedbackJointTorqueAction(ResidualMpcJointTorqueAction):
       else:
         self._joint_velocity_offset.zero_()
         self._joint_velocity_offset[:, self._residual_ids] = gated
-      self._io.set_joint_velocity_offset(self._joint_velocity_offset)
+      self._bridge.set_joint_velocity_offset(self._joint_velocity_offset)
 
     if "wrench" in blocks:
       self._wrench_offset.copy_(blocks["wrench"] * self._wrench_scale * gate)
-      self._io.set_wrench_offset(self._wrench_offset)
+      self._bridge.set_wrench_offset(self._wrench_offset)
 
     if "root_pose" in blocks:
       root = blocks["root_pose"] * gate
       self._root_translation.copy_(root[:, :3] * self.cfg.root_translation_scale)
       self._root_rotation.copy_(root[:, 3:] * self.cfg.root_rotation_scale)
-      self._io.set_root_pose_offset(self._root_translation, self._root_rotation)
+      self._bridge.set_root_pose_offset(self._root_translation, self._root_rotation)
 
     if not self.cfg.torque_channel:
       head = head.clone()

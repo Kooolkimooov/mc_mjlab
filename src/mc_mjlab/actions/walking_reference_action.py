@@ -34,31 +34,31 @@ class WalkingReferenceActionCfg(McRtcResidualActionCfg):
   """Enabled controller that must provide the ismpc walking-reference calls."""
 
   def __post_init__(self) -> None:
-    """Reject a controller without the calls here, not at native init."""
+    """Declare the reference callbacks and reject a controller lacking them."""
     enabled = get_controller_name(Path(self.mc_rtc_config_path))
     if enabled != self.walking_controller:
       raise ValueError(
         f"{WALKING_REF_VEL_SETTER} needs {self.walking_controller!r}, but "
         f"{self.mc_rtc_config_path} enables {enabled!r}"
       )
+    self.datastore_vectors_inputs = tuple(
+      dict.fromkeys((*self.datastore_vectors_inputs, WALKING_REF_VEL_SETTER))
+    )
+    self.datastore_vectors_outputs = tuple(
+      dict.fromkeys((*self.datastore_vectors_outputs, WALKING_REF_VEL_GETTER))
+    )
 
 
 class WalkingReferenceMixin(McRtcResidualActionBase):
-  """Buffers, datastore command pair and readouts shared by both drive modes."""
+  """Buffers, reference feed and readouts shared by both drive modes."""
 
   cfg: WalkingReferenceActionCfg
 
   walking_reference_is_absolute: bool = False
   """Whether the setter takes a target rather than an offset from the nominal."""
 
-  def _setup_datastore_vector_input_commands(self, cfg: McRtcResidualActionCfg) -> None:
-    super()._setup_datastore_vector_input_commands(cfg)
-    self._datastore_vector_input_command_pairs = (
-      (WALKING_REF_VEL_GETTER, WALKING_REF_VEL_SETTER),
-    )
-    self._datastore_vector_input_command_is_absolute = (
-      self.walking_reference_is_absolute,
-    )
+  def _setup_action_extensions(self, cfg: McRtcResidualActionCfg) -> None:
+    super()._setup_action_extensions(cfg)
     self._walking_reference_requested = torch.zeros(
       self.num_envs, 3, device=self.device
     )
@@ -68,12 +68,35 @@ class WalkingReferenceMixin(McRtcResidualActionBase):
     self._previous_walking_reference_executed = torch.zeros_like(
       self._walking_reference_requested
     )
+    self._walking_reference_nominal = torch.zeros_like(
+      self._walking_reference_requested
+    )
     self._walking_reference_active = torch.zeros(
       self.num_envs, dtype=torch.bool, device=self.device
     )
-    # Aliases, not copies: the base writes these straight into the input block.
-    self._datastore_vector_input_active = self._walking_reference_active
-    self._datastore_vector_input_values = self._walking_reference_executed
+
+  def _feed_walking_reference(self) -> None:
+    """Send the executed reference, as a target or an offset from the nominal."""
+    if self.walking_reference_is_absolute:
+      self.set_datastore_vector_input(
+        WALKING_REF_VEL_SETTER, self._walking_reference_executed
+      )
+      return
+    # The getter reports what this term last wrote, so the nominal is only
+    # readable while the offset is zero. docs/walking-reference.md
+    idle = (self._previous_walking_reference_executed == 0.0).all(dim=1)
+    hold = (idle & self._datastore_output_fresh).unsqueeze(-1)
+    self._walking_reference_nominal.copy_(
+      torch.where(
+        hold,
+        self.datastore_vector_output(WALKING_REF_VEL_GETTER),
+        self._walking_reference_nominal,
+      )
+    )
+    self.set_datastore_vector_input(
+      WALKING_REF_VEL_SETTER,
+      self._walking_reference_nominal + self._walking_reference_executed,
+    )
 
   def _reset_action_extensions(self, env_ids: torch.Tensor | slice) -> None:
     super()._reset_action_extensions(env_ids)
@@ -81,6 +104,8 @@ class WalkingReferenceMixin(McRtcResidualActionBase):
     self._walking_reference_executed[env_ids] = 0.0
     self._previous_walking_reference_executed[env_ids] = 0.0
     self._walking_reference_active[env_ids] = False
+    # The nominal survives: the rebuilt controller sets the same reference, and
+    # feeding zero for the period before the first fresh getter stops the walk.
 
   @property
   def walking_reference_velocity(self) -> torch.Tensor:
@@ -161,6 +186,7 @@ class GatedWalkingReferenceDeltaAction(
     self._walking_reference_active.copy_(
       self._walking_reference_executed.abs().amax(dim=1) > 1.0e-6
     )
+    self._feed_walking_reference()
 
   @property
   def walking_reference_normalized(self) -> torch.Tensor:
@@ -205,3 +231,4 @@ class AbsoluteWalkingReferenceMixin(WalkingReferenceMixin):
     self._walking_reference_requested.copy_(command)
     self._walking_reference_executed.copy_(command)
     self._walking_reference_active.fill_(True)
+    self._feed_walking_reference()

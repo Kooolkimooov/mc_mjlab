@@ -39,8 +39,8 @@ one probe below had already answered its question, and the path could not run
 under the native workers at all: `DatastoreCommands` requires
 `InputLayout.use_datastore_scalar_offset()`, which `io_layout.hpp` does not
 define. Unconditional setters remain, as
-[datastore_scalar_inputs](coupling.md#datastore_scalar_inputs); the gated pair
-transport survives for `vector3` only, where the walking reference uses it.
+[datastore_scalar_inputs](coupling.md#datastore_scalar_inputs); the `vector3`
+pairs followed on the same day, leaving no gated transport at all.
 What it did:
 
 the shared-memory transport accepts paired scalar getter/setters.

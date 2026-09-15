@@ -56,9 +56,29 @@ absolute target, adding no action dimensions.
 - 2026-09-15 — split out of `McRtcResidualActionCfg`. The two modes had been
   mutually exclusive fields guarded by a runtime `ValueError`; they are now two
   classes, and the base action carries three generic extension hooks
-  (`_setup_datastore_vector_input_commands`, `_setup_action_extensions`,
-  `_process_action_extensions`, `_reset_action_extensions`) instead of any
-  walking state.
+  (`_setup_action_extensions`, `_process_action_extensions`,
+  `_reset_action_extensions`) instead of any walking state.
+- 2026-09-15 — the reference moved off the gated datastore command pair, which
+  had never been able to run (docs/coupling.md#datastore-callbacks), onto the
+  unconditional `datastore_vectors_inputs` feed. The cfg's `__post_init__`
+  declares `ismpc_walking::set_ref_vel` and `get_ref_vel`, and the fourth
+  extension hook went with the pair.
+
+## _feed_walking_reference
+
+**Current:** the term writes `ismpc_walking::set_ref_vel` every control period,
+because an unconditional input column is always written — leaving it alone is
+not an option the transport offers. The absolute mode sends the command target
+as-is. The delta mode sends `nominal + offset`, and has to latch the nominal
+itself: once it starts writing, `get_ref_vel` reports its own last write, so the
+nominal is only readable while the previous offset was zero. It is relatched
+only when the base also reports `_datastore_output_fresh`, since a reset zeroes
+the collected readouts, and it deliberately survives a reset: the rebuilt
+controller sets the same reference, and feeding a zero nominal for the period
+before the first fresh getter would stop the walk.
+
+**Re-measure if:** the controller's own reference changes within an episode, or
+the reset path stops zeroing the datastore readouts.
 
 ## walking_reference_velocity_slew_rate
 

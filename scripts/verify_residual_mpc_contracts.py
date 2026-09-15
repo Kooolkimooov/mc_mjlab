@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import torch
-from verify_native_action_contracts import verify_datastore_commands, verify_layout
+from verify_native_action_contracts import verify_layout, verify_walking_reference_feed
 
 import mc_mjlab.tasks  # noqa: F401
 from mc_mjlab.residual_mpc import (
@@ -122,7 +122,7 @@ def verify_tracking_reward_discriminates() -> None:
 def main() -> None:
   """Run every deterministic ResidualMPC contract."""
   verify_layout()
-  verify_datastore_commands()
+  verify_walking_reference_feed()
   verify_phases()
   verify_history()
   verify_blending()
