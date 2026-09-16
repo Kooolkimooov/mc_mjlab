@@ -5,7 +5,7 @@ repository consumes the current Python bindings and does not modify the external
 controller library; the items below define the versioned boundary a controller
 implementation should expose before hardware deployment.
 
-## recovery_state
+## Recovery state
 
 **Current:** expose command-relative DCM offset, base angular velocity, gravity
 tilt, left/right vertical foot load, calibrated detector score, filtered
@@ -20,7 +20,7 @@ period changes.
 - 2026-08-24 — defined from the accepted deployable recovery detector; push
   schedule and time since push are deliberately absent.
 
-## joint_residual_interface
+## Joint residual interface
 
 **Current:** accept a vector keyed by stable joint names, control mode
 (`position` or `torque`), normalized request, physical request, and sequence
@@ -43,7 +43,7 @@ real-time transport changes.
   hardware-bound projection without assuming datastore access in today's
   bindings.
 
-## controller_references
+## Controller references
 
 **Current:** publish joint position and velocity references plus planned ZMP,
 control CoM, and control CoM velocity under stable names. Each sample carries
@@ -59,7 +59,7 @@ changes.
 - 2026-08-24 — records the minimum actor inputs already consumed by this
   repository and the sequence relationship required for deployment parity.
 
-## controller_parameter_modulation
+## Controller parameter modulation
 
 **Current:** the local mc_rtc binding exposes `MCController.datastore()` plus a
 generic `DataStore.call()` over zero-argument getters and one-argument setters

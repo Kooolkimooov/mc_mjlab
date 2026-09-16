@@ -1,11 +1,14 @@
 """First-use symlinks into the mc_rtc workspace's mc_mujoco share."""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 MC_MUJOCO_SHARE_DIR = Path.home() / "workspace/install/share/mc_mujoco"
 
 
 def ensure_asset_symlink(link: Path, target: Path) -> None:
+  """Point ``link`` at the workspace ``target``, unless it already resolves."""
   if link.exists():
     return
   if link.is_symlink():  # dangling: workspace moved/removed
@@ -16,6 +19,7 @@ def ensure_asset_symlink(link: Path, target: Path) -> None:
       f"{target} exists. Build/install mc_mujoco in the ROS workspace "
       "(or restore the file) and retry."
     )
+
   link.parent.mkdir(parents=True, exist_ok=True)
   try:
     link.symlink_to(target, target_is_directory=target.is_dir())

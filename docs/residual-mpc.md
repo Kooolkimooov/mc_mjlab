@@ -1,6 +1,6 @@
 # ResidualMPC reproduction
 
-## SCOPE
+## Scope
 
 **Current:** `Mc-Mjlab-Residual-Mpc-Logisticcontroller-Ismpc-Hrp5P-Joint-Torque`
 reproduces the selected joint-action/torque-blending architecture from
@@ -16,7 +16,7 @@ kinematic ISMPC controller still runs at 500 Hz and replans at 20 Hz.
 - 2026-08-28 — first forward-only HRP5P task; lateral/yaw commands, terrain,
   end-to-end comparison, and full-seed studies remain out of scope.
 
-## ACTION_SCALE_BLEND_FACTOR
+## Action scale blend factor
 
 **Current:** normalized leg actions use
 `min(0.01 rad, 0.20 * effort_limit / Kp) / 0.1`, then the resulting posture
@@ -44,7 +44,7 @@ not reconstructed.
 - 2026-08-28 — introduced as an observation-compatible surrogate for the
   paper's nonlinear MPC value; online observation normalization absorbs scale.
 
-## JOINT_REGULARIZATION
+## Joint regularization
 
 **Current:** raw mean squared deviation from the nominal joint stance has weight
 `-1.0`. [ResidualMPC Table I](https://arxiv.org/html/2510.12717#S4.SS1), row
@@ -59,7 +59,7 @@ uses the likely corrected sign.
 - 2026-08-28 — documented the exact likely sign error rather than silently
   changing the printed objective.
 
-## PPO_SAFETY_CHOICE
+## PPO safety choice
 
 **Current:** PPO follows the cited three-layer, 24-step, five-epoch/four-batch
 configuration, while retaining this repository's tanh-bounded Gaussian and
@@ -72,7 +72,7 @@ hardware-safety choice, not a claim about the paper's unpublished output head.
 
 - 2026-08-28 — initial task configuration.
 
-## FIDELITY_LIMITS
+## Fidelity limits
 
 **Current:** the installed ISMPC is a predictive walking planner with a
 kinematic whole-body controller. `jointTorque` is used when available; otherwise
@@ -172,7 +172,7 @@ measurement.
 The first sweep used `3 s` inside a `12 s` episode and was wrong.
 
 **The ISMPC realises a reference over many gait cycles, not immediately.** Reading
-`ismpc_walking::get_ref_vel` back through the `walking_ref_vel` vector output,
+`ismpc_walking::get_ref_vel` back through the vector datastore output,
 with `+0.600 m/s` commanded:
 
 | t | `get_ref_vel` | measured `vx` |
@@ -479,7 +479,7 @@ move.
 - 2026-08-29 — recalibrated objective, 300-iteration seed, paired comparison;
   the residual is significantly worse than the prior it is meant to improve.
 
-## set_ts
+## ismpc set_ts
 
 **Current:** the ISMPC's speed ceiling is a ceiling on **step length**, not on
 velocity. Step length is invariant at `~0.109 m` while speed scales as `1 / ts`.
@@ -544,7 +544,7 @@ basis; it is not dead, it is simply not winning.
 - 2026-08-31 — cap identified as a fixed `0.109 m` step; `zmp_cstr_square`
   refuted; `set_ts` confirmed as the only working speed lever.
 
-## kinematics_cstr
+## ismpc kinematics_cstr
 
 **Current:** the ISMPC's speed ceiling is the footstep planner's kinematic step
 box. Planned step length is exactly `d_h_x / 2`, and `d_h_x` is `0.2` — the
@@ -1033,7 +1033,7 @@ ResidualMPC subclass because `ResidualBalanceOnPolicyRunner` only warns on a
 missing manifest, which its own legacy checkpoints rely on.
 
 The measured results recorded elsewhere in this file — including
-`## POWERED_RESULT` — were produced under the wrong equation and say nothing
+`## Powered-mode result` — were produced under the wrong equation and say nothing
 about the paper's architecture.
 
 **Not shared with residual_balance.** That task's torque action builds its
@@ -1046,7 +1046,7 @@ torque, with no `q_hat` term, so it never had this reference to confuse.
 - 2026-09-02 — split into `controller_q` and `default_q` after external review;
   the contract now uses deliberately different tensors, so a swap fails it.
 
-## POWERED_RESULT
+## Powered-mode result
 
 **Current:** measured properly, the residual is **worse** than its prior on
 established walking. `std015` `model_999`, 64 environments, 45 minutes,
@@ -1094,7 +1094,7 @@ or more, with the clustered test, never at 16.
 - 2026-09-01 — the sign reversed under adequate power; the reproduction does not
   currently show a residual that improves on its prior.
 
-## tuning_plateau
+## Tuning plateau
 
 **Current:** five paired comparisons, all on the same objective. Configuration
 differences between the last four are smaller than the measurement noise.
@@ -1143,11 +1143,12 @@ the noise floor and would change this conclusion.
 - 2026-09-01 — recorded after `std015` returned to the `+5%` band, showing the
   `ent001` result was within run-to-run variation.
 
-## mean_speed
+## Mean speed
 
-**Current:** the planner's cruise speed is now settable at runtime, but the task
-does not yet use it. `MEAN_SPEED_OFFSET` and `MEAN_SPEED_COMMANDS` are defined
-and unwired.
+**Current:** the planner's cruise speed is settable at runtime, and the task
+does not use it. `MEAN_SPEED_OFFSET` and `MEAN_SPEED_COMMANDS` were defined and
+unwired, and were deleted on 2026-09-16 rather than carried; wiring the speed
+means adding them back against a re-measurement, not reviving dead constants.
 
 **A workspace C++ change backs this, and it is not in this repository.**
 `~/workspace/src/FootSteps_Planner/src/plugin.cpp` gained two datastore entries
@@ -1184,7 +1185,7 @@ pass. The existence check now runs after `init`; the binding-capability check
 stays at configure, being ordering-independent.
 
 **Raising it changes nothing measurable.** Held at `0.3` through
-`datastore_scalar_holds` and swept in-process, the envelope is identical to the
+`datastore_scalar_input_holds` and swept in-process, the envelope is identical to the
 installed `0.1` to three decimals. Cells are mean tracking *error* in `m/s`, not
 achieved speed: a `0.60` command reading `0.515` achieved `0.085`.
 
@@ -1193,7 +1194,7 @@ achieved speed: a `0.60` command reading `0.515` achieved `0.085`.
 | `mean_speed = 0.1` | 0.071 | 0.136 | 0.319 | 0.515 |
 | `mean_speed = 0.3` | 0.075 | 0.138 | 0.320 | 0.516 |
 
-**The knob arrives and is ignored.** Read back through `controller_scalars`
+**The knob arrives and is ignored.** Read back through `datastore_scalar_output`
 from inside a running simulation while commanding `0.6 m/s`:
 
 ```
@@ -1287,5 +1288,8 @@ switch were removed in the native migration; re-evaluate against native workers.
 resolved.
 
 **History:**
-- 2026-08-31 — added the scalar entries and `datastore_scalar_holds`; the
+- 2026-08-31 — added the scalar entries and `datastore_scalar_input_holds`; the
   runtime path works standalone and fails inside the worker pool.
+- 2026-09-15 — the scalar hold path was removed from the action base, so this
+  sweep is no longer reproducible as written.
+  docs/controller-timing.md#removed-datastore_scalar_input_commands

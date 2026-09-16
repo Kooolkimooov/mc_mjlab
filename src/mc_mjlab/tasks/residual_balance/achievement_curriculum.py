@@ -109,6 +109,7 @@ def apply_qualification(
     "last_report_iteration": evidence.checkpoint_iteration,
     "last_report_sha256": evidence.report_sha256,
   }
+
   if evidence.eligible:
     passed = state.pass_streak + 1
     if passed < REQUIRED_PASS_REPORTS:
@@ -116,11 +117,13 @@ def apply_qualification(
         replace(state, pass_streak=passed, regression_streak=0, **common),
         "pass_pending",
       )
+
     qualified = state.current_stage
     last_stage = len(ACHIEVEMENT_STAGES) - 1
     next_stage = min(qualified + 1, last_stage)
     qualified_checkpoints = list(state.qualified_checkpoints)
     qualified_checkpoints[qualified] = evidence.checkpoint
+
     return AchievementDecision(
       replace(
         state,
@@ -136,19 +139,23 @@ def apply_qualification(
       "mastered" if qualified == last_stage else "advanced",
       qualified,
     )
+
   regressions = state.regression_streak + 1
   if regressions < REQUIRED_REGRESSIONS:
     return AchievementDecision(
       replace(state, pass_streak=0, regression_streak=regressions, **common),
       "regression_pending",
     )
+
   if state.current_stage == 0:
     target = 0
     highest = -1
   else:
     target = state.current_stage - 1
     highest = min(state.highest_passed_stage, target)
+
   last_good = state.qualified_checkpoints[target] if highest >= target else None
+
   return AchievementDecision(
     replace(
       state,
@@ -174,6 +181,7 @@ def read_qualification_evidence(
   payload = path.read_bytes()
   report_sha256 = hashlib.sha256(payload).hexdigest()
   report = json.loads(payload)
+
   if not isinstance(report, dict):
     raise TypeError(f"{path} must contain a JSON object")
   config = report.get("config")
@@ -182,6 +190,7 @@ def read_qualification_evidence(
   record = config.get("achievement")
   if not isinstance(record, dict):
     raise ValueError(f"{path} was not run with --achievement-stage")
+
   stage = int(record.get("stage", -1))
   if stage != expected_stage:
     raise ValueError(f"report stage {stage} does not match stage {expected_stage}")
@@ -190,6 +199,7 @@ def read_qualification_evidence(
     raise ValueError(f"stage {stage} qualification contract is malformed")
   if record.get("contract_sha256") != expected_digest:
     raise ValueError(f"stage {stage} qualification contract differs from training")
+
   seeds = tuple(sorted({int(seed) for seed in config.get("seeds", [])}))
   if len(seeds) < MINIMUM_QUALIFICATION_SEEDS:
     raise ValueError(
@@ -198,9 +208,11 @@ def read_qualification_evidence(
   scenarios = config.get("scenarios", [])
   if set(scenarios) != set(REQUIRED_QUALIFICATION_SCENARIOS):
     raise ValueError("achievement qualification must run every required scenario")
+
   checkpoints = report.get("checkpoints")
   if not isinstance(checkpoints, dict) or len(checkpoints) != 1:
     raise ValueError("achievement qualification must contain exactly one checkpoint")
+
   checkpoint, values = next(iter(checkpoints.items()))
   if not isinstance(checkpoint, str):
     raise ValueError("qualified checkpoint key must be a path string")
@@ -213,6 +225,7 @@ def read_qualification_evidence(
     raise ValueError(
       "qualified checkpoint is outside the active run directory"
     ) from error
+
   match = re.search(r"model_(\d+)", checkpoint_path.name)
   if match is None:
     raise ValueError("qualified checkpoint name has no model iteration")
@@ -221,6 +234,7 @@ def read_qualification_evidence(
     raise ValueError(
       f"qualified iteration {iteration} is newer than trainer {current_iteration}"
     )
+
   if not isinstance(values, dict):
     raise ValueError("qualified checkpoint summary must be an object")
   promotion = values.get("promotion")
@@ -229,11 +243,13 @@ def read_qualification_evidence(
   reasons = promotion.get("reasons", [])
   if not isinstance(reasons, list):
     raise ValueError("qualification reasons must be a list")
+
   identity = json.dumps(
     {"checkpoint": str(checkpoint_path), "seeds": seeds, "stage": stage},
     sort_keys=True,
     separators=(",", ":"),
   )
+
   return QualificationEvidence(
     token=hashlib.sha256(identity.encode()).hexdigest(),
     report_sha256=report_sha256,
@@ -270,6 +286,36 @@ class AchievementCurriculumBridge:
       self.root.mkdir(parents=True, exist_ok=True)
       self._publish_state()
 
+  def iteration(self, iteration: int) -> dict[str, float]:
+    """Consume at most one new report and return logger scalars."""
+    if self.enabled:
+      self._consume_report(iteration)
+    return {
+      "stage": float(self.state.current_stage),
+      "highest_passed_stage": float(self.state.highest_passed_stage),
+      "pass_streak": float(self.state.pass_streak),
+      "regression_streak": float(self.state.regression_streak),
+      "mastered": float(self.state.mastered),
+    }
+
+  def snapshot(self) -> dict[str, Any] | None:
+    """Return checkpoint metadata when the active task uses this curriculum."""
+    return self.state.to_dict() if self.active else None
+
+  def restore(self, value: dict[str, Any] | None) -> None:
+    """Restore stage hysteresis without deriving it from elapsed steps."""
+    if not self.active:
+      return
+    if value is None:
+      print("[mc_mjlab] checkpoint predates achievement curriculum state")
+      return
+    self.state = AchievementState.from_dict(value)
+    if self._last_observed_token != self.state.last_report_sha256:
+      self._last_observed_token = None
+    self._set_stage(self.state.current_stage)
+    if self.enabled:
+      self._publish_state()
+
   def _resolve_term(self) -> Any | None:
     """Find the marked achievement disturbance without coupling to its class."""
     try:
@@ -290,18 +336,6 @@ class AchievementCurriculumBridge:
       return hashlib.sha256((self.root / "qualification.json").read_bytes()).hexdigest()
     except FileNotFoundError:
       return None
-
-  def iteration(self, iteration: int) -> dict[str, float]:
-    """Consume at most one new report and return logger scalars."""
-    if self.enabled:
-      self._consume_report(iteration)
-    return {
-      "stage": float(self.state.current_stage),
-      "highest_passed_stage": float(self.state.highest_passed_stage),
-      "pass_streak": float(self.state.pass_streak),
-      "regression_streak": float(self.state.regression_streak),
-      "mastered": float(self.state.mastered),
-    }
 
   def _consume_report(self, iteration: int) -> None:
     """Apply a newly replaced qualification report if it satisfies the contract."""
@@ -415,21 +449,3 @@ class AchievementCurriculumBridge:
         "report_path": str((self.root / "qualification.json").resolve()),
       },
     )
-
-  def snapshot(self) -> dict[str, Any] | None:
-    """Return checkpoint metadata when the active task uses this curriculum."""
-    return self.state.to_dict() if self.active else None
-
-  def restore(self, value: dict[str, Any] | None) -> None:
-    """Restore stage hysteresis without deriving it from elapsed steps."""
-    if not self.active:
-      return
-    if value is None:
-      print("[mc_mjlab] checkpoint predates achievement curriculum state")
-      return
-    self.state = AchievementState.from_dict(value)
-    if self._last_observed_token != self.state.last_report_sha256:
-      self._last_observed_token = None
-    self._set_stage(self.state.current_stage)
-    if self.enabled:
-      self._publish_state()

@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """Write docs/architecture from the source; --check turns drift into a failure."""
 
+from __future__ import annotations
+
 import argparse
 import ast
 import difflib
 import re
 import sys
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 # Sibling script, resolved by the interpreter's script directory at runtime.
-import architecture_extract as ex  # ty: ignore[unresolved-import]
+import architecture_extract as ex
 
 OUT = ex.ROOT / "docs" / "architecture"
 CSS = Path(__file__).with_name("architecture_page.css")
@@ -24,16 +26,15 @@ HOST = NATIVE / "cpp" / "controllers_host.cpp"
 LAYOUT = NATIVE / "hpp" / "io_layout.hpp"
 PROTOCOL = NATIVE / "hpp" / "ipc_socket.hpp"
 POOL = NATIVE / "cpp" / "controllers_manager.cpp"
-BINDING = ex.SRC / "mc_mjlab" / "controller_io.py"
+BRIDGE = ex.SRC / "mc_mjlab" / "bridge" / "sim_controller_bridge.py"
 ACTION = ACTIONS / "mc_rtc_residual_action.py"
 POSITION = ACTIONS / "mc_rtc_residual_joint_position_actions.py"
 TORQUE = ACTIONS / "mc_rtc_residual_joint_torque_actions.py"
-REGISTRY = ROBOTS / "robots_registry.py"
+REGISTRY = ROBOTS / "registry.py"
 RB = TASKS / "residual_balance"
 ZR = TASKS / "zero_residual"
 RB_CFG = RB / "residual_balance_env_cfg.py"
 ZR_CFG = ZR / "zero_residual_env_cfg.py"
-PPO_CFG = RB / "residual_balance_ppo_cfg.py"
 
 BANNER = (
   "<!-- Generated from the source. Do not edit. -->\n"
@@ -168,7 +169,7 @@ def node_id(name: str) -> str:
   return re.sub(r"[^A-Za-z0-9]", "_", name)
 
 
-def tick(items) -> str:
+def tick(items: Iterable[str]) -> str:
   """A comma-separated backticked list."""
   return ", ".join(f"`{item}`" for item in items)
 
@@ -265,7 +266,7 @@ def collaboration_diagram() -> str:
   """Methods each class calls on the collaborators it constructs."""
   owners = (
     (ACTION, "McRtcResidualActionBase"),
-    (BINDING, "ControllerIoBinding"),
+    (BRIDGE, "SimControllerBridge"),
   )
   worker_side = {
     name.rsplit(".", 1)[-1]
@@ -397,7 +398,7 @@ def rate_stack() -> str:
 
 def task_ids(package: Path) -> str:
   """Every id this package builds, resolved through the repo's naming helper."""
-  from utils.task_naming import get_task_name
+  from mc_mjlab.tasks.naming import get_task_name
 
   gates = ex.conditional_imports(package / "__init__.py")
   rows = []
@@ -428,26 +429,6 @@ def registration_table(package: Path) -> str:
         )
       )
   return table(("Id", "Env cfg", "runner_cls", "Called in"), rows) if rows else ""
-
-
-def term_census() -> str:
-  """Manager terms by the constructor used to build them."""
-  rows = []
-  for package, path in (("residual_balance", RB_CFG), ("zero_residual", ZR_CFG)):
-    counts: dict[str, int] = {}
-    for binding in ex.term_bindings(path):
-      counts[binding.kind] = counts.get(binding.kind, 0) + 1
-    for kind in ex.TERM_KINDS:
-      if counts.get(kind):
-        rows.append((f"`{package}`", f"`{kind}`", str(counts[kind])))
-  duals = table(
-    ("Term", "Constructors"),
-    [
-      (f"`{name}`", tick(kinds))
-      for name, kinds in sorted(ex.dual_role_terms(RB_CFG).items())
-    ],
-  )
-  return table(("Package", "Constructor", "Call sites"), rows) + "\n\n" + duals
 
 
 def manager_table(
@@ -542,13 +523,11 @@ def robot_registry() -> str:
   """The registry keys, and whether each names a directory of the same name."""
   rows = [
     (f"`{key}`", "yes" if (ROBOTS / key).is_dir() else "no")
-    for key in ex.dict_keys("robots.robots_registry.ROBOTS")
+    for key in ex.dict_keys("robots.registry.ROBOTS")
   ]
   fields = table(
     ("`RobotSpec` field",),
-    [
-      (f"`{name}`",) for name in ex.class_attributes("robots.robots_registry.RobotSpec")
-    ],
+    [(f"`{name}`",) for name in ex.class_attributes("robots.registry.RobotSpec")],
   )
   return table(("`MainRobot`", "Directory of that name"), rows) + "\n\n" + fields
 
@@ -573,7 +552,7 @@ def gain_paths() -> str:
   """The pd_gains_path each registry entry names."""
   rows = [
     (f"`{key}`", f"`{kwargs.get('pd_gains_path', '')}`")
-    for key, kwargs in ex.dict_call_kwargs("robots.robots_registry.ROBOTS").items()
+    for key, kwargs in ex.dict_call_kwargs("robots.registry.ROBOTS").items()
   ]
   return table(("Robot", "`pd_gains_path`"), rows)
 

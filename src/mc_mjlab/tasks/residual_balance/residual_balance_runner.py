@@ -1,25 +1,17 @@
-"""Runner that makes the external base-controller configuration reproducible."""
+"""Runner that adds the balance task's budget, curriculum and watchdog hooks."""
 
 from __future__ import annotations
 
-import hashlib
 import json
-import os
-import shutil
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
-from mjlab.rl import MjlabOnPolicyRunner
+from mjlab.rl import RslRlVecEnvWrapper
 
-from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
+from mc_mjlab.rl.runner import McRtcResidualOnPolicyRunner
 from mc_mjlab.tasks.residual_balance.achievement_curriculum import (
   AchievementCurriculumBridge,
-)
-from mc_mjlab.tasks.residual_balance.effective_training_manifest import (
-  build_effective_training_manifest,
-  curriculum_runtime_snapshot,
-  materialize_effective_training_manifest,
-  synchronize_resumed_curriculum,
-  validate_effective_training_manifest,
 )
 from mc_mjlab.tasks.residual_balance.residual_balance_diagnostics import (
   ppo_diagnostics,
@@ -29,121 +21,70 @@ from mc_mjlab.tasks.residual_balance.training_watchdog import (
   RunnerWatchdogBridge,
   WatchdogStop,
 )
-from utils.mc_rtc_config import get_controller_name
 
 
-def _file_record(role: str, path: Path) -> dict[str, str | bool]:
-  """Capture one provenance file as content plus a stable digest."""
-  path = path.expanduser().resolve()
-  if not path.is_file():
-    return {"role": role, "source": str(path), "present": False}
-  content = path.read_text(errors="replace")
-  return {
-    "role": role,
-    "source": str(path),
-    "present": True,
-    "sha256": hashlib.sha256(content.encode()).hexdigest(),
-    "content": content,
-  }
+class ResidualBalanceOnPolicyRunner(McRtcResidualOnPolicyRunner):
+  """Train the balance task under its achievement curriculum and health watchdog."""
 
-
-def _controller_config_paths(controller_name: str) -> list[Path]:
-  """Find installed mc_rtc YAML files that configure the selected controller."""
-  paths: set[Path] = set()
-  for value in os.environ.get("LD_LIBRARY_PATH", "").split(os.pathsep):
-    if not value:
-      continue
-    library_dir = Path(value).expanduser()
-    for suffix in ("yaml", "yml"):
-      paths.update(library_dir.glob(f"*/etc/{controller_name}.{suffix}"))
-  return sorted(path.resolve() for path in paths if path.is_file())
-
-
-def collect_controller_provenance(env) -> dict:
-  """Collect all non-checkpoint inputs that define the base controller."""
-  action_cfg = env.unwrapped.cfg.actions["mc_rtc_residual"]
-  project_cfg = Path(action_cfg.mc_rtc_config_path)
-  controller_name = get_controller_name(project_cfg)
-  records = [
-    _file_record("project_mc_rtc", project_cfg),
-    _file_record("user_mc_rtc", Path.home() / ".config/mc_rtc/mc_rtc.yaml"),
-  ]
-  if action_cfg.pd_gains_path is not None:
-    records.append(_file_record("pd_gains", Path(action_cfg.pd_gains_path)))
-  records.extend(
-    _file_record(f"controller_config_{index}", path)
-    for index, path in enumerate(_controller_config_paths(controller_name))
-  )
-  return {"controller_name": controller_name, "files": records}
-
-
-def _materialize_provenance(provenance: dict, log_dir: Path) -> None:
-  """Write readable copies alongside the run's ordinary parameter dump."""
-  output_dir = log_dir / "base_controller_config"
-  output_dir.mkdir(parents=True, exist_ok=True)
-  manifest = {"controller_name": provenance["controller_name"], "files": []}
-  for index, record in enumerate(provenance["files"]):
-    public_record = {key: value for key, value in record.items() if key != "content"}
-    if record["present"]:
-      source = Path(record["source"])
-      snapshot = f"{index:02d}_{record['role']}{source.suffix}"
-      shutil.copy2(source, output_dir / snapshot)
-      public_record["snapshot"] = snapshot
-    manifest["files"].append(public_record)
-  (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-
-
-def _provenance_signature(provenance: dict) -> tuple:
-  """Reduce provenance to the values that affect reproducibility."""
-  files = tuple(
-    (record["role"], record["present"], record.get("sha256"))
-    for record in provenance["files"]
-  )
-  return provenance["controller_name"], files
-
-
-class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
-  """Persist and validate the base-controller files used by a residual run."""
-
-  PROVENANCE_KEY = "base_controller_provenance"
   BUDGET_KEY = "training_budget"
-  MANIFEST_KEY = "effective_training_manifest"
-  CURRICULUM_KEY = "curriculum_runtime"
   ACHIEVEMENT_KEY = "achievement_curriculum"
   WATCHDOG_KEY = "training_watchdog"
 
-  def __init__(self, env, train_cfg: dict, log_dir=None, device: str = "cpu") -> None:
-    super().__init__(env, train_cfg, log_dir, device)
-    self._configure_actor_update_mask(env)
-    self._controller_provenance = collect_controller_provenance(env)
+  def setup_task_hooks(
+    self, env: RslRlVecEnvWrapper, train_cfg: dict, log_dir: str | None
+  ) -> None:
+    """Attach the iteration budget, the achievement curriculum and the watchdog."""
     self._training_budget = training_budget(env.num_envs, train_cfg)
-    self._effective_manifest = build_effective_training_manifest(env, train_cfg)
     self._achievement = AchievementCurriculumBridge(self, log_dir)
     self._watchdog = RunnerWatchdogBridge(self, log_dir)
     # rsl_rl's `learn()` offers no per-iteration hook, so the one logging call it
     # makes is where the diagnostics attach. docs/ppo.md#training-diagnostics
-    self.logger.log = self._log_with_diagnostics(self.logger.log)
-    if log_dir is not None and int(os.environ.get("RANK", "0")) == 0:
-      _materialize_provenance(self._controller_provenance, Path(log_dir))
-      materialize_effective_training_manifest(self._effective_manifest, Path(log_dir))
-      (Path(log_dir) / "training_budget.json").write_text(
-        json.dumps(self._training_budget, indent=2) + "\n"
-      )
+    self.logger.log = self._log_with_diagnostics(  # ty: ignore[invalid-assignment]
+      self.logger.log
+    )
 
-  def _configure_actor_update_mask(self, env) -> None:
-    """Connect PPO actor updates to the authority applied by the action term."""
-    configure = getattr(self.alg, "set_actor_update_mask_source", None)
-    if not callable(configure):
-      return
-    action = env.unwrapped.action_manager.get_term("mc_rtc_residual")
-    if not isinstance(action, McRtcResidualActionBase):
-      raise TypeError("residual runner requires an mc_rtc residual action")
-    configure(lambda: action.actor_update_gate)
+  def materialize_task_inputs(self, log_dir: Path) -> None:
+    """Write the derived iteration budget beside the other run records."""
+    (log_dir / "training_budget.json").write_text(
+      json.dumps(self._training_budget, indent=2) + "\n"
+    )
 
-  def _log_with_diagnostics(self, log):
+  def checkpoint_task_state(self) -> dict:
+    """Stamp the budget, the watchdog configuration and the curriculum stage."""
+    achievement = self._achievement.snapshot()
+    return {
+      self.BUDGET_KEY: self._training_budget,
+      self.WATCHDOG_KEY: self._watchdog.as_config(),
+      **({self.ACHIEVEMENT_KEY: achievement} if achievement is not None else {}),
+    }
+
+  def checkpoint_saved(self, path: str) -> None:
+    """Let the watchdog count the checkpoints it may later roll back to."""
+    self._watchdog.checkpoint_saved(path)
+
+  def restore_task_state(self, infos: dict) -> None:
+    """Put the achievement curriculum back on the stage the checkpoint holds."""
+    self._achievement.restore(infos.get(self.ACHIEVEMENT_KEY))
+
+  def learn(
+    self, num_learning_iterations: int, init_at_random_ep_len: bool = False
+  ) -> None:
+    """Run training while publishing an unambiguous terminal lifecycle state."""
+    try:
+      super().learn(num_learning_iterations, init_at_random_ep_len)
+    except WatchdogStop as error:
+      print(f"[mc_mjlab] {error}")
+      self.logger.stop_logging_writer()
+    except BaseException as error:
+      self._watchdog.failed(error)
+      raise
+    else:
+      self._watchdog.completed()
+
+  def _log_with_diagnostics(self, log: Callable[..., Any]) -> Callable[..., Any]:
     """Wrap the logger so every iteration also records the PPO diagnostics."""
 
-    def logging_call(*args, **kwargs):
+    def logging_call(*args: Any, **kwargs: Any) -> Any:
       writer = self.logger.writer
       iteration = kwargs.get("it", args[0] if args else None)
       diagnostics = ppo_diagnostics(self.alg)
@@ -167,75 +108,3 @@ class ResidualBalanceOnPolicyRunner(MjlabOnPolicyRunner):
       return result
 
     return logging_call
-
-  def learn(
-    self, num_learning_iterations: int, init_at_random_ep_len: bool = False
-  ) -> None:
-    """Run training while publishing an unambiguous terminal lifecycle state."""
-    try:
-      super().learn(num_learning_iterations, init_at_random_ep_len)
-    except WatchdogStop as error:
-      print(f"[mc_mjlab] {error}")
-      self.logger.stop_logging_writer()
-    except BaseException as error:
-      self._watchdog.failed(error)
-      raise
-    else:
-      self._watchdog.completed()
-
-  def save(self, path: str, infos=None) -> None:
-    """Embed controller inputs in every checkpoint as well as the run directory."""
-    achievement = self._achievement.snapshot()
-    infos = {
-      **(infos or {}),
-      self.PROVENANCE_KEY: self._controller_provenance,
-      self.BUDGET_KEY: self._training_budget,
-      self.MANIFEST_KEY: self._effective_manifest,
-      self.CURRICULUM_KEY: curriculum_runtime_snapshot(self.env),
-      self.WATCHDOG_KEY: self._watchdog.as_config(),
-      **({self.ACHIEVEMENT_KEY: achievement} if achievement is not None else {}),
-    }
-    super().save(path, infos)
-    self._watchdog.checkpoint_saved(path)
-
-  def load(
-    self,
-    path: str,
-    load_cfg: dict | None = None,
-    strict: bool = True,
-    map_location: str | None = None,
-  ) -> dict:
-    """Reject a checkpoint when its recorded base controller is different."""
-    infos = super().load(path, load_cfg, strict, map_location)
-    checkpoint_infos = infos or {}
-    saved_provenance = checkpoint_infos.get(self.PROVENANCE_KEY)
-    if saved_provenance is None:
-      print(f"[mc_mjlab] checkpoint {path} predates base-controller provenance")
-    elif _provenance_signature(saved_provenance) != _provenance_signature(
-      self._controller_provenance
-    ):
-      raise RuntimeError(
-        "Checkpoint base-controller configuration differs from the active "
-        "configuration. Restore the YAML/PD files embedded under infos/"
-        f"{self.PROVENANCE_KEY} before loading {path}."
-      )
-    saved_manifest = checkpoint_infos.get(self.MANIFEST_KEY)
-    if saved_manifest is None:
-      print(f"[mc_mjlab] checkpoint {path} predates effective-config manifests")
-    else:
-      validate_effective_training_manifest(
-        saved_manifest,
-        self._effective_manifest,
-        full_resume=load_cfg is None,
-      )
-    if load_cfg is None:
-      synchronize_resumed_curriculum(self.env, checkpoint_infos)
-      self._achievement.restore(checkpoint_infos.get(self.ACHIEVEMENT_KEY))
-      synchronized = curriculum_runtime_snapshot(self.env)
-      saved_curriculum = checkpoint_infos.get(self.CURRICULUM_KEY)
-      if saved_curriculum is not None and saved_curriculum != synchronized:
-        print(
-          "[mc_mjlab] curriculum targets were realigned to the restored "
-          "common_step_counter"
-        )
-    return infos

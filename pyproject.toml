@@ -51,6 +51,10 @@ cmake.source-dir = "src/mc_rtc_interface"
 build-dir = "build"
 # Stale .cpp edits rebuild on import; uv sync alone never sees them.
 editable.rebuild = true
+# That rebuild's banner is the one thing it writes to stdout, so it corrupts
+# any `$(uv run python -c ...)` capture. SKBUILD_EDITABLE_VERBOSE=1 brings it
+# back; a failed rebuild still prints.
+editable.verbose = false
 minimum-version = "build-system.requires"
 
 [tool.scikit-build.wheel]
@@ -74,7 +78,14 @@ mc_mjlab = "mc_mjlab.tasks"
 [tool.pytest.ini_options]
 # Without it a bare `uv run pytest` walks .venv and collects torch's own test
 # modules, which error out at import.
-testpaths = ["src/mc_rtc_interface/tests"]
+testpaths = ["tests"]
+# `scripts/evaluation` is repository-only and not in the wheel, so it is reached
+# by path, not by install. The ty entry below must match or it reports every
+# `evaluation.*` import unresolved.
+pythonpath = ["scripts"]
+
+[tool.ty.environment]
+extra-paths = ["scripts"]
 
 [tool.ruff]
 src = ["src"]
@@ -86,5 +97,7 @@ indent-width = 2
 target-version = "py313"
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F", "I", "B"]
-ignore = ["B011"]
+select = ["E4", "E7", "E9", "F", "I", "B", "ANN"]
+# ANN401: `Any` is the honest annotation where the untyped mc_rtc bindings cross
+# into Python; ANN requires an annotation, `ty` judges whether it is right.
+ignore = ["B011", "ANN401"]

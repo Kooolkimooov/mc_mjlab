@@ -26,28 +26,22 @@ def residual_balance_ppo_cfg(
   learning_rate: float = 1.0e-3,
   num_learning_epochs: int = 2,
   num_mini_batches: int = 2,
-  recurrent: bool = False,
   objective_clipping: bool = True,
 ) -> RslRlOnPolicyRunnerCfg:
   """PPO settings, following mjlab's locomotion configs."""
   if max_iterations is None:
     max_iterations = iterations_for_budget(policy_steps_per_env, num_steps_per_env)
-  actor_class = (
-    "mc_mjlab.tasks.zero_init_actor:ZeroInitRNNModel"
-    if recurrent
-    else "mc_mjlab.tasks.zero_init_actor:ZeroInitMLPModel"
-  )
   return RslRlOnPolicyRunnerCfg(
     actor=RslRlModelCfg(
       # rsl_rl leaves the mean rows at nn.Linear's default: untrained RMS 0.094.
-      class_name=actor_class,
+      class_name="mc_mjlab.rl.zero_init_actor:ZeroInitMLPModel",
       hidden_dims=(512, 256, 128),
       activation="elu",
       obs_normalization=True,
-      rnn_type="gru" if recurrent else None,
+      rnn_type=None,
       rnn_hidden_dim=256,
       distribution_cfg={
-        "class_name": ("mc_mjlab.tasks.squashed_gaussian:SquashedGaussianDistribution"),
+        "class_name": ("mc_mjlab.rl.squashed_gaussian:SquashedGaussianDistribution"),
         "init_std": 0.1,
         # Match the powered ResidualMPC setting. docs/ppo.md#std_range
         "std_range": (0.05, 0.15),
@@ -75,7 +69,7 @@ def residual_balance_ppo_cfg(
       desired_kl=0.02,
       max_grad_norm=1.0,
       class_name=(
-        "mc_mjlab.tasks.rollout_adaptive_ppo:RolloutAdaptivePPO"
+        "mc_mjlab.rl.rollout_adaptive_ppo:RolloutAdaptivePPO"
         if schedule == "rollout_adaptive"
         else "PPO"
       ),

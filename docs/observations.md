@@ -1,6 +1,6 @@
 # Observations
 
-What the policy sees, and why. Terms in `tasks/mdp.py`, wiring in
+What the policy sees, and why. Terms in `mdp/`, wiring in
 `tasks/residual_balance/residual_balance_env_cfg.py`.
 
 ## Noise levels
@@ -78,10 +78,11 @@ and joint state are near-Markov, whereas the plan's recent history is what encod
 where in the stride the robot is.
 
 Actor width is `1099` at 20 controller frames after removing the two sole
-velocimeters. The archived history screens are `649` dimensions at 10 frames and
-`424` at 5. The one-frame GRU input is `172` dimensions, with hidden size `256`;
-all three are opt-in through `MC_MJLAB_REGISTER_ARCHIVED_TASKS=1`. Both recurrent
-and feed-forward policies zero-initialize the mean head. They remain affordable
+velocimeters. The archived history screens were `649` dimensions at 10 frames and
+`424` at 5, and the one-frame GRU input `172` dimensions with hidden size `256`;
+all three were opt-in through `MC_MJLAB_REGISTER_ARCHIVED_TASKS=1` and were
+removed with it on 2026-09-16, leaving the 20-frame feed-forward actor. Both
+recurrent and feed-forward policies zero-initialized the mean head. They remain affordable
 because collection dominates completely — 6.94 s against 0.014 s of learning per
 iteration at 2x2 epochs x minibatches, so a wider first layer costs no wall clock.
 
@@ -156,7 +157,7 @@ Controller-internal and exact, so they carry no observation noise, the same as
 `controller_reference_velocity`. Given the same history because the plan steps
 foot to foot and the phase is the point.
 
-They are *plans*, not errors. The measured side of `com_velocity_tracking` is
+They are *plans*, not errors. The measured side of the CoM velocity comparison is
 largely inferable from `base_lin_vel`; the measured side — the centre of pressure
 under the feet — went to the **critic** as `measured_zmp_offset` on 2026-08-17.
 The actor still does not get it directly, but `foot_load_share` is derived from

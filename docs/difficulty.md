@@ -250,16 +250,19 @@ wrench, or the viewer gains a force visualization.
 **History:**
 - 2026-08-28 — added after the shipped `play` gave no way to see a perturbation.
 
-## curriculum_diagnostics
+## Retired: the curriculum_diagnostics tasks
 
-**Current:** Two additive ankle-authority tasks isolate the difficulty change
+**Retired:** 2026-09-16 — both tasks and `scripts/run_curriculum_diagnostics.py`
+were deleted with the archived registrations. The measurements are kept.
+
+**Was:** Two additive ankle-authority tasks isolate the difficulty change
 that coincides with the long run's early optimum. `Curriculum-Frozen` keeps the
 impulse range at `[0.10, 0.25] m/s`. `Curriculum-Gradual` holds that range through
 48,000 policy steps, then linearly raises its upper bound to `0.40 m/s` at 80,000
 and `0.50 m/s` at 112,000. Both keep the torque-margin weight at `-0.05`, so the
 diagnostic changes only impulse difficulty.
 
-`scripts/run_curriculum_diagnostics.py` runs two 2-iteration, 8-environment smoke
+`scripts/run_curriculum_diagnostics.py` ran two 2-iteration, 8-environment smoke
 tests before two 220-iteration, 128-environment diagnostics. Smoke tests use
 TensorBoard; diagnostics use W&B by default. Every run enables mjlab's NaN guard,
 saves locally every 20 iterations, and records resumable state under
@@ -379,8 +382,10 @@ count, stage magnitudes, or checkpoint cadence changes.
 friction `+-10%`, active PD gains `+-5%`, and motor strength `+-5%`. Actor
 observations sample `0-1` policy-step delay, while
 actuator commands sample `0-1` mc_rtc controller-period delay (`0-2` physics
-substeps). Archived `Position-Robust2` doubles every range and permits two delay
-steps. Both require `MC_MJLAB_REGISTER_ARCHIVED_TASKS=1`. Randomization is static
+substeps). Archived `Position-Robust2` doubled every range and permitted two delay
+steps; stage two and both archived ids were removed on 2026-09-16, leaving stage
+one for the active qualifier's `robust` scenario and its calibration tools.
+Randomization is static
 per environment construction; ordinary training does not enable it before the
 standard-task promotion gate is met.
 
@@ -490,9 +495,12 @@ are biased by 1/duration until runs are long relative to the cap — see
 - 2026-08-14 — briefly committed as `0.0`, which disabled every disturbance in
   the task; caught in review and amended back to 0.4.
 
-## push_angular_velocity
+## Retired: push_angular_velocity
 
-**Current:** `0.0` — the `roll`/`pitch` components of the push are off. It has
+**Retired:** 2026-09-16 — the dial was `0.0` from the day it was added and no
+caller ever set it, so it was deleted rather than carried.
+
+**Was:** `0.0` — the `roll`/`pitch` components of the push are off. It has
 been 0.0 since the task was introduced; the dial exists so angular disturbance
 can be added without restructuring the event term.
 

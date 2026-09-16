@@ -39,7 +39,8 @@ The review identified real work worth retaining:
   construction.
 - `RolloutAdaptivePPO` fixes repeated per-minibatch learning-rate adaptation.
 - `ControllerPool.close` fixes worker thread-pool and failed-build leaks.
-- `verify_improvement_contracts.py` provides deterministic executable contracts.
+- `tests/` provides deterministic executable contracts (they lived in
+  `verify_improvement_contracts.py`, unrun, when this review was written).
 - `recovery_detector.json` records its calibration seed, environment count,
   duration, duty, recall, and quantiles.
 - `apply_qualification` is pure over frozen state, report validation is strict,
@@ -155,17 +156,22 @@ path is safe because authority has already decayed near zero.
 **Decision:** deferred. Route expiry through the same decay/slew contract before
 training the walking-reference action again.
 
-## _apply_datastore_commands
+## Retired: _apply_datastore_commands
 
-**Current:** a datastore value captured at burst onset can be restored up to two
+**Retired:** 2026-09-16 — the gated command pair went with the gated
+walking-reference action; the absolute feed replaced it.
+
+**Was:** a datastore value captured at burst onset can be restored up to two
 seconds later, overwriting an intervening FSM update.
 
 **Decision:** deferred. Restore relative to a live controller value or require a
 callback contract that owns the override lifecycle.
 
-## WALKING_REFERENCE_SCALE
+## Retired: WALKING_REFERENCE_SCALE
 
-**Current:** `(0.20, 0.15, 0.30)` permits a `-0.2 m/s` longitudinal delta against
+**Retired:** 2026-09-16 — the constant went with the gated delta channel.
+
+**Was:** `(0.20, 0.15, 0.30)` permits a `-0.2 m/s` longitudinal delta against
 the installed controller's `+0.1 m/s` command, including reverse walking. That is
 not residual-scale authority.
 
@@ -181,7 +187,7 @@ seconds. Omitting a JSON key silently selects a different detector.
 **Decision:** deferred. Require every calibrated temporal key or make the code
 defaults exactly match the versioned file.
 
-## _select_residual_joints
+## select_residual_joints
 
 **Current:** `leg[-2:]` and `leg[2:-1]` assume a six-DoF leg without asserting
 that topology.
@@ -191,12 +197,16 @@ slicing.
 
 ## residual_balance task registrations
 
-**Current:** four residual-balance ids are registered by default: position,
-torque, ankle, and ankle achievement. Together with the two zero-residual play
-ids, mc_mjlab exposes six tasks. Ten completed ablations no longer build during
-`import mjlab`; `MC_MJLAB_REGISTER_ARCHIVED_TASKS=1` restores their original ids
-for old-checkpoint compatibility. The screen launcher now contains only the
-supported standard and ankle comparison.
+**Current:** ten ids are registered and they are all of them — six
+residual-balance, two zero-residual, one residual_mpc, one residual_feedback.
+The screen launcher contains only the supported standard and ankle comparison.
+
+**Was:** four residual-balance ids registered by default, and ten completed
+ablations that no longer built during `import mjlab` but could be restored under
+their original ids by `MC_MJLAB_REGISTER_ARCHIVED_TASKS=1`. On 2026-09-16 the
+archived registrations and that switch were deleted, together with the task
+dials and gated walking-reference code that existed only for them; reproducing
+one of those experiments means checking out the revision before that cleanup.
 
 **Re-measure if:** a retained task is rejected, a new policy direction qualifies,
 or an archived checkpoint needs a compatibility path beyond its original id.
@@ -205,9 +215,12 @@ or an archived checkpoint needs a compatibility path beyond its original id.
 - 2026-08-27 — reduced 14 default residual registrations to four while retaining
   ten historical ids behind an explicit compatibility switch.
 
-## verify_improvement_contracts.py
+## Retired: the verify_improvement_contracts.py script
 
-**Current:** the repository has a deterministic assertion suite despite guidance
+**Retired:** 2026-09-16 — the surviving checks moved into `tests/`, grouped by
+subject, so pytest runs them. The finding below is what motivated the move.
+
+**Was:** the repository has a deterministic assertion suite despite guidance
 that still says there is no test suite. The suite is the only executable coverage
 for several training contracts.
 

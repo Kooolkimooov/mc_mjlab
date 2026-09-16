@@ -10,24 +10,26 @@ src/mc_mjlab/
   actions/mc_rtc_residual_joint_position_actions.py  # McRtcResidualJointPositionAction(Cfg)
   actions/mc_rtc_residual_joint_torque_actions.py    # McRtcResidualJointTorqueAction(Cfg)
   actions/mc_rtc_residual_action.py        # residual action base (interpolation, async dispatch)
+  bridge/sim_controller_bridge.py  # simulation joints, root and sensors in native layout
+  bridge/controller_datastore.py   # numeric aliases, gated commands and baselines
+  bridge/config.py, bridge/shared_memory.py  # mc_rtc yaml reads, shared-memory views
+  residuals/recovery_authority.py  # recovery detector and authority gating
+  residuals/mpc_math.py       # MPC-side residual plumbing
+  residuals/safety.py         # residual clipping and feasibility guards
+  residuals/printer.py        # the per-joint residual `play` prints
   robots/                     # constants (assets are dynamically symlinked from mc_rtc install path)
+  mdp/                        # the tasks' MDP terms: rewards, observations, events, metrics
+  rl/                         # actor, distribution, PPO, shared runner and checkpoint contracts
   tasks/__init__.py           # imports every task sub-package (mjlab.tasks entry point)
-  tasks/mdp.py                # the tasks' MDP terms: rewards, observations, events, metrics
   tasks/residual_balance/     # the RL task: __init__ registers the ids, env cfg + PPO cfg alongside
   tasks/residual_mpc/         # paper-style task: residual on the MPC's own inputs
   tasks/residual_feedback/    # residual on the controller's feedback rather than its output
   tasks/zero_residual/        # the demo task: mc_rtc alone, RL residual left at zero
-  recovery_authority.py       # recovery detector and authority gating
-  residual_mpc.py             # MPC-side residual plumbing
-  residual_safety.py          # residual clipping and feasibility guards
-  controller_io.py            # simulation joints, root and sensors in native layout
-  controller_datastore.py     # numeric aliases, gated commands and baselines
 src/mc_rtc_interface/
   cpp/                        # native manager, worker, host and controller instance
   hpp/io_layout.hpp           # authoritative shared-memory offsets
   hpp/ipc_socket.hpp          # worker protocol and memory descriptions
   bindings/module.cpp        # Python ControllersManager bindings
-src/utils/                    # task ids, config, PD gains and shared memory
 docs/                         # why the numbers are what they are (see docs/README.md)
 etc/
   mc_rtc.yaml                 # mc_rtc controller config
@@ -58,7 +60,7 @@ editable install points at — they are not copied into `.venv`. That persistent
 `build/` is also what makes the native tests runnable directly:
 
 ```sh
-cd build && ctest            # native tests plus the deterministic contracts
+cd build && ctest            # C++ tests plus the pytest suite in tests/
 ```
 
 Configuring by hand is only for building against a prefix other than this
@@ -70,7 +72,7 @@ selected interpreter's environment.
 
 An action can read extra numbers out of mc_rtc through its datastore, on top of
 the joint channels every task uses. This is **optional and opt-in**: a task asks
-for entries by listing aliases in `controller_vectors` / `controller_scalars`,
+for entries by listing aliases in `datastore_vectors_outputs` / `datastore_scalar_outputs`,
 both empty by default — the zero-residual demo lists nothing and runs with the
 datastore untouched. A task names known entries in those lists; a getter that
 does not exist yet is added to `instance_datastore_plugin`.
@@ -97,7 +99,7 @@ controller.** `controller_vector_callbacks` / `controller_scalar_callbacks` map
 public aliases onto callback names, so the same alias can be repointed at either
 side — `support_foot` resolves to the plugin's getter, while `walking_ref_vel`
 resolves to the controller's `ismpc_walking::get_ref_vel`. The defaults are
-`VECTOR_CALLBACKS` and `SCALAR_CALLBACKS` in `controller_datastore.py`.
+`VECTOR_CALLBACKS` and `SCALAR_CALLBACKS` in `bridge/controller_datastore.py`.
 
 Adding a getter means adding a function to `instance_datastore_plugin` and
 naming it in that map; `ControllerInstance::finish_reset` then registers it on
@@ -156,6 +158,17 @@ then run:
 ```sh
 uv sync
 ```
+
+The ROS workspace's own dependencies are Debian packages under
+`/usr/lib/python3/dist-packages`, which a plain venv hides. If that bites — a
+bare `pytest` aborts importing `launch_testing` — create the venv with them
+(a `uv venv` flag only; uv has no setting for it):
+
+```sh
+uv venv --system-site-packages && uv sync
+```
+
+or flip the option in `.venv/pyvenv.cfg`.
 
 ### mc_rtc dependency
 
@@ -229,17 +242,17 @@ uv run play  Mc-Mjlab-Residual-Balance-Logisticcontroller-Ismpc-Hrp5P-Position \
   --checkpoint-file <path/to/model_*.pt>
 ```
 
-The default mc_mjlab surface is ten tasks. One of them, the achievement-gated
-ankle curriculum, advances only from held-out qualification reports — see
+The mc_mjlab surface is ten tasks, and `uv run list-envs` shows all of them.
+One, the achievement-gated ankle curriculum, advances only from held-out
+qualification reports — see
 [docs/difficulty.md](docs/difficulty.md#achievement_finite_impulse_curriculum)
-for how to drive it. Ten completed ablations are hidden so `import mjlab` does
-not build them. To play an old checkpoint under its original id:
+for how to drive it.
 
-```sh
-MC_MJLAB_REGISTER_ARCHIVED_TASKS=1 uv run list-envs
-MC_MJLAB_REGISTER_ARCHIVED_TASKS=1 uv run play <archived-task-id> \
-  --checkpoint-file <path/to/model_*.pt>
-```
+Ten completed ablations used to register behind an environment variable, for
+replaying their checkpoints under their original ids. They are gone, along with
+the task dials and the gated walking-reference code that existed only for them.
+Reproducing one of those experiments means checking out the revision before that
+cleanup; every supported checkpoint still loads on the ten ids above.
 
 Every residual-balance training run publishes a PID-bound heartbeat under
 `<run>/watchdog/`. For an unattended run, attach the cooperative monitor from a
@@ -270,9 +283,7 @@ uv run python scripts/compare_to_baseline.py --checkpoint <path/to/model_*.pt>
 uv run python scripts/audit_rewards.py --checkpoint <path/to/model_*.pt>
 # Can a constant residual move the centre of pressure at all?
 uv run python scripts/probe_residual_authority.py --level 1.0
-uv run python scripts/probe_walking_reference.py
 uv run python scripts/inspect_controller_datastore.py
-uv run python scripts/probe_step_duration.py
 # Does the DCM objective still prefer standing to walking? (no checkpoint needed)
 uv run python scripts/validate_dcm_objective.py
 ```
@@ -284,12 +295,11 @@ defaults low on both, to leave room for a training job.
 
 ### Environment variables
 
-| Variable                           | Effect                                                                 |
-| ---------------------------------- | ---------------------------------------------------------------------- |
-| `MC_MJLAB_CONTROL`                 | `position` (default) or `torque`, for the demo                         |
-| `MC_MJLAB_PRINT_RESIDUAL`          | Steps between `[residual]` printouts during `play`; `0` silences       |
-| `MC_MJLAB_REGISTER_ARCHIVED_TASKS` | `1` also registers the ten archived ablation ids                       |
-| `MC_MJLAB_PUSH_DEBUG`              | Positive float: scale pushes, cap warm-up at 1 s, print `[push]` lines |
+| Variable                  | Effect                                                                 |
+| ------------------------- | ---------------------------------------------------------------------- |
+| `MC_MJLAB_CONTROL`        | `position` (default) or `torque`, for the demo                         |
+| `MC_MJLAB_PRINT_RESIDUAL` | Steps between `[residual]` printouts during `play`; `0` silences       |
+| `MC_MJLAB_PUSH_DEBUG`     | Positive float: scale pushes, cap warm-up at 1 s, print `[push]` lines |
 
 ### External paths
 

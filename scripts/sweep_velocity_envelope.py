@@ -8,6 +8,7 @@ import itertools
 import statistics
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 import torch
 from mjlab.envs import ManagerBasedRlEnv
@@ -52,7 +53,12 @@ def _grid(spec: str) -> list[float]:
   return [float(lo) + step * i for i in range(n)]
 
 
-def evaluate(twist, arm: str, policy, args) -> list[Sample]:
+def evaluate(
+  twist: tuple[float, float, float],
+  arm: str,
+  policy: Any,
+  args: argparse.Namespace,
+) -> list[Sample]:
   """Hold one twist across every environment and score the settled tracking."""
   cfg = residual_mpc_env_cfg(
     num_envs=args.num_envs,
@@ -71,12 +77,14 @@ def evaluate(twist, arm: str, policy, args) -> list[Sample]:
     settle = round(args.settle_s / env.step_dt)
     steps = round(args.episode_length_s / env.step_dt)
     asset = env.scene["robot"]
+
     zeros = torch.zeros(
       env.num_envs, env.action_manager.total_action_dim, device=env.device
     )
     linear, angular = [], []
     alive = torch.ones(env.num_envs, dtype=torch.bool, device=env.device)
     terminated = torch.zeros_like(alive)
+
     for step in range(steps):
       with torch.inference_mode():
         action = zeros if policy is None else policy(wrapped.get_observations())
@@ -85,6 +93,7 @@ def evaluate(twist, arm: str, policy, args) -> list[Sample]:
       alive &= ~step_terminated.bool()
       if step < settle:
         continue
+
       command = env.command_manager.get_command("twist")
       assert command is not None
       planar = asset.data.root_link_lin_vel_b[:, :2]

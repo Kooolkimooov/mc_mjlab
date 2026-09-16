@@ -18,3 +18,6 @@ from mc_mjlab.actions.residual_mpc_joint_torque_action import (
 from mc_mjlab.actions.residual_mpc_joint_torque_action import (
   ResidualMpcJointTorqueActionCfg as ResidualMpcJointTorqueActionCfg,
 )
+from mc_mjlab.actions.walking_reference_action import (
+  AbsoluteWalkingReferenceActionCfg as AbsoluteWalkingReferenceActionCfg,
+)

@@ -1,17 +1,17 @@
 """Runner that refuses checkpoints written under different action semantics."""
 
-from mc_mjlab.residual_mpc import ACTION_SEMANTICS_VERSION
-from mc_mjlab.tasks.residual_balance.residual_balance_runner import (
-  ResidualBalanceOnPolicyRunner,
-)
+from __future__ import annotations
+
+from mc_mjlab.residuals.mpc_math import ACTION_SEMANTICS_VERSION
+from mc_mjlab.rl.runner import McRtcResidualOnPolicyRunner
 
 
-class ResidualMpcOnPolicyRunner(ResidualBalanceOnPolicyRunner):
+class ResidualMpcOnPolicyRunner(McRtcResidualOnPolicyRunner):
   """Adds a hard action-semantics gate to the provenance-aware runner."""
 
   SEMANTICS_KEY = "action_semantics_version"
 
-  def save(self, path: str, infos=None) -> None:
+  def save(self, path: str, infos: dict | None = None) -> None:
     """Stamp the action-semantics version into every checkpoint."""
     super().save(path, {**(infos or {}), self.SEMANTICS_KEY: ACTION_SEMANTICS_VERSION})
 

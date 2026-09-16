@@ -58,10 +58,12 @@ def main() -> None:
   args.log_root.mkdir(parents=True, exist_ok=True)
   state_path = args.log_root / "screen_state.json"
   state = read_state(state_path)
+
   for arm in selected:
     if not args.rerun and state.get(arm.name, {}).get("exit_code") == 0:
       print(f"[screen] skip completed {arm.name}", flush=True)
       continue
+
     command = [
       "uv",
       "run",
@@ -86,6 +88,7 @@ def main() -> None:
       "--log-root",
       str(args.log_root),
     ]
+
     log_path = args.log_root / f"{arm.name}.log"
     print(f"[screen] start {arm.name}; log {log_path}", flush=True)
     with log_path.open("w") as stream:
@@ -96,6 +99,7 @@ def main() -> None:
         text=True,
         check=False,
       )
+
     state[arm.name] = {
       "exit_code": result.returncode,
       "task_id": arm.task_id,
@@ -103,6 +107,7 @@ def main() -> None:
       "seed": args.seed,
       "log": str(log_path),
     }
+
     write_state(state_path, state)
     if result.returncode:
       raise SystemExit(f"screen {arm.name} failed; see {log_path}")

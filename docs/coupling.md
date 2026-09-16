@@ -21,7 +21,7 @@ before dispatch so stale successful payloads cannot be mistaken for fresh output
 native migration. [Earlier measurements](coupling-history.md) retain their sample
 sizes and original values; they do not validate this integration.
 
-## ControllerIoBinding
+## SimControllerBridge
 
 **Current:** input and output columns use native offset methods. Python scatters
 all simulated reference-order joints, including passive joints, and retains
@@ -41,7 +41,7 @@ the full native force-sensor ordering.
 **Re-measure if:** RobotModule joint/sensor metadata or MuJoCo conventions change.
 
 **History:** the legacy layout used target-order joints and a sixteen-value root
-block. Native mapping and geometry are covered by `verify_native_action_contracts`.
+block. Native mapping and geometry are covered by `tests/test_native_action_contracts.py`.
 
 ## Reset pose seeding
 
@@ -88,26 +88,91 @@ configuration changes.
 **History:** the old Python pool implemented kill/respawn quarantine. Its retained
 measurements and failure evidence are in [the historical notes](coupling-history.md).
 
-## DatastoreCommands
+## datastore_scalar_inputs
 
-**Current:** public scalar/vector accessors retain their names; configuration maps
-aliases to native callback names. Default vector aliases are `planned_zmp` →
-`mc_mjlab::planned_zmp`, `control_com` → `mc_mjlab::control_com`,
-`control_com_vel` → `mc_mjlab::control_com_vel`, and `walking_ref_vel` →
-`ismpc_walking::get_ref_vel`. Both `support_foot` and the historical public
-`ismpc_walking::support_foot_name` alias select numeric `mc_mjlab::support_foot`
-(right=0, left=1). Unknown names are treated as explicit callback names and must
-validate successfully in native initialization. Missing callbacks are errors.
+**Current:** `datastore_scalar_inputs` and `datastore_vectors_inputs` name
+`double` and `Eigen::Vector3d` datastore *setters*. They are the unconditional
+setter path: the native step writes every declared input column into the controller's datastore
+before `run()`, on every control period, with no usage flag, no baseline and no
+restore — which is why they work on the current native interface, while the
+gated pairs still need usage flags it does not expose.
 
-Setters require one usage flag per callback per environment, addressed by
-`use_datastore_scalar_offset()` and `use_datastore_vector3_offset()`. Missing
-methods raise a clear prerequisite error before workers start. Python captures
-the latest collected getter value on activation and sends absolute
-baseline-plus-residual values. Deactivation restores that baseline once, then
-clears usage. Each callback is independently gated; getters remain populated
-while setters are inactive. After reset, relative commands wait for fresh getter
-output from the first step and apply in the following control period. Explicit
-absolute commands may apply immediately. Held scalar offsets survive resets.
+The action term owns one value buffer per kind, zero until a task writes it.
+`set_datastore_scalar_input(setter, values)` takes `(num_envs,)` and
+`set_datastore_vector_input(setter, values)` takes `(num_envs, 3)`;
+`datastore_scalar_input` / `datastore_vector_input` read the fed value back.
+A value holds until set again, across episode resets, because a fed setter is a
+property of the task and not of the episode — the rule the removed scalar holds
+followed. docs/controller-timing.md#removed-datastore_scalar_input_commands
+
+One hazard: a declared setter is
+written from the very first controller step, before any task code has run, so
+its zero default reaches the controller unless the task feeds it during
+construction.
+
+**Re-measure if:** the native input block gains usage flags, or `apply_input`
+stops writing datastore columns every step.
+
+**History:**
+- 2026-09-15 — both fields existed on the cfg with output-shaped docstrings and
+  no reader; wired to the layout, the value buffers and the per-period write.
+  The walking reference moved onto them when the gated pairs were removed.
+
+## required_controller
+
+**Current:** a cfg field on `McRtcResidualActionCfg`, `None` by default, naming
+the controller a term's calls only exist in; `_validate_cfg` compares it to the
+config's `Enabled` (`bridge.config.get_controller_name`) before a worker
+starts, and its error names the field so a controller known to provide the same
+calls can be accepted. Only `WalkingReferenceActionCfg` redeclares it,
+defaulting to `LogisticController_ismpc`, the sole provider of the
+`ismpc_walking::get_ref_vel` / `set_ref_vel` pair; every other action term
+leaves it `None` and runs on whatever controller is enabled. Without the check a
+mismatch surfaces as the native "controller initialization failed" raise from
+the missing callbacks, which names the datastore entries rather than the
+controller.
+
+**Re-measure if:** another term starts calling controller-specific entries, or
+the walking reference moves to a differently named controller.
+
+**History:**
+- 2026-09-15 -- added `required_controller`, replacing the walking-reference
+  cfg's own `walking_controller` field and its `__post_init__` raise. That raise
+  fired during task registration, where mjlab's task loader turns an exception
+  into a `[WARN]` and a traceback: the run then failed as an unknown task id
+  rather than a wrong controller. `_validate_cfg` sees the final cfg, after any
+  `--env.*` override, and stops the run itself.
+
+## Datastore callbacks
+
+**Current:** there is no alias layer. A task names native callbacks directly in
+`datastore_vectors_outputs` / `datastore_scalar_outputs`, and
+`datastore_vector_output` / `datastore_scalar_output` read them back under the
+same names. The adapter's four
+getters are constants in `mc_mjlab/bridge/controller_datastore.py` (`PLANNED_ZMP`,
+`CONTROL_COM`, `CONTROL_COM_VEL`, `SUPPORT_FOOT`); a controller's own getters are
+constants in the task that reads them, as `residual_mpc/mdp.py` holds the
+`ismpc_walking::` ones. `SUPPORT_FOOT` is numeric (right=0, left=1) — ismpc's own
+`ismpc_walking::support_foot_name` returns a string the layout cannot carry, so
+the plugin converts it. Every configured name must validate in native
+initialization; missing callbacks are errors.
+
+**History:**
+- 2026-09-15 — the two alias maps were deleted with the walking-reference move.
+  They mapped four vector and two scalar public names onto these callbacks, and
+  the one mapping that was not cosmetic (`ismpc_walking::support_foot_name` →
+  `mc_mjlab::support_foot`) is now written out at its single use site.
+
+**Removed 2026-09-15: the gated `DatastoreCommands` pairs.** They carried one
+usage flag per callback per environment, captured a baseline on activation, sent
+absolute baseline-plus-offset values and restored the baseline once on
+deactivation. None of it ever ran here: the flags needed
+`use_datastore_scalar_offset()` / `use_datastore_vector3_offset()`, which the
+native `InputLayout` does not define, so constructing a non-empty pair list
+raised — including for the walking reference, whose action term therefore failed
+in `__init__`. Setters now go through `datastore_scalar_inputs` /
+`datastore_vectors_inputs` above, and a term that wants a baseline latches the
+getter itself (docs/walking-reference.md#_feed_walking_reference).
 
 The native interface accepts only `double` and `Eigen::Vector3d` callbacks.
 Getters return values or const references; setters accept values or const
@@ -127,7 +192,7 @@ references. Unsupported inventory:
 An external controller adapter must expose required values using supported
 numeric callbacks. The `mc_mjlab::` names are supplied in-process by
 [instance_datastore_plugin](#instance_datastore_plugin) rather than by a
-controller; native usage flags remain a prerequisite for the setter path.
+controller.
 
 **Re-measure if:** callback signatures, usage-flag semantics or adapter values change.
 

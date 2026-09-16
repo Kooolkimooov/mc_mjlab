@@ -65,7 +65,7 @@ counts, process/thread configuration, native code or installed libraries change.
   The first iteration includes warmup and profiling overhead; this is not a
   controlled throughput comparison against earlier runs.
 
-## gomp_barrier_wait_end
+## OpenMP barrier waiting
 
 **Current:** in the trainer's `train` thread-name group, leaf CPU samples are
 86.40% `gomp_barrier_wait_end` and 3.15% `gomp_team_barrier_wait_end` in PyTorch's
@@ -85,7 +85,7 @@ placement, worker count or rollout operations change.
 
 **History:** 2026-09-14 — identified from the same 58,184-sample capture.
 
-## profiling_artifacts
+## Profiling artifacts
 
 **Current:** artifacts are stored with the run at
 `logs/rsl_rl/Mc-Mjlab-Residual-Balance-Logisticcontroller-Ismpc-Hrp5P-Position/2026-09-14_11-30-33_cpp-profile-15/native-profile/`:

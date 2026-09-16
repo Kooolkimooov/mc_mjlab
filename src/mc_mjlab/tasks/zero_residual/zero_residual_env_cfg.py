@@ -21,14 +21,14 @@ from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
 from mc_mjlab.actions.mc_rtc_residual_joint_torque_actions import (
   McRtcResidualJointTorqueActionCfg,
 )
-from mc_mjlab.robots.robots_registry import (
+from mc_mjlab.robots.registry import (
   get_main_robot_spec,
   prepare_cfg_for_mc_rtc,
 )
 
 # Every env is its own mc_rtc controller (~70 MB, ~570 ms to construct, built
 # serially), so the env count is memory- and startup-bound rather than GPU-bound.
-# Two is what a viewer session wants; raise it to sweep throughput.
+# One is what a viewer session wants; raise it to sweep throughput.
 PLAY_NUM_ENVS = 1
 NUM_ENVS = 420
 

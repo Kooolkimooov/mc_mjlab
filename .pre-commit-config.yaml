@@ -25,11 +25,29 @@ repos:
         entry: python3 scripts/check_prose.py
         language: system
         types: [python]
-        files: ^(src|scripts)/
+        files: ^(src|scripts|tests)/
 
-      - id: ctest
-        name: ctest (C++ and python)
-        entry: cmake --build build --target check
+      # The per-file hook above cannot see a heading orphaned by a file it was
+      # not handed, so the whole-tree pass runs strict and fails the commit.
+      - id: check-docs
+        name: check docs references
+        entry: python3 scripts/check_prose.py --strict src scripts tests
+        language: system
+        types_or: [python, c++, c, markdown]
+        pass_filenames: false
+
+      # A Python-only commit never builds the C++ side. The native hook below
+      # excludes ctest's `python` test, which this one already ran.
+      - id: pytest
+        name: pytest (tests/)
+        entry: uv run pytest -q
         language: system
         types_or: [python, c++, c, cmake]
+        pass_filenames: false
+
+      - id: ctest
+        name: ctest (C++)
+        entry: cmake --build build --target check-native
+        language: system
+        types_or: [c++, c, cmake]
         pass_filenames: false

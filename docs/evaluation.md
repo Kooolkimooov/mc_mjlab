@@ -3,6 +3,32 @@
 How to find out whether a residual policy actually beat mc_rtc, and the sampling
 traps that make it easy to get a confident wrong answer. Scripts in `scripts/`.
 
+## Who owns what
+
+`scripts/` is not part of the wheel — `[tool.scikit-build.wheel] packages` ships
+`src/mc_mjlab` only — so a script may import the library and the library may
+never import a script. The machinery the scripts share lives in
+`scripts/evaluation/`, a package rather than a pile of cross-script imports:
+
+| Module | Holds |
+| --- | --- |
+| `rollout` | environment construction and teardown, reset without updating the observation history, pre-reset episode-buffer snapshots |
+| `comparison` | `compare_to_baseline.py`'s paired records and stopping rule |
+| `qualification` | `qualify_checkpoints.py`'s fixed-episode schedules and decisions |
+| `qualification_strata` | per-stratum accounting, formerly shipped inside the task package |
+| `reward_audit` | the live reward audit, formerly shipped inside the task package |
+| `disturbances`, `scenarios` | the shared scenario definitions both samplers draw from |
+
+Comparison and qualification share `rollout` and nothing else. They are
+different experimental designs — different sampling, statistics and episode
+records — and merging their record types would make one of them silently wrong.
+
+**Retired 2026-09-16:** `verify_improvement_contracts.py` (migrated into
+`tests/`, see below), `run_curriculum_diagnostics.py`, `probe_step_duration.py`
+and `probe_walking_reference.py` (their subjects were removed), plus the
+evaluator options that drove them. Each has a `Retired:` section in the doc that
+covered it, keeping the measurements verbatim.
+
 ## Why the training curves cannot answer it
 
 `Episode_Reward/*` comes from a *stochastic* policy still carrying its
@@ -323,7 +349,8 @@ values, so a stale or forged digest could mask a real difference or invent one.
 The payload now decides.
 
 **A field added after a checkpoint was written is not an interface change.**
-On 2026-08-28 the action term gained `controller_scalars`, and every checkpoint
+On 2026-08-28 the action term gained its datastore scalar outputs (then named
+`controller_scalars`), and every checkpoint
 trained before it became unqualifiable: the saved manifest cannot contain a key
 that did not exist. `validate_effective_training_manifest` now drops keys the
 active contract *gained* before comparing, and names them. Removed keys and
@@ -339,6 +366,39 @@ should be enforced rather than recorded.
   same-day checkpoint; the branch review had flagged this as the most dangerous
   defect on the branch and `leo-mjlab-review.md` had already recorded the
   decision to exclude them.
+
+## _RENAMED_MODULES
+
+**Current:** `validate_effective_training_manifest` rewrites the import paths a
+saved manifest recorded before the 2026-09-15 source-tree move, so a checkpoint
+is compared against the module spellings it would carry today. `_RENAMED_MODULES`
+maps the whole-module moves; terms from the split `mc_mjlab.tasks.mdp` are
+resolved by scanning the seven `mc_mjlab.mdp` submodules for the one that
+defines the name, so the map does not have to list every term and cannot go
+stale against a later re-split.
+
+**Why.** Both enforced contracts name each manager term, action class, config
+dataclass and configured `class_name` by `module:qualname`. The move changed
+every one of those strings while changing no behaviour, so without the rewrite
+each of the position, ankle, achievement and matched-impulse checkpoints would
+fail its full resume *and* its actor-only load with a diff listing nothing but
+paths. That is the failure `source_drift` already records as the wrong
+shape of enforcement: identity is evidence about semantics, not semantics.
+
+The rewrite is deliberately narrow. It is applied only to the saved side, only
+to the listed modules, and it does not touch values, orderings, dimensions or
+effective parameters: a term that really did move to a different callable still
+fails, because its attribute name no longer resolves.
+
+**Re-measure if:** modules move again -- add the pair rather than widening the
+rule -- or `mc_mjlab.mdp` stops binding its seven submodules, which is what the
+lookup walks.
+
+**History:**
+- 2026-09-15 — added with the source-layout refactor
+  (`docs/target-source-tree.md`), which moved 20 modules and split the MDP terms
+  into seven. Verified path-only: the moved files' contents are unchanged in the
+  move commits.
 
 ## invalidated_scenarios
 
@@ -492,7 +552,7 @@ Three arms, identical but for the controller and the residual:
 | `walking+residual` | as `walking` | full-scale, alternating signs |
 
 Nothing in the repo is touched to get the standing arm: `posture_config` rewrites
-the one `Enabled:` line into `--out-dir`, and `_make_env_cfg(mc_rtc_yaml=...)`
+the one `Enabled:` line into `--out-dir`, and `make_residual_balance_env_cfg(mc_rtc_yaml=...)`
 takes it from there.
 
 What each block of the output answers:
@@ -592,25 +652,45 @@ then drives nonzero action to assert exact inactive residual zeroing.
 
 ## Deterministic contract suites
 
-Three scripts assert the Python side of the action without starting a
-controller: `verify_native_action_contracts.py` (reference-order scatter and
-gather, quaternion conversion, sensor routing, datastore commands, dispatch
-pipeline), `verify_residual_mpc_contracts.py` (bridge and blending) and
-`verify_residual_feedback_contracts.py` (modality widths, parity with
-ResidualMPC, kick-curriculum gating). The native tests under
-`src/mc_rtc_interface/tests/` cover the other side of the boundary; these cover
-the mjlab side, and the two do not overlap.
+Every contract this repo asserts without starting a controller lives in
+`tests/`, one module per subject, and `uv run pytest` runs all of them in about
+12 s. The C++ tests under `src/mc_rtc_interface/tests/` cover the other side of
+the boundary; these cover the mjlab side, and the two do not overlap.
 
-All three run under `ctest` as `contract_*`, about 4 s each, so a stale
-assertion fails at commit time rather than months later.
+| Module | Subject |
+| --- | --- |
+| `test_native_action_contracts.py` | reference-order scatter and gather, quaternion conversion, sensor routing, dispatch pipeline, `required_controller` |
+| `test_residual_mpc_contracts.py` | bridge and blending |
+| `test_residual_feedback_contracts.py` | modality widths, parity with ResidualMPC, kick-curriculum gating |
+| `test_datastore_inputs.py` | setter shapes, missing configured names, feed-buffer readback, reset persistence |
+| `test_balance_curricula.py` | achievement and stratified curricula, rehearsal weights, task registrations |
+| `test_effective_training_manifest.py` | checkpoint loading across callable moves, and the negative cases that must still fail |
+| `test_evaluation_rollout.py` | reset ordering, observation-history preservation, metric reductions, incomplete episodes, worker truncations, exception cleanup |
+| `test_qualification.py` | qualification decisions and strata accounting |
+| `test_reward_audit.py` | reward accounting units and weights |
+| `test_policy.py` | squashed Gaussian, zero initialization, log-ratio bounds |
+| `test_residual_safety.py` | feasibility projection against the `RobotModule`'s bounds |
+| `test_watchdog.py` | escalation thresholds and verdicts |
 
-```sh
-cd build && ctest -R '^contract_'
-```
+`tests/conftest.py` imports `mjlab` before anything else, because a test module
+that reaches this repo's packages first re-enters a half-built
+`mc_mjlab.actions` and mjlab swallows the failure as a `[WARN]`.
 
-**History:** `verify_residual_feedback_contracts.py` asserted a
-`kick_difficulty` curriculum that `e797db2` had already made opt-in, and failed
-undetected until 2026-09-14 because nothing ran it.
+The evaluation modules test `scripts/evaluation/`, which is on pytest's
+`pythonpath` (`[tool.pytest.ini_options]`) and deliberately not in the wheel:
+its only callers are the scripts and these tests.
+
+**History:**
+- 2026-09-16 -- the surviving checks from `scripts/verify_improvement_contracts.py`
+  moved in, grouped by subject. That script was 1430 lines carrying an 18-class
+  mjlab mock, and nothing ran it; the migrated checks use real configuration
+  classes and small test doubles, and the suite went from 25 cases to 60.
+- 2026-09-15 -- moved out of `scripts/` into `tests/`, dropping the three
+  `contract_*` ctest entries for the single `python` one. As standalone scripts
+  each had its own `main()`, and the two shared contracts ran twice.
+- `verify_residual_feedback_contracts.py` asserted a `kick_difficulty`
+  curriculum that `e797db2` had already made opt-in, and failed undetected until
+  2026-09-14 because nothing ran it.
 
 ## sweep_velocity_envelope.py
 
@@ -757,3 +837,32 @@ draws.
 **History:**
 - 2026-09-01 — added after unmatched randomization was found to be the confound
   behind a result that reversed sign between 16 and 64 environments.
+
+## agent.seed
+
+**Current:** `42` everywhere, including `--nominal` runs, the probes and both
+contract suites. Every reported number is therefore one seed, and a policy that
+only clears a gate at seed 42 has not been shown to clear it at all.
+
+**`--agent.seed -1` is the lever that randomizes it.** `mjlab/scripts/train.py`
+copies `agent.seed` into `env.seed`, and `ManagerBasedRlEnv.__init__` calls its
+own `seed()`, whose `-1` branch draws `np.random.randint(0, 10_000)`, seeds
+python, numpy, torch and warp from it, and writes the drawn value back into
+`cfg.env.seed`. The draw is printed (`Setting seed: N`) and appears in the
+startup info table, so the seed behind a run stays recoverable from its log.
+`seed=None` is not the same lever: it skips the seeding call entirely. rsl-rl
+never reads `agent.seed` itself, so this one call is the whole mechanism.
+
+Use it when a checkpoint looks promising and the question has become whether the
+result is the policy or the seed: re-run the screen under two or three drawn
+seeds before spending a qualification on it.
+
+**Two hazards.** A run started at `-1` draws a *different* seed when it resumes,
+and `seed` is not in `_OPERATIONAL_ENV_KEYS`, so the drawn value sits inside the
+training contract and `validate_effective_training_manifest` refuses the resume
+on `environment.seed`. Pass the seed the log recorded instead, or move `seed`
+into the operational keys if randomized runs should stay resumable. And under
+multi-GPU the seed is `agent.seed + rank`, so `-1` randomizes rank 0 only and
+hands ranks `1, 2, 3` the fixed seeds `0, 1, 2`.
+
+**Re-measure if:** n/a — structural.

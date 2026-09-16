@@ -11,7 +11,7 @@ from mc_mjlab.actions.mc_rtc_residual_action import (
   McRtcResidualActionBase,
   McRtcResidualActionCfg,
 )
-from mc_mjlab.residual_safety import project_residual
+from mc_mjlab.residuals.safety import project_residual
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv

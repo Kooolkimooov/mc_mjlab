@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Static facts about this repo, read with griffe, grimp, pyreverse and ast."""
 
+from __future__ import annotations
+
 import ast
 import functools
 import re
@@ -129,11 +131,6 @@ def class_attributes(dotted: str) -> list[str]:
   ]
 
 
-def module_constants(dotted: str, prefix: str) -> list[str]:
-  """Module-level constants sharing a prefix, sorted."""
-  return sorted(n for n in model()[dotted].members if n.startswith(prefix))
-
-
 def classes() -> dict[str, list[str]]:
   """Every class in the package mapped to its base classes, as written."""
   found: dict[str, list[str]] = {}
@@ -146,11 +143,6 @@ def classes() -> dict[str, list[str]]:
 
   walk(model())
   return found
-
-
-def subclasses_of(base: str) -> list[str]:
-  """Direct subclasses of one base, by its written name."""
-  return sorted(n for n, bases in classes().items() if base in bases)
 
 
 # --- grimp ------------------------------------------------------------------
@@ -395,31 +387,6 @@ def class_channels(path: Path) -> str:
   return "?"
 
 
-def param_defaults(path: Path, function: str) -> dict[str, str]:
-  """Parameter defaults of one function, for values forwarded rather than written."""
-  node = next(
-    (
-      n
-      for n in ast.walk(tree(path))
-      if isinstance(n, ast.FunctionDef) and n.name == function
-    ),
-    None,
-  )
-  if node is None:
-    return {}
-  args = node.args
-  found = {}
-  for name, default in zip(args.kwonlyargs, args.kw_defaults, strict=True):
-    if default is not None:
-      found[name.arg] = ast.unparse(default)
-  positional = args.posonlyargs + args.args
-  for name, default in zip(
-    positional[len(positional) - len(args.defaults) :], args.defaults, strict=True
-  ):
-    found[name.arg] = ast.unparse(default)
-  return found
-
-
 def registrations(path: Path) -> list[Registration]:
   """Every register_mjlab_task call in one task package, as written."""
   found = []
@@ -580,21 +547,6 @@ def internal_call_graph(
       if callee in bodies and callee != name:
         edges.add((name, callee))
   return sorted(edges)
-
-
-def status_writers(paths: list[Path], prefix: str = "STATUS_") -> list[tuple[str, str]]:
-  """Which function writes which status constant, by enclosing definition."""
-  found = set()
-  for path in paths:
-    root = tree(path)
-    for node in ast.walk(root):
-      if not isinstance(node, ast.FunctionDef):
-        continue
-      for child in ast.walk(node):
-        if isinstance(child, ast.Name) and child.id.startswith(prefix):
-          if isinstance(child.ctx, ast.Load):
-            found.add((f"{path.stem}.{node.name}", child.id))
-  return sorted(found)
 
 
 def layout_inputs(path: Path) -> list[tuple[str, str, str]]:

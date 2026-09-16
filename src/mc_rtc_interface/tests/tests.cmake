@@ -242,10 +242,12 @@ foreach(count IN ITEMS 0 -1 1x 1.5 18446744073709551616)
     )
 endforeach()
 
+# The Python side lives in the repo's own tests/ directory: binding tests plus
+# the deterministic action contracts, none of which the C++ tests above reach.
 add_test(
   NAME python
   COMMAND "${UV_EXECUTABLE}" run --project "${CMAKE_CURRENT_SOURCE_DIR}/../.."
-    python -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/tests" -q
+    python -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/../../tests" -q
 )
 
 set_tests_properties(
@@ -253,20 +255,8 @@ set_tests_properties(
   ENVIRONMENT
     "MC_RTC_SHARED_MEMORY_TEST=$<TARGET_FILE:test_shared_memory>;MC_RTC_INSTANCE_PROBE_DIR=$<TARGET_FILE_DIR:InstanceProbe>"
   ENVIRONMENT_MODIFICATION "PYTHONPATH=path_list_prepend:${CMAKE_BINARY_DIR}"
-  TIMEOUT 120
+  TIMEOUT 300
 )
-
-# The Python side of the action: reference-order scatter/gather, datastore
-# commands and task cfg wiring, none of which the native tests above reach.
-foreach(contract native_action residual_mpc residual_feedback)
-  add_test(
-    NAME "contract_${contract}"
-    COMMAND "${UV_EXECUTABLE}" run --project "${CMAKE_CURRENT_SOURCE_DIR}/../.."
-      python
-      "${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/verify_${contract}_contracts.py"
-  )
-  set_tests_properties("contract_${contract}" PROPERTIES TIMEOUT 300)
-endforeach()
 
 # Never attach ctest to the default target under scikit-build: the `python`
 # test shells out to `uv run` on this same project, which deadlocks against
@@ -283,15 +273,25 @@ add_custom_target(
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 
-add_dependencies(
-  check
-  test_controllers_manager
-  test_shared_memory
-  mc_rtc_interface
-  InstanceProbe
-  test_output_guard
-  test_host_reset_outputs
-  test_host_failures
-  test_host_io
-  test_worker_ipc
+# What the C++ pre-commit hook builds and runs: pytest has its own hook there,
+# and running the `python` test from both doubles it onto every mixed commit.
+add_custom_target(
+  check-native
+  COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -E "^python$"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
+
+foreach(check_target check check-native)
+  add_dependencies(
+    ${check_target}
+    test_controllers_manager
+    test_shared_memory
+    mc_rtc_interface
+    InstanceProbe
+    test_output_guard
+    test_host_reset_outputs
+    test_host_failures
+    test_host_io
+    test_worker_ipc
+  )
+endforeach()

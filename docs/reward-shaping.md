@@ -27,7 +27,7 @@ linear combination of *measured CoM and CoM velocity*, but those terms score
 plan-tracking errors expresses a plan-independent stability margin.
 
 Constants in `tasks/residual_balance/residual_balance_env_cfg.py`; terms in
-`tasks/mdp.py`.
+`mdp/`.
 
 ## reward_audit
 
@@ -88,7 +88,7 @@ whose callable changes simulation state.
   arms, raw and weighted quantiles, shape assertions, conditional denominators,
   and exact restoration of synthetic zero-weight contributions.
 
-## ZMP_TRACKING_STD
+## Retired: ZMP_TRACKING_STD
 
 **Removed 2026-08-19** with its reward term; see `Pruning the agreement rewards`.
 The sizing argument is kept because it is the template every later `std` followed.
@@ -104,7 +104,7 @@ the residual to earn.
 signal is mostly noise (0.02 scores 0.41); loosen it and it saturates (0.10
 scores 0.84).
 
-## ZMP_TRACKING_WEIGHT
+## Retired: ZMP_TRACKING_WEIGHT
 
 **Removed 2026-08-19.** `zmp_tracking` is no longer a reward term; the quantity
 survives as the `zmp_error` metric. See `Pruning the agreement rewards` below.
@@ -118,7 +118,7 @@ survives as the `zmp_error` metric. See `Pruning the agreement rewards` below.
   (~0.0125 per step against ~0.001 of penalties), which is what stops the split
   from creating an incentive to end the episode early.
 
-## COM_VELOCITY_TRACKING_STD
+## Retired: COM_VELOCITY_TRACKING_STD
 
 **Removed 2026-08-19** with its reward term; see `Pruning the agreement rewards`.
 The two-scale reasoning below is why `com_velocity_error` is reported as a plain
@@ -145,7 +145,7 @@ Horizontal stays a 2-norm rather than two more kernels: x and y are
 interchangeable for balance, so the term should not care which way the robot is
 drifting.
 
-## COM_VELOCITY_TRACKING_WEIGHT
+## Retired: COM_VELOCITY_TRACKING_WEIGHT
 
 **Removed 2026-08-19**, and replaced by the `com_velocity_error` metric. This is the
 term that was negative against baseline in **every** comparison ever run, so it is
@@ -185,7 +185,7 @@ error = norm( (com_vel_xy - commanded_com_vel_xy) / omega - (CoP - com)_xy )
 ```
 
 with the command taken from the controller's own control robot
-(`controller_vector("control_com_vel")`, the same reference `com_velocity_error`
+(`datastore_vector_output(CONTROL_COM_VEL)`, the same reference `com_velocity_error`
 uses). The reward is `exp(-(error/std)^2)`, gated on the feet carrying load
 exactly as `zmp_tracking` is. Standing is unaffected by the correction — its
 command is zero to four decimals — so this is purely a walking-side change.
@@ -345,7 +345,7 @@ stabilizer QP does not directly regulate it, so unlike the tracking terms this i
 something the residual can improve without competing with the controller.
 
 It reads the `root_angmom` subtree-angular-momentum sensor, which
-`robots/additional_sensors_configuration.py` has been adding to every robot MJCF
+`robots/sensors.py` has been adding to every robot MJCF
 and which nothing had ever read.
 
 **The weight is measured, and the first guess was 10x too large.** A zero-residual
@@ -368,7 +368,7 @@ carries at least `min_normal_force`. Contact slip is a violation the QP's own
 model cannot see, which is again what makes it worth paying for.
 
 It reads the `left_foot_lin_vel` / `right_foot_lin_vel` velocimeters — the other
-pair of sensors added by `additional_sensors_configuration` and never read.
+pair of sensors added by `robots/sensors` and never read.
 
 **This term is deliberately near-inert, and the weight is set for that.** The
 baseline barely slips: measured `sum(v_tangential^2) = 0.0004`, i.e. ~0.02 m/s. The
@@ -387,7 +387,7 @@ not a shaping term.
 `RECOVERY_WINDOW_S = 2.0`. The disturbance-gated half of the payment.
 
 **2026-08-17 — the term is now `mdp.recovery_dcm`, not `recovery_tracking`.** The
-gate machinery is unchanged (`_age_since_push`, the same window, the same
+gate machinery is unchanged (`age_since_push`, the same window, the same
 schedule-independence argument below); only the scored quantity moved from
 plan-matching to the DCM offset above. Everything recorded here about *why the
 gate exists and why it is 2.0 s* still applies.
@@ -510,9 +510,11 @@ also a health curve in its own right: a robot lifting off, stumbling or on its
 way down spends more steps ungrounded, and that shows up there before it shows up
 in a termination.
 
-## zmp_tracking
+## How the ZMP comparison is built
 
-How the two sides of the comparison are built.
+The `zmp_tracking` reward this was written for was retired on 2026-08-19 (see
+`Pruning the agreement rewards`), but the comparison it describes is still how
+`mdp.metrics.zmp_error` and `mdp.rewards.recovery_tracking` are computed.
 
 The **controller side** is `planned_zmp`: the centroidal ZMP of the QP's own
 solution, i.e. the ZMP the motion mc_rtc commands this period implies (see
@@ -544,15 +546,16 @@ velocity is differential and directly comparable. It reads `subtree_linvel`, whi
 MuJoCo fills because the robots carry a subtree sensor (the RL-only `root_angmom`),
 which is what makes `mj_subtreeVel` run.
 
-## _ZmpSensors
+## ZmpSensors
 
-Split out of `zmp_tracking` so the reward is not the only way to reach the raw
-number: the reward reports `exp(-(error/std)^2)`, a bounded kernel output that
-says nothing about metres.
+Split out of the `zmp_tracking` reward so that reward was not the only way to
+reach the raw number: it reported `exp(-(error/std)^2)`, a bounded kernel output
+that says nothing about metres. The reward is gone and the split is what
+outlived it.
 
-`offset_error` is memoised for the current step, because three terms score the
-same quantity — `zmp_tracking`, `recovery_tracking` and the `zmp_error` metric —
-and computing it is not free: the `site_xmat`/`site_xpos` gathers, a batched
+`offset_error` is memoised for the current step, because several terms score the
+same quantity — `recovery_tracking` and the `zmp_error` metric among them — and
+computing it is not free: the `site_xmat`/`site_xpos` gathers, a batched
 `(num_envs, k, 3, 3) @ (num_envs, k, 3, 1)`, the cross products and the
 action-term lookup, at 50 Hz x num_envs.
 
@@ -672,8 +675,9 @@ Recorded so they are not reinvented.
 tanh of the joint-velocity reference) is anti-correlated with what we want: over
 96 s x 16 envs the reference norm runs 1.78 rad/s in the second before a fall
 against 0.64 overall, because a falling robot's controller thrashes. The term
-would pay *more* for the run-up to a fall. It exists in `mdp.py` but is not wired
-into the task, and should not be without re-measuring.
+would pay *more* for the run-up to a fall. It was an unwired implementation in
+`mdp`, and was deleted with the other orphan rewards on 2026-09-16; it should not
+come back without re-measuring.
 
 **A support-region margin on the measured ZMP** is close to a tautology, since a
 centre of pressure lies inside the contact hull by construction. Only the
@@ -685,14 +689,16 @@ position-controlled with stiff PD, so the measured angle follows the commanded o
 to within 0.04 rad even while the robot topples (measured), and since the command
 is reference-plus-residual such a term reduces to a second penalty on the
 residual. Whole-body failure shows up in the base — attitude, height, travel —
-which is what the task's terminations and `base_progress_tanh` read instead.
+which is what the task's terminations read instead. (`base_progress_tanh` read
+the same quantity and was never wired into a task either; it went on 2026-09-16.)
 
 ## action_l2
 
 **Current:** `action_l2` is the executed-residual metric: normalized residual
 actually delivered after tanh squashing, physical scaling, authority gating,
-and feasibility projection. `action_rate_l2` differences that same executed
-quantity across policy steps.
+and feasibility projection. `requested_action_rate_l2` differences the requested
+quantity across policy steps; the executed-side `action_rate_l2` was an unwired
+orphan and went on 2026-09-16.
 
 This makes execution telemetry invariant to per-joint physical scales and avoids
 reconstructing applied authority from raw requests. The reward no longer uses
@@ -827,7 +833,7 @@ to **0.64** of its limit. Nothing enforced any of it. The position clip bounds t
 *offset*, not the torque it produces. The hard clamp now makes an overlarge
 request visible through projection telemetry rather than divergent on hardware.
 
-Both halves already existed unwired: `mc_rtc_robot_configuration.get_effort_limits`
+Both halves already existed unwired: `robot_module.get_effort_limits`
 reads per-joint limits straight from the mc_rtc `RobotModule`, and
 `entity.data.qfrc_actuator` gives the realised joint torque.
 
@@ -991,7 +997,7 @@ now carries ~95% of the dense signal.
 
 4 envs x 700 steps per regime, zero residual, identical but for the controller
 (`Enabled: Posture` against `LogisticController_ismpc`, passed through
-`_make_env_cfg(mc_rtc_yaml=...)` so no config file was touched):
+`make_residual_balance_env_cfg(mc_rtc_yaml=...)` so no config file was touched):
 
 | regime | `dcm_stability` | `zmp_tracking` | `com_velocity_tracking` | `norm(alpha)` |
 | --- | --- | --- | --- | --- |

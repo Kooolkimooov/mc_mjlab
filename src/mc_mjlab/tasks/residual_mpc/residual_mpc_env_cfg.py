@@ -27,18 +27,18 @@ from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.terrains import TerrainEntityCfg
 
 from mc_mjlab import MC_RTC_YAML_PATH
+from mc_mjlab import mdp as shared_mdp
 from mc_mjlab.actions.residual_mpc_joint_torque_action import (
   ResidualMpcJointTorqueActionCfg,
 )
-from mc_mjlab.robots import mc_rtc_robot_configuration as mc_rtc
-from mc_mjlab.robots.robots_registry import (
+from mc_mjlab.actions.walking_reference_action import WALKING_REF_VEL_GETTER
+from mc_mjlab.robots import robot_module as mc_rtc
+from mc_mjlab.robots.registry import (
   get_main_robot_spec,
   prepare_cfg_for_mc_rtc,
 )
-from mc_mjlab.tasks import mdp as shared_mdp
 from mc_mjlab.tasks.residual_mpc import mdp
 
-POLICY_DT = 0.01
 BLEND_FACTOR = 0.1
 SELF_COLLISION_SENSOR = "self_collision"
 COMMAND_NAME = "twist"
@@ -48,7 +48,7 @@ COMMAND_NAME = "twist"
 COMMAND_RANGES = ((0.15, 0.40), (0.0, 0.0), (0.0, 0.0))
 
 #: Paper-faithful kick bound, sampled inside the norm ball by
-#: `mdp.initial_velocity_kick`. docs/residual-mpc.md#INITIAL_VELOCITY_RANGE
+#: `mdp.disturbances.initial_velocity_kick`. docs/residual-mpc.md#INITIAL_VELOCITY_RANGE
 INITIAL_VELOCITY_RANGE = {
   "x": (-0.5, 0.5),
   "y": (-0.5, 0.5),
@@ -64,13 +64,6 @@ EPISODE_LENGTH_S = 30.0
 #: leaving a third for the residual. The paper does not fix sigma.
 #: docs/residual-mpc.md#LINEAR_TRACKING_SIGMA
 LINEAR_TRACKING_SIGMA = 0.02
-#: Baseline-relative offset for the planner's cruise speed (installed default
-#: 0.1 m/s). Not yet wired: the pool fails during configure with an empty
-#: payload when it is. docs/residual-mpc.md#mean_speed
-MEAN_SPEED_OFFSET = 0.20
-MEAN_SPEED_COMMANDS = (
-  ("footsteps_planner::get_mean_speed", "footsteps_planner::set_mean_speed"),
-)
 
 
 def residual_mpc_env_cfg(
@@ -81,9 +74,6 @@ def residual_mpc_env_cfg(
   kick_curriculum: bool = False,
   pushes: bool = True,
   fixed_twist: tuple[float, float, float] | None = None,
-  command_ranges: tuple[
-    tuple[float, float], tuple[float, float], tuple[float, float]
-  ] = COMMAND_RANGES,
   console_output: Literal["none", "single", "all"] = "none",
   mc_rtc_yaml: Path = MC_RTC_YAML_PATH,
 ) -> ManagerBasedRlEnvCfg:
@@ -112,7 +102,7 @@ def residual_mpc_env_cfg(
   joint_cfg = SceneEntityCfg("robot", joint_names=tuple(map(re.escape, mobile)))
 
   actions: dict[str, ActionTermCfg] = {
-    mdp.ACTION_NAME: ResidualMpcJointTorqueActionCfg(
+    mdp.accessors.ACTION_NAME: ResidualMpcJointTorqueActionCfg(
       entity_name="robot",
       actuator_names=(".*",),
       residual_actuator_names=leg_joints,
@@ -124,15 +114,15 @@ def residual_mpc_env_cfg(
       scale=1.0,
       blend_factor=BLEND_FACTOR,
       action_scale_blend_factor=BLEND_FACTOR,
-      controller_scalars=(
-        mdp.QP_OBJECTIVE_CALLBACK,
-        mdp.STEP_TIME_CALLBACK,
-        mdp.STEP_DURATION_CALLBACK,
-        mdp.SUPPORT_FOOT_CALLBACK,
+      datastore_scalar_outputs=(
+        mdp.accessors.QP_OBJECTIVE_CALLBACK,
+        mdp.accessors.STEP_TIME_CALLBACK,
+        mdp.accessors.STEP_DURATION_CALLBACK,
+        mdp.accessors.SUPPORT_FOOT_CALLBACK,
       ),
       walking_velocity_command_name=COMMAND_NAME,
       # Read back so a run shows the reference the controller actually holds.
-      controller_vectors=("walking_ref_vel",),
+      datastore_vectors_outputs=(WALKING_REF_VEL_GETTER,),
       console_output="single" if play else console_output,
       print_residual_every=10 if play else 0,
     )
@@ -141,7 +131,7 @@ def residual_mpc_env_cfg(
   # A held twist is how the envelope sweep asks for one command per episode; the
   # box is otherwise resampled. docs/residual-mpc.md#COMMAND_RANGES
   vx, vy, wz = (
-    command_ranges
+    COMMAND_RANGES
     if fixed_twist is None
     else tuple((value, value) for value in fixed_twist)
   )
@@ -159,18 +149,24 @@ def residual_mpc_env_cfg(
   }
 
   observation_terms = {
-    "root_position": ObservationTermCfg(func=mdp.root_position),
-    "root_quaternion": ObservationTermCfg(func=mdp.root_quaternion),
+    "root_position": ObservationTermCfg(func=mdp.observations.root_position),
+    "root_quaternion": ObservationTermCfg(func=mdp.observations.root_quaternion),
     "joint_position": ObservationTermCfg(
-      func=mdp.joint_position, params={"asset_cfg": joint_cfg}
+      func=mdp.observations.joint_position, params={"asset_cfg": joint_cfg}
     ),
     "joint_velocity": ObservationTermCfg(
-      func=mdp.joint_velocity, params={"asset_cfg": joint_cfg}
+      func=mdp.observations.joint_velocity, params={"asset_cfg": joint_cfg}
     ),
-    "body_linear_velocity": ObservationTermCfg(func=mdp.body_linear_velocity),
-    "body_angular_velocity": ObservationTermCfg(func=mdp.body_angular_velocity),
-    "contact_phases": ObservationTermCfg(func=mdp.controller_contact_phases),
-    "mpc_objective": ObservationTermCfg(func=mdp.controller_qp_objective),
+    "body_linear_velocity": ObservationTermCfg(
+      func=mdp.observations.body_linear_velocity
+    ),
+    "body_angular_velocity": ObservationTermCfg(
+      func=mdp.observations.body_angular_velocity
+    ),
+    "contact_phases": ObservationTermCfg(
+      func=mdp.observations.controller_contact_phases
+    ),
+    "mpc_objective": ObservationTermCfg(func=mdp.observations.controller_qp_objective),
   }
   observations = {
     "actor": ObservationGroupCfg(
@@ -191,35 +187,39 @@ def residual_mpc_env_cfg(
 
   rewards = {
     "linear_tracking": RewardTermCfg(
-      func=mdp.linear_velocity_tracking,
+      func=mdp.rewards.linear_velocity_tracking,
       weight=10.0,
       params={"command_name": COMMAND_NAME, "sigma": LINEAR_TRACKING_SIGMA},
     ),
     "angular_tracking": RewardTermCfg(
-      func=mdp.angular_velocity_tracking,
+      func=mdp.rewards.angular_velocity_tracking,
       weight=5.0,
       params={"command_name": COMMAND_NAME, "sigma": 0.5},
     ),
-    "first_action_rate": RewardTermCfg(func=mdp.first_action_rate, weight=-1.0e-3),
-    "second_action_rate": RewardTermCfg(func=mdp.second_action_rate, weight=-1.0e-4),
-    "torque_l2": RewardTermCfg(func=mdp.torque_l2, weight=-1.0e-4),
+    "first_action_rate": RewardTermCfg(
+      func=mdp.rewards.first_action_rate, weight=-1.0e-3
+    ),
+    "second_action_rate": RewardTermCfg(
+      func=mdp.rewards.second_action_rate, weight=-1.0e-4
+    ),
+    "torque_l2": RewardTermCfg(func=mdp.rewards.torque_l2, weight=-1.0e-4),
     "orientation": RewardTermCfg(
-      func=mdp.orientation_reward, weight=1.0, params={"sigma": 0.5}
+      func=mdp.rewards.orientation_reward, weight=1.0, params={"sigma": 0.5}
     ),
     "height": RewardTermCfg(
-      func=mdp.height_reward,
+      func=mdp.rewards.height_reward,
       weight=1.0,
       params={"target_height": nominal_height, "sigma": 0.5},
     ),
     # Table I prints positive raw MSE with +1, which rewards deviation.
     # docs/residual-mpc.md
     "joint_regularization": RewardTermCfg(
-      func=mdp.joint_regularization,
+      func=mdp.rewards.joint_regularization,
       weight=-1.0,
       params={"asset_cfg": joint_cfg},
     ),
     "self_collision": RewardTermCfg(
-      func=mdp.self_collision,
+      func=mdp.rewards.self_collision,
       weight=-1.0,
       params={"sensor_name": SELF_COLLISION_SENSOR},
     ),
@@ -229,24 +229,26 @@ def residual_mpc_env_cfg(
   terminations = {
     "time_out": TerminationTermCfg(func=envs_mdp.time_out, time_out=True),
     "self_collision": TerminationTermCfg(
-      func=mdp.self_collision, params={"sensor_name": SELF_COLLISION_SENSOR}
+      func=mdp.rewards.self_collision, params={"sensor_name": SELF_COLLISION_SENSOR}
     ),
     "base_speed": TerminationTermCfg(
-      func=mdp.excessive_base_speed, params={"limit": 10.0}
+      func=mdp.terminations.excessive_base_speed, params={"limit": 10.0}
     ),
     "angular_speed": TerminationTermCfg(
-      func=mdp.excessive_angular_speed, params={"limit": 5.0}
+      func=mdp.terminations.excessive_angular_speed, params={"limit": 5.0}
     ),
     "orientation": TerminationTermCfg(
       func=envs_mdp.bad_orientation, params={"limit_angle": math.radians(45.0)}
     ),
     "height": TerminationTermCfg(
-      func=mdp.height_outside,
+      func=mdp.terminations.height_outside,
       params={"minimum": 0.7 * nominal_height, "maximum": 1.3 * nominal_height},
     ),
-    "controller_failed": TerminationTermCfg(func=mdp.controller_failed),
+    "controller_failed": TerminationTermCfg(
+      func=shared_mdp.terminations.controller_failed
+    ),
     "controller_worker_failed": TerminationTermCfg(
-      func=mdp.controller_worker_failed, time_out=True
+      func=shared_mdp.terminations.controller_worker_failed, time_out=True
     ),
   }
 
@@ -272,9 +274,9 @@ def residual_mpc_env_cfg(
         },
       ),
       "randomize_pd_gains": EventTermCfg(
-        func=shared_mdp.randomize_current_pd_gains,
+        func=shared_mdp.disturbances.randomize_current_pd_gains,
         mode="startup",
-        params={"scale_range": (0.95, 1.05), "action_name": mdp.ACTION_NAME},
+        params={"scale_range": (0.95, 1.05), "action_name": mdp.accessors.ACTION_NAME},
       ),
       "randomize_effort": EventTermCfg(
         func=dr.effort_limits,
@@ -286,7 +288,7 @@ def residual_mpc_env_cfg(
         },
       ),
       "refresh_action_scaling": EventTermCfg(
-        func=mdp.refresh_action_scaling, mode="startup"
+        func=mdp.disturbances.refresh_action_scaling, mode="startup"
       ),
     }
   if pushes:
@@ -294,7 +296,7 @@ def residual_mpc_env_cfg(
     # than pushing repeatedly. Held to KICK_WARMUP_S because the FSM stands for
     # the first seconds of an episode. docs/residual-mpc.md#INITIAL_VELOCITY_RANGE
     events["initial_base_velocity"] = EventTermCfg(
-      func=mdp.initial_velocity_kick,
+      func=mdp.disturbances.initial_velocity_kick,
       mode="step",
       params={
         "velocity_range": INITIAL_VELOCITY_RANGE,
@@ -321,15 +323,15 @@ def residual_mpc_env_cfg(
     history_length=10,
   )
   metrics = {
-    "projection_fraction": MetricsTermCfg(func=mdp.projection_fraction),
+    "projection_fraction": MetricsTermCfg(func=shared_mdp.metrics.projection_fraction),
     "maximum_effort_ratio": MetricsTermCfg(
-      func=mdp.maximum_effort_ratio, reduce="max", per_substep=True
+      func=mdp.metrics.active_effort_ratio, reduce="max", per_substep=True
     ),
     # Read as a pair: error_vel_xy alone cannot say whether a gait is slow or
     # merely mistracking. docs/residual-mpc.md#forward_speed
-    "forward_speed": MetricsTermCfg(func=mdp.forward_speed),
+    "forward_speed": MetricsTermCfg(func=mdp.metrics.forward_speed),
     "commanded_speed": MetricsTermCfg(
-      func=mdp.commanded_speed, params={"command_name": COMMAND_NAME}
+      func=mdp.metrics.commanded_speed, params={"command_name": COMMAND_NAME}
     ),
   }
 
@@ -367,6 +369,6 @@ def residual_mpc_env_cfg(
     # adaptive magnitude makes the arms face different difficulty.
     # docs/residual-mpc.md#INITIAL_VELOCITY_RANGE
     cfg.curriculum = {
-      "kick_difficulty": CurriculumTermCfg(func=mdp.survival_kick_curriculum)
+      "kick_difficulty": CurriculumTermCfg(func=mdp.curricula.survival_kick_curriculum)
     }
   return cfg

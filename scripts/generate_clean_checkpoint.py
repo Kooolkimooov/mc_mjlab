@@ -9,7 +9,10 @@ from pathlib import Path
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl import RslRlVecEnvWrapper
 
-from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import _make_env_cfg
+from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
+  AUTHORITY_SETS,
+  make_residual_balance_env_cfg,
+)
 from mc_mjlab.tasks.residual_balance.residual_balance_ppo_cfg import (
   residual_balance_ppo_cfg,
 )
@@ -27,32 +30,25 @@ def main() -> None:
   parser.add_argument("--control", choices=("position", "torque"), default="position")
   parser.add_argument(
     "--authority-set",
-    choices=("uniform", "ankle", "sagittal", "hardware"),
+    choices=AUTHORITY_SETS,
     default="uniform",
   )
   parser.add_argument("--num-workers", type=int, default=1)
-  parser.add_argument(
-    "--controller-history", type=int, choices=(1, 5, 10, 20), default=20
-  )
-  parser.add_argument("--proprio-history", type=int, choices=(1, 5), default=5)
-  parser.add_argument("--recurrent", action="store_true")
   parser.add_argument("--device", default="cuda:0")
   args = parser.parse_args()
   args.output.parent.mkdir(parents=True, exist_ok=True)
-  cfg = _make_env_cfg(
+  cfg = make_residual_balance_env_cfg(
     args.control,
     num_envs=1,
     num_workers=args.num_workers,
     push_velocity=0.0,
     authority_set=args.authority_set,
-    controller_history=args.controller_history,
-    proprio_history=args.proprio_history,
   )
   cfg.auto_reset = False
   env = ManagerBasedRlEnv(cfg, device=args.device)
   runner = ResidualBalanceOnPolicyRunner(
     RslRlVecEnvWrapper(env),
-    asdict(residual_balance_ppo_cfg(recurrent=args.recurrent)),
+    asdict(residual_balance_ppo_cfg()),
     device=args.device,
   )
   runner.save(str(args.output))

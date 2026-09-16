@@ -30,9 +30,20 @@ datastore binding changes.
 - 2026-08-25 — enumerated 43 total datastore entries and 31 walking entries
   from the live installed controller without invoking a setter.
 
-## datastore_scalar_commands
+## Removed datastore_scalar_input_commands
 
-**Current:** the shared-memory transport accepts paired scalar getter/setters.
+**Removed 2026-09-15** from `McRtcResidualActionBase`, with
+`datastore_scalar_input_holds`, the baseline readouts and
+`set_datastore_scalar_input_delta`. No registered task ever declared a pair, the
+one probe below had already answered its question, and the path could not run
+under the native workers at all: `DatastoreCommands` requires
+`InputLayout.use_datastore_scalar_offset()`, which `io_layout.hpp` does not
+define. Unconditional setters remain, as
+[datastore_scalar_inputs](coupling.md#datastore_scalar_inputs); the `vector3`
+pairs followed on the same day, leaving no gated transport at all.
+What it did:
+
+the shared-memory transport accepts paired scalar getter/setters.
 Each active command is a delta from a baseline captured inside its worker. The
 host checks that the getter is finite and the setter takes `double`, publishes
 both the applied value and captured baseline, and restores the baseline when
@@ -81,9 +92,12 @@ inside the existing budget regardless.
 **Re-measure if:** the robot, the controller, or the QP formulation changes, or
 controllers per worker rises far above 16.
 
-## probe_step_duration
+## Retired: the probe_step_duration screen
 
-**Current:** `scripts/probe_step_duration.py` runs all cohorts concurrently from
+**Retired:** 2026-09-16 — `scripts/probe_step_duration.py` was deleted with the
+gated datastore commands it exercised. The screen below is kept for its numbers.
+
+**Was:** `scripts/probe_step_duration.py` runs all cohorts concurrently from
 identical reset states and encoder bias, applies one fixed finite impulse, and
 reports two-second command-relative DCM error, hazards, worker failures, applied
 timing, and restoration error. It probes the generic scalar channel without

@@ -1,6 +1,7 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+This file provides guidance to coding agents working in this repository.
+`CLAUDE.md` is a symlink to it, so both names read the same bytes; edit this file.
 
 # What this is
 
@@ -51,7 +52,7 @@ uv sync                                          # after choosing the mjlab sour
 scripts/demos/run_test_mc_rtc.sh                 # viser viewer (1 env)
 uv run list-envs                                 # task ids (ours + mjlab's)
 # Ids are Mc-Mjlab-<task dir>-<Enabled>-<MainRobot>-<control suffix>,
-# built by utils/task_naming.py, which reads Enabled/MainRobot from
+# built by tasks/naming.py, which reads Enabled/MainRobot from
 # etc/mc_rtc.yaml and then `.title().replace("_", "-")`s the whole string -- so
 # LogisticController_ismpc/HRP5P become Logisticcontroller-Ismpc/Hrp5P, not the
 # spelling in the yaml. Never hand-assemble one: run list-envs.
@@ -65,20 +66,22 @@ uv run python scripts/compare_to_baseline.py --checkpoint <model.pt>
 uv run python scripts/probe_residual_authority.py --level 1.0
 # The DCM objective's own gate: standing must not outscore walking (~1 min/regime).
 uv run python scripts/validate_dcm_objective.py
-uv run python scripts/verify_improvement_contracts.py
 # Regenerate docs/architecture/ from the source; --check fails on drift.
 uv run python scripts/generate_architecture_docs.py
 uv run ruff format && uv run ruff check --fix    # format + lint
-uv run ty check                                  # type check (91 pre-existing
+uv run ty check                                  # type check (115 pre-existing
                                                  # diagnostics: unresolvable
                                                  # mc_rtc bindings + mujoco stubs)
-uv run pytest                                    # binding tests (testpaths is set)
-cd build && ctest                                # native tests, incl. worker recovery
-python3 scripts/check_prose.py src scripts       # prose budget + docs/ links
+uv run pytest                                    # tests/: bindings + action contracts
+cd build && ctest                                # C++ tests, worker recovery, and pytest
+                                                 # (--target check-native skips pytest)
+python3 scripts/check_prose.py src scripts tests # prose budget + docs/ links
+python3 scripts/check_prose.py --strict src scripts tests  # ... as pre-commit runs it
 ```
 
-The deterministic improvement-contract suite does not replace a live controller
-check; the demo is the simulation verification. A healthy run holds a steady
+`pytest` carries the improvement contracts; they moved out of a standalone
+script into `tests/`, grouped by subject, so they are run rather than merely
+runnable. They still do not replace a live controller check; the demo is the simulation verification. A healthy run holds a steady
 root height (HRP5P z≈0.79, JVRC1 z≈0.83, RHPS1 z≈0.84) — a dropping z means the
 robot is falling.
 
@@ -124,7 +127,7 @@ PUSH_VELOCITY = 0.4
 
 The link is a convenience, not the mechanism — grep by identifier is. So **skip
 the link where the docs heading is already the function's own name** (`grep`
-finds `zmp_tracking` either way); spend the line only where the connection is
+finds `dcm_stability` either way); spend the line only where the connection is
 not guessable.
 
 If a file cannot meet 10%, it is too big or doing too many jobs — split it
@@ -145,23 +148,51 @@ Where each kind of writing lives:
 verbatim when moving them: a paraphrase that drops the sample size is worth much
 less than the original.
 
+# Python style
+
+The prose budget above means the code itself has to carry the explanation, so
+write it to be read top to bottom.
+
+- **Sequence a function as steps, not as a puzzle.** Do the work in the order
+  someone would describe it, and put a blank line between the steps — wherever
+  a reader would take a breath, and always around a block that does something
+  different from the line before it.
+- **Early returns over nesting.** Guard clauses first, then a flat body. A
+  second level of indentation inside a method is usually a helper waiting to be
+  extracted.
+- **Order class methods by importance.** The lifecycle and the methods callers
+  actually use come first (`__init__`, `process_actions`, `apply_actions`,
+  `reset`, `close`), then the public accessors, then the `_`-prefixed helpers,
+  and the `@property` definitions last, as one block at the bottom.
+  `McRtcResidualActionBase` is the worked example.
+- **Privates go below the publics, in call order.** The public block reads
+  what-before-how; the `_`-prefixed block underneath follows the order those
+  publics call into it, so the file still reads as one pass. A helper called
+  from several places sits below the first of them.
+- **One job per module.** When a module grows a second job, split it rather
+  than sectioning it with comments — that is why `mdp/` is seven submodules and
+  why the PPO config sits beside the env cfg rather than inside it. The 10%
+  comment budget is the tripwire for this, not a separate rule.
+- **Types are part of the signature.** Every module opens with
+  `from __future__ import annotations`, and every def annotates its parameters
+  and its return. Annotation-only imports (`ManagerBasedRlEnv`, mjlab's
+  `*TermCfg`, our own action terms) go under `if TYPE_CHECKING:`, which is also
+  what keeps the `mdp` ↔ `actions` direction from closing into a cycle.
+- 2-space indent (ruff `indent-width = 2`), 88-column lines. `uv run ruff
+  format` settles everything it can, and none of the above.
+
 # Commit messages
 
 Keep them concise: a subject line plus a 2-4 line body carrying the one number
 or reason the diff does not show. Everything longer belongs in `docs/` under a
 grep-able `##` heading.
 
-**Never** put a `Codex-Session:` line, a session id, a `Codex.ai` URL, or a
-"Generated with Codex" line in a commit message — they outlive the session
-and stay in `git log` forever. Co-author trailers are wanted and stay. For Codex,
-use `Co-Authored-By: Codex MODEL <noreply@openai.com>`, replacing `MODEL` with
-the most precise current model identity available in the session, including its
-variant or exact model ID when known. Never copy a model identity from an earlier
-commit or assume a fixed model from these instructions. If the exact identity is
-unavailable, use only what is known; do not invent a version or variant.
-This holds for messages carried through a history rewrite too: strip session
-lines and correct inaccurate attribution for the work being amended, while
-preserving other contributors' trailers.
+**Never** put a session line, a session id, an agent URL, or a "Generated with
+<agent>" line in a commit message — they outlive the session and stay in
+`git log` forever. Your own agent's `Co-Authored-By:` trailer is wanted and
+stays; use the model identity of the session you are in rather than one copied
+from an earlier commit. This holds for messages carried through a history
+rewrite too: strip the session line rather than preserve it.
 
 # Architecture
 
@@ -187,11 +218,26 @@ From mjlab down to mc_rtc:
   velocity targets, residual on position); and
   `mc_rtc_residual_joint_torque_actions.py` →
   `McRtcResidualJointTorqueAction(Cfg)` (adds channel `tau` → effort targets,
-  residual on torque).
-- `mc_mjlab/controller_io.py` — simulation-side reference-order scatter/gather,
+  residual on torque). Three more modules extend that base rather than widening
+  it: `walking_reference_action.py` feeds `ismpc_walking::set_ref_vel` through
+  the generic extension hooks (`AbsoluteWalkingReferenceMixin` is the surviving
+  drive mode, a command-manager target adding no action dimensions; the
+  recovery-gated delta variant is retired, docs/walking-reference.md);
+  `residual_feedback_action.py` puts the residual on the controller's own
+  feedback rather than its output; and `residual_mpc_joint_torque_action.py`
+  combines the torque action with the absolute walking reference.
+- `residuals/` — the residual machinery the action terms compose, one concern
+  per module: `safety` (feasibility projection against the `RobotModule`'s
+  bounds), `recovery_authority` (the calibrated detector and its gate),
+  `mpc_math` and `printer`. It depends on `bridge/`, never on `mdp/` or `tasks/`.
+- `mc_mjlab/bridge/sensors.py` — the low-level MuJoCo sensor lookups
+  (`wrench_sensor`) that both `mdp/sensors.py` and `residuals/recovery_authority.py`
+  need. It imports neither actions nor MDP terms, which is the whole reason it
+  is its own module rather than a helper on either caller.
+- `mc_mjlab/bridge/sim_controller_bridge.py` — simulation-side reference-order scatter/gather,
   biased encoders, measured effort, local root coordinates, wxyz-to-xyzw
   conversion and named sensors. Use native layout offset methods throughout.
-- `mc_mjlab/controller_datastore.py` — numeric output aliases and independently
+- `mc_mjlab/bridge/controller_datastore.py` — numeric output aliases and independently
   gated setters. Relative commands capture collected baselines, restore once on
   deactivation, and wait one control period after reset for fresh getters.
 - `mc_rtc_interface/cpp/` — native `ControllersManager`, worker, `ControllersHost`
@@ -203,7 +249,7 @@ From mjlab down to mc_rtc:
 - `mc_rtc_interface/hpp/io_layout.hpp` and `ipc_socket.hpp` define the layout and
   protocol. Root input is ten values (position, xyzw quaternion, linear velocity);
   every body sensor, including FloatingBase, has its own gyro/acceleration slot.
-  Public `alpha` maps to native `qd`. Python retains `utils/shared_memory.py`.
+  Public `alpha` maps to native `qd`. Python retains `bridge/shared_memory.py`.
 - Native worker recovery kills and reaps a failed generation during collection,
   then starts its replacement from the episode reset on a fresh endpoint. Its
   rows truncate, then the next reset-bearing step initializes the bound
@@ -223,32 +269,59 @@ From mjlab down to mc_rtc:
   sub-*packages* are walked, so a task added as a bare module never registers;
   and `register_mjlab_task` takes built cfgs, so `import mjlab` now builds this
   repo's env cfgs — without a sourced mc_rtc workspace mjlab's loader reports
-  that as a `[WARN]` plus traceback rather than failing. Only ten supported ids
-  register by default (six residual-balance, two zero-residual, one each for
-  residual_mpc and residual_feedback); `MC_MJLAB_REGISTER_ARCHIVED_TASKS=1`
-  restores ten historical residual ablations for old-checkpoint compatibility.
-- `tasks/residual_balance/residual_balance_runner.py` — snapshots external base
-  controller inputs into the run directory and every checkpoint, and validates
-  them on load. Its effective-training manifest records live resolved manager
-  terms, callable defaults and source hashes: full resumes enforce the semantic
-  training contract and immediately recompute curricula after restoring the
-  global counter, while actor-only loads enforce the narrower observation/action
-  interface. Position and torque registrations use distinct full task ids as
-  experiment names, so automatic resume cannot cross control modes.
+  that as a `[WARN]` plus traceback rather than failing. Ten ids register, and
+  they are all of them (six residual-balance, two zero-residual, one each for
+  residual_mpc and residual_feedback): the ten archived ablations and their
+  `MC_MJLAB_REGISTER_ARCHIVED_TASKS` switch are gone. Reproducing an archived
+  experiment means checking out the revision before that cleanup; every
+  *supported* checkpoint still loads.
+- `rl/` — what every task shares: the zero-init actor, the squashed Gaussian,
+  `RolloutAdaptivePPO`, and `runner.py`'s `McRtcResidualOnPolicyRunner`, which
+  snapshots external base controller inputs into the run directory
+  (`controller_provenance.py`) and every checkpoint and validates them on load.
+  Its effective-training manifest records live resolved manager terms, callable
+  defaults and source hashes: full resumes enforce the semantic training
+  contract and immediately recompute curricula after restoring the global
+  counter, while actor-only loads enforce the narrower observation/action
+  interface. `_RENAMED_MODULES` maps the paths this refactor moved, so an older
+  checkpoint is compared against today's spelling. Both task runners subclass it
+  through five hooks; the balance one adds the achievement curriculum, the
+  training budget and the watchdog, the MPC one an action-semantics gate.
+  Position and torque registrations use distinct full task ids as experiment
+  names, so automatic resume cannot cross control modes.
+- `scripts/` — the measurement and maintenance tools, and **not** part of the
+  wheel: `[tool.scikit-build.wheel] packages` ships `src/mc_mjlab` only. The
+  analysis machinery those scripts share lives in `scripts/evaluation/`, a
+  package on pytest's `pythonpath` rather than in the library, because its only
+  callers are the scripts and the tests: `rollout` (environment lifecycle,
+  reset-without-history-update, pre-reset episode snapshots), `comparison` and
+  `qualification` (which share that plumbing but keep their own sampling,
+  statistics and episode records — they are different experimental designs, not
+  one design twice), `qualification_strata`, `reward_audit`, `disturbances` and
+  `scenarios`. A retired script goes with its docs section, which keeps its
+  measurements under a `Retired:` heading; see docs/evaluation.md for what each
+  surviving one measures.
+- `mdp/` — the terms every task builds its managers from, split by
+  responsibility: `sensors` (the `_ZmpSensors` plumbing and the action-term
+  accessors the rest read through), then `observations`, `rewards`, `metrics`,
+  `terminations`, `disturbances` (the push and impulse events) and `curricula`.
+  `mdp/__init__.py` binds those seven submodules and nothing else: no star
+  imports anywhere in this repo, so every call site reads
+  `mdp.<submodule>.<term>` and says which file defines the term.
 - `robots/<ROBOT>/<robot>_constants.py` — per-robot constants: spec loading
   (collisions disabled by default, geom groups 2=visual/3=collision/4=sites),
   actuator configs, stance initial state, PD-gains path. The three are
   parallel by construction; each is thin, delegating to the shared
-  `robots/*_configuration.py` helpers below, and differing only in the
+  `robots/*.py` helpers below, and differing only in the
   robot-specific names (root body, foot bodies, deactivated joints).
 - `robots/*.py` — the shared machinery those constants files call, one
-  concern per module: `mc_rtc_robot_configuration` (joint order, stance, base
+  concern per module: `robot_module` (joint order, stance, base
   pose and torque limits read lazily from the mc_rtc `RobotModule`, so nothing
-  is hand-transcribed), `collision_configuration` (geom naming + the
-  `CollisionCfg` presets), `pd_actuator_configuration` (gains from the MJCF's
-  armature), `additional_sensors_configuration` (the RL-only sole velocimeters
+  is hand-transcribed), `collisions` (geom naming + the
+  `CollisionCfg` presets), `actuators` (gains from the MJCF's
+  armature), `sensors` (the RL-only sole velocimeters
   and root angular-momentum sensor), `mc_mujoco_assets` (first-use symlinks),
-  and `robots_registry` (`MainRobot` → `RobotSpec`, plus `prepare_cfg_for_mc_rtc`).
+  and `registry` (`MainRobot` → `RobotSpec`, plus `prepare_cfg_for_mc_rtc`).
   `etc/mc_rtc.yaml`'s `MainRobot` is the single source of truth for which robot
   runs: the demo reads it and loads the matching mjlab entity, and the host
   raises if the entity's joints don't exist on the controller's robot.
@@ -269,7 +342,7 @@ Cross-cutting invariants:
   — without it those joints would go limp.
 - The robot XMLs' collision geoms are unnamed, so mjlab's name-based collision
   presets would match nothing. Each robot's `get_spec` therefore names them
-  (`collision_configuration`) before disabling them by group, and ships
+  (`robots/collisions`) before disabling them by group, and ships
   presets; `RobotSpec.names_collision_geoms` records that it did, and
   `prepare_cfg_for_mc_rtc` keeps the presets. A robot that has *not* named its
   geoms falls back to enabling group 3 wholesale — the presets cannot be left
@@ -299,6 +372,12 @@ Cross-cutting invariants:
   too far from stability condition, stopping` — so neither "run() returned
   false" nor "reset() returns" can be relied on for a fallen robot. Native
   timeout and manager respawning are the required containment.
+- `import mjlab` imports this repo's tasks (its `mjlab.tasks` entry point) and
+  they build their cfgs at import, so the *first* module to pull mjlab in must
+  not be one of ours: `python -c "from mc_mjlab import mdp"` re-enters a
+  half-built `mc_mjlab.actions` and mjlab swallows it as a `[WARN]`, leaving the
+  ids unregistered until something imports `mc_mjlab.tasks` again. Any script
+  that imports mjlab first — isort puts it first — is unaffected.
 - `Robot.jointIndexByName` on a missing joint throws a C++ `std::out_of_range`
   that terminates the process uncatchably — always probe `hasJoint` first
   (the host's `joint_index` helper does).
@@ -320,10 +399,10 @@ Cross-cutting invariants:
   `DataStore.call()` for zero-argument getters and one-argument setters over
   the binding's supported scalar/vector/spatial types. Callback lookup is
   runtime-checked and must be re-resolved after reset like every controller
-  handle. `mdp.zmp_tracking` deliberately keeps the control-centroid plan for
-  checkpoint compatibility: it is the QP-commanded ZMP, while ismpc's reachable
-  `zmp_target` differs by delay compensation before the stabilizer builds its
-  CoM-acceleration target.
+  handle. The `PLANNED_ZMP` column `mdp.metrics.zmp_error` reads is deliberately
+  the control-centroid plan, not ismpc's reachable `zmp_target`: it is the
+  QP-commanded ZMP, and the two differ by delay compensation before the
+  stabilizer builds its CoM-acceleration target. Never return zero there.
 - mc_rtc terminal output is C++ spdlog. Native per-row log flags implement
   `console_output="none"`, `"single"` (environment zero), or `"all"`; play uses
   `"single"`. `controller_timeout_ms` defaults to 60000. Native workers own
@@ -344,6 +423,11 @@ Cross-cutting invariants:
 - `fell_over` and `collapsed` are mutually exclusive labels (tilt wins), so their
   shares add up; their *union* is unchanged, and hazard is still computed from the
   union rather than by summing the two.
+- Every run is seed 42 unless told otherwise; `--agent.seed -1` is the lever that
+  draws one instead, and is how a promising checkpoint gets re-screened off its
+  training seed. The drawn seed enters the training contract, so such a run
+  cannot be resumed without passing the seed its log printed.
+  docs/evaluation.md#agentseed
 - Neither logged family of curves means what it looks like. Every
   `Episode_Reward/*` is an episode *sum*, and those correlate with episode
   length at r = +0.98 — they move when the robot survives longer, not when it
@@ -356,4 +440,3 @@ Cross-cutting invariants:
 - `[tool.ruff] target-version` is pinned one interpreter below
   `requires-python` on purpose: otherwise ruff rewrites `except (A, B):`
   into PEP 758 syntax that older interpreters cannot parse. Keep the pin.
-- Style: 2-space indent (ruff `indent-width = 2`), 88-column lines.

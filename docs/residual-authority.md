@@ -395,12 +395,19 @@ The question arose because the reward proved blind to the policy — see
 
 ## AUTHORITY_SETS
 
-**Current:** `uniform` and `ankle` are registered by default. The completed
-`sagittal` and `hardware` screens are available only through
-`MC_MJLAB_REGISTER_ARCHIVED_TASKS=1`. Ankle authority selects the last two joints
-of each leg. Sagittal authority selects hip pitch, knee pitch, and ankle pitch.
-Hardware and uniform retain all twelve leg joints. Selection is derived from each
-mc_rtc robot module rather than HRP5P names typed into the task.
+**Current:** `uniform`, `ankle` and `ankle_pitch`, declared once as the
+`AuthoritySet` `Literal` in `residual_balance_env_cfg` and read from there by
+every builder, CLI and test — `AUTHORITY_SETS` is `get_args` of that type, so a
+fourth choice cannot be added to one copy and missed by the other. Ankle
+authority selects the last two joints of each leg, `ankle_pitch` the pitch joint
+alone, and `uniform` all twelve. Selection is derived from each mc_rtc robot
+module rather than HRP5P names typed into the task.
+
+**Was:** `uniform` and `ankle` by default, with completed `sagittal` and
+`hardware` screens reachable only through `MC_MJLAB_REGISTER_ARCHIVED_TASKS=1`.
+Sagittal selected hip pitch, knee pitch and ankle pitch; hardware retained all
+twelve leg joints. Both went with the archived registrations on 2026-09-16, and
+a second `AUTHORITY_SETS` copy that had drifted from this one went with them.
 
 For every non-uniform position set, per-joint authority is
 `min(0.01 rad, 0.20 * effort_limit / kp)`. Torque uses
@@ -419,7 +426,7 @@ mode changes.
   pitch), `0.007602` (ankle pitch), and `0.010000` (ankle roll), symmetrically
   left/right.
 
-## probe_selective_authority
+## probe_selective_authority.py
 
 **Current:** `scripts/probe_selective_authority.py` runs paired zero and pulse
 environments for individual joints and anatomy groups, measuring the two-second

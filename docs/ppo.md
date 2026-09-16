@@ -27,7 +27,7 @@ hand the controller a huge random offset on step one and knock it over.
 ## ZeroInitMLPModel
 
 **Current:** the actor's `class_name`, a subclass that zeroes the mean rows of the
-output layer after construction. Defined in `tasks/zero_init_actor.py`, selected
+output layer after construction. Defined in `rl/zero_init_actor.py`, selected
 through rsl_rl's documented `"module.path:Attr"` form, so nothing is patched.
 
 **Why it exists.** rsl_rl never initializes the actor's mean head. `MLPModel`

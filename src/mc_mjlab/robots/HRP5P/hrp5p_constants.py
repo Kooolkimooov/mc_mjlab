@@ -1,13 +1,18 @@
 """HRP5P constants and helpers."""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 import mujoco
 from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
 
-from mc_mjlab.robots import mc_rtc_robot_configuration as mc_rtc
-from mc_mjlab.robots.additional_sensors_configuration import add_locomotion_sensors
-from mc_mjlab.robots.collision_configuration import (
+from mc_mjlab.robots import robot_module as mc_rtc
+from mc_mjlab.robots.actuators import (
+  get_armature_from_spec,
+  get_pd_actuator_cfgs,
+)
+from mc_mjlab.robots.collisions import (
   get_collision_presets,
   group_and_disable_collision_geoms,
   name_foot_collision_geoms,
@@ -17,10 +22,7 @@ from mc_mjlab.robots.mc_mujoco_assets import (
   MC_MUJOCO_SHARE_DIR,
   ensure_asset_symlink,
 )
-from mc_mjlab.robots.pd_actuator_configuration import (
-  get_armature_from_spec,
-  get_pd_actuator_cfgs,
-)
+from mc_mjlab.robots.sensors import add_locomotion_sensors
 
 # MJCF and assets.
 
@@ -33,6 +35,7 @@ HRP5P_PD_GAINS_PATH: Path = HRP5P_PD_GAINS_DIR / "PDgains_sim.dat"
 
 
 def ensure_assets() -> None:
+  """Link the MJCF, meshes and PD gains in from the mc_mujoco share."""
   ensure_asset_symlink(HRP5P_MESH_DIR, HRP5P_MC_RTC_ASSETS_DIR / "meshes")
   ensure_asset_symlink(HRP5P_XML, HRP5P_MC_RTC_ASSETS_DIR / "xml" / "HRP5Pmain.xml")
   ensure_asset_symlink(HRP5P_PD_GAINS_DIR, HRP5P_MC_RTC_ASSETS_DIR / "pdgains")

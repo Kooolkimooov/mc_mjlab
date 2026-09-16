@@ -15,6 +15,8 @@ MAX_PROSE = 0.10
 MIN_LINES = 30  # Below this a lone module docstring is unavoidably most of the file.
 ROOT = Path(__file__).resolve().parents[1]
 CODE_DIRS = ("src", "scripts")
+# Docs name C++ identifiers and files too; the native tree lives under src/.
+CODE_SUFFIXES = (".py", ".cpp", ".hpp")
 LINK = re.compile(r"docs/([\w./-]+\.md)#([\w-]+)")
 # A heading naming code: snake_case, CONST_CASE or CamelCase. A plain English
 # word like "Assets" is a section title, not something to look for in the code.
@@ -113,15 +115,26 @@ def orphans(link_targets: dict[str, set[str]], code: str) -> list[str]:
       if not line.startswith("## "):
         continue
       name = line[3:].strip().strip("`")
-      if name.endswith(".py"):
-        # A heading naming a module: check the file, not the symbol table.
-        if not any((ROOT / d).rglob(name) for d in CODE_DIRS):
+      if name.endswith(CODE_SUFFIXES):
+        # rglob returns a generator, which is always truthy -- consume it.
+        if not any(any((ROOT / d).rglob(name)) for d in CODE_DIRS):
           stale.append(f"docs/{md.relative_to(ROOT / 'docs')}: no such file '{name}'")
       elif IDENTIFIER.match(name) and name.split(".")[0] not in code:
         stale.append(
           f"docs/{md.relative_to(ROOT / 'docs')}: '{name}' is not in the code"
         )
   return stale
+
+
+def source_text() -> str:
+  """Every source file the docs headings may name, Python and C++ alike."""
+  files = [
+    path
+    for directory in CODE_DIRS
+    for path in sorted((ROOT / directory).rglob("*"))
+    if path.suffix in CODE_SUFFIXES
+  ]
+  return "\n".join(path.read_text() for path in files)
 
 
 def python_files(targets: list[str]) -> list[Path]:
@@ -136,6 +149,9 @@ def python_files(targets: list[str]) -> list[Path]:
 
 def main() -> int:
   argv = sys.argv[1:]
+  # Pre-commit runs the full check strictly; the edit-time hook stays advisory.
+  strict = "--strict" in argv
+  argv = [arg for arg in argv if arg != "--strict"]
   if argv:
     files, hook = python_files(argv), False
   else:
@@ -157,12 +173,14 @@ def main() -> int:
   link_targets = headings()
   problems = check(files, link_targets)
 
+  stale: list[str] = []
   if not hook:
-    code = "\n".join(
-      p.read_text() for d in CODE_DIRS for p in sorted((ROOT / d).rglob("*.py"))
-    )
-    for warning in orphans(link_targets, code):
-      print(f"warning: {warning}")
+    stale = orphans(link_targets, source_text())
+    for warning in stale:
+      print(
+        f"{'error' if strict else 'warning'}: {warning}",
+        file=sys.stderr if strict else sys.stdout,
+      )
 
   for problem in problems:
     print(problem, file=sys.stderr)
@@ -170,7 +188,7 @@ def main() -> int:
     # Advisory: surface it in the transcript without failing the edit, since a
     # file can legitimately be over budget partway through a refactor.
     return 2
-  return 1 if problems else 0
+  return 1 if problems or (strict and stale) else 0
 
 
 if __name__ == "__main__":

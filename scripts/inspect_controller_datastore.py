@@ -6,6 +6,7 @@ import argparse
 import contextlib
 import os
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
 import mc_control
@@ -15,7 +16,7 @@ FUNCTION_TYPE = re.compile(r"std::function<(.+) \((.*)\)>")
 
 
 @contextlib.contextmanager
-def suppress_native_output():
+def suppress_native_output() -> Iterator[None]:
   """Temporarily redirect native stdout and stderr to ``/dev/null``."""
   saved = (os.dup(1), os.dup(2))
   devnull = os.open(os.devnull, os.O_WRONLY)

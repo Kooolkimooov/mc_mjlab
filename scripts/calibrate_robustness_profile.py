@@ -7,10 +7,12 @@ import gc
 import statistics
 
 import torch
-from mjlab.envs import ManagerBasedRlEnv
+from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
-from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import _make_env_cfg
+from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
+  make_residual_balance_env_cfg,
+)
 
 EVENT_COMPONENTS = {
   "friction": "randomize_friction",
@@ -26,7 +28,7 @@ PROFILES = (
 )
 
 
-def select_components(cfg, profile: str) -> None:
+def select_components(cfg: ManagerBasedRlEnvCfg, profile: str) -> None:
   """Keep only the requested stage-one randomization component."""
   selected = set(EVENT_COMPONENTS) if profile == "all" else {profile}
   for component, event_name in EVENT_COMPONENTS.items():
@@ -42,10 +44,10 @@ def select_components(cfg, profile: str) -> None:
       actuator.delay_max_lag = 0
 
 
-def run_profile(profile: str, args) -> dict[str, float]:
+def run_profile(profile: str, args: argparse.Namespace) -> dict[str, float]:
   """Run one no-residual cohort to its first termination or time limit."""
   stage = 0 if profile == "nominal" else 1
-  cfg = _make_env_cfg(
+  cfg = make_residual_balance_env_cfg(
     "position",
     num_envs=args.num_envs,
     num_workers=args.num_workers,
@@ -55,13 +57,16 @@ def run_profile(profile: str, args) -> dict[str, float]:
   )
   if stage:
     select_components(cfg, profile)
+
   cfg.seed = args.seed
   cfg.episode_length_s = args.seconds
   cfg.events["reset_base"].params["pose_range"] = {}
+
   env = ManagerBasedRlEnv(cfg, device=args.device)
   action = env.action_manager.get_term("mc_rtc_residual")
   if not isinstance(action, McRtcResidualActionBase):
     raise TypeError(f"unexpected residual action type: {type(action).__name__}")
+
   zero = torch.zeros(
     env.num_envs, env.action_manager.total_action_dim, device=env.device
   )
@@ -71,6 +76,7 @@ def run_profile(profile: str, args) -> dict[str, float]:
   failures = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
   worker_failures = torch.zeros_like(failures)
   alpha_medians: list[float] = []
+
   try:
     env.reset()
     while bool(active.any()):
@@ -82,6 +88,7 @@ def run_profile(profile: str, args) -> dict[str, float]:
           alpha = alpha[:, action.residual_ids]
         alpha = alpha.abs().median()
         alpha_medians.append(float(alpha))
+
       worker = env.termination_manager.get_term("controller_worker_failed")
       done = terminated | time_outs
       failures |= active & terminated & ~worker
@@ -94,6 +101,7 @@ def run_profile(profile: str, args) -> dict[str, float]:
     gc.collect()
     if torch.cuda.is_available():
       torch.cuda.empty_cache()
+
   return {
     "survival": 1.0 - float(failures.float().mean()),
     "worker_failure": float(worker_failures.float().mean()),
