@@ -1,4 +1,4 @@
-"""Locomanip's passive cart and directional floor contact."""
+"""Locomanip's passive cart, its floor contact and the hand-contact sensors."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pathlib import Path
 
 import mujoco
 from mjlab.entity import EntityCfg
+from mjlab.sensor import ContactMatch, ContactSensorCfg
 
 from mc_mjlab.robots.robot_module import get_robot_module
 
@@ -72,4 +73,22 @@ def cart_floor_contact(spec: mujoco.MjSpec) -> None:  # ty: ignore[unresolved-at
     geomname2=planes[0].name,
     condim=3,
     friction=[0.5, 0.02, 0.005, 0.0001, 0.0001],
+  )
+
+
+def hand_cart_contact_sensors() -> tuple[ContactSensorCfg, ...]:
+  """Report each hand's contact against the cart, for terms that read the grasp."""
+  # HRP5P's own hand links; another robot's Locomanip frames are named differently.
+  return tuple(
+    ContactSensorCfg(
+      name=f"{side}_hand_cart",
+      primary=ContactMatch(
+        mode="subtree", pattern=f"{prefix}hand_Link0_Plan2", entity="robot"
+      ),
+      secondary=ContactMatch(mode="subtree", pattern="Body", entity="cart"),
+      fields=("found", "force"),
+      reduce="netforce",
+      history_length=2,
+    )
+    for side, prefix in (("left", "L"), ("right", "R"))
   )

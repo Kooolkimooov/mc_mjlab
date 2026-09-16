@@ -69,7 +69,7 @@ uv run python scripts/validate_dcm_objective.py
 # Regenerate docs/architecture/ from the source; --check fails on drift.
 uv run python scripts/generate_architecture_docs.py
 uv run ruff format && uv run ruff check --fix    # format + lint
-uv run ty check                                  # type check (115 pre-existing
+uv run ty check                                  # type check (117 pre-existing
                                                  # diagnostics: unresolvable
                                                  # mc_rtc bindings + mujoco stubs)
 uv run pytest                                    # tests/: bindings + action contracts
@@ -269,8 +269,9 @@ From mjlab down to mc_rtc:
   sub-*packages* are walked, so a task added as a bare module never registers;
   and `register_mjlab_task` takes built cfgs, so `import mjlab` now builds this
   repo's env cfgs — without a sourced mc_rtc workspace mjlab's loader reports
-  that as a `[WARN]` plus traceback rather than failing. Ten ids register, and
-  they are all of them (six residual-balance, two zero-residual, one each for
+  that as a `[WARN]` plus traceback rather than failing. Twelve ids register, and
+  they are all of them (six residual-balance, two zero-residual, two locomanip --
+  the play-only cart demo and its trainable residual -- one each for
   residual_mpc and residual_feedback): the ten archived ablations and their
   `MC_MJLAB_REGISTER_ARCHIVED_TASKS` switch are gone. Reproducing an archived
   experiment means checking out the revision before that cleanup; every

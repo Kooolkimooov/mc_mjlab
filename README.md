@@ -243,17 +243,22 @@ uv run play  Mc-Mjlab-Residual-Balance-Logisticcontroller-Ismpc-Hrp5P-Position \
   --checkpoint-file <path/to/model_*.pt>
 ```
 
-The mc_mjlab surface is ten tasks, and `uv run list-envs` shows all of them.
+The mc_mjlab surface is twelve tasks, and `uv run list-envs` shows all of them.
 One, the achievement-gated ankle curriculum, advances only from held-out
 qualification reports — see
 [docs/difficulty.md](docs/difficulty.md#achievement_finite_impulse_curriculum)
-for how to drive it.
+for how to drive it. Another,
+`Mc-Mjlab-Locomanip-Locomanipcontroller-Hrp5P-Position-Residual`, is the
+barebones cart-pushing residual: it trains, but it carries one task reward and no
+curriculum, and every episode pushes the same waypoint until you randomize one —
+see [docs/locomanip.md](docs/locomanip.md#locomanip_residual_env_cfg) for what is
+wired and what is deliberately missing.
 
 Ten completed ablations used to register behind an environment variable, for
 replaying their checkpoints under their original ids. They are gone, along with
 the task dials and the gated walking-reference code that existed only for them.
 Reproducing one of those experiments means checking out the revision before that
-cleanup; every supported checkpoint still loads on the ten ids above.
+cleanup; every supported checkpoint still loads on the ids above.
 
 Every residual-balance training run publishes a PID-bound heartbeat under
 `<run>/watchdog/`. For an unattended run, attach the cooperative monitor from a

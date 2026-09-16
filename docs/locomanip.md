@@ -106,3 +106,80 @@ place of Locomanip's JVRC1 gripper frames. The hand transforms are rotated 180
 degrees about their local X axes for those planar surfaces. Sparse Jacobians are
 required because HRP5P plus the free cart has 65 velocities, above MuJoCo Warp's
 dense limit of 60.
+
+## locomanip_residual_env_cfg
+
+**Current:** The trainable task, registered as
+`Mc-Mjlab-Locomanip-Locomanipcontroller-Hrp5P-Position-Residual`, beside the
+play-only demo id. It is deliberately a skeleton: one task reward, the four
+regularizers every residual task carries, the five terminations, four metrics,
+and no curriculum. Each manager comes from its own `_`-prefixed builder in the
+module, so a new term is one entry in one dict.
+
+What the wiring fixes, and why each choice is not free:
+
+| Setting | Value | Why it cannot simply be changed |
+| --- | --- | --- |
+| Action name | `mc_rtc_residual` | `rl/controller_provenance.py` reads this key by name; the demo's `robot_joints` would `KeyError` before the first step |
+| `decimation` | 20 | 50 Hz policy over the 500 Hz controller; must stay divisible by `frameskip` |
+| `frameskip` | 2 | 1 kHz physics into the config's 2 ms controller period |
+| `jacobian` | `sparse` | HRP5P plus the free cart is 65 velocities, over MuJoCo Warp's dense limit of 60 |
+| `required_controller` | `LocomanipController` | a wrong `Enabled` otherwise surfaces as a missing datastore callback |
+| `episode_length_s` | 60.0 | the installed DemoFSM completes its cycle in 52.194 s |
+| `num_envs` | 32 | a starting point, not a measurement: one Locomanip controller per env, built serially, plus a cart |
+
+**Deliberately absent**, in the order they are likely to matter: per-episode goal
+randomization (the FSM pushes the same 1 m waypoint every episode, so the task is
+one trajectory until a datastore setter feeds the waypoint), payload
+randomization beyond the `cart_mass_scale` hook, contact and hand-wrench reward
+terms, a curriculum, and an actor/critic split — both groups are the same terms.
+
+**Re-measure if:** the controller config, the FSM, the robot or the cart asset
+changes.
+
+**History:** added as the barebones trainable task, alongside the zero-residual
+demo that stays play-only.
+
+## RESIDUAL_SCALE
+
+**Current:** `0.01` rad, applied to every actuator as a float and clipped to the
+same magnitude, matching residual balance's uniform position authority.
+
+**Not measured for this task.** It is inherited, not derived: no probe has been
+run against Locomanip's own authority. `docs/residual-authority.md` explains how
+the balance task replaced its uniform scale with per-joint hardware limits, which
+is the same move available here.
+
+**Re-measure if:** the residual joint set narrows, or the control mode changes to
+torque.
+
+**History:** taken from `residual_balance`'s uniform position scale.
+
+## OBJECT_TRACKING_STD
+
+**Current:** `0.10` m, the Gaussian kernel width of `object_position_tracking`.
+
+**Not measured for this task.** The kernel has to be placed against the baseline's
+own error distribution, and that distribution has not been taken on HRP5P: the
+JVRC1 sweep in the knowledge base puts the zero-residual cart error between
+0.02 m and 2.1 m depending on the cart mass, which is three orders of magnitude of
+choice. Place it before reading anything into the reward curve.
+
+**Re-measure if:** the cart, the waypoint, or the robot changes.
+
+**History:** chosen as a round number so the task trains at all.
+
+## cart_mass_scale
+
+**Current:** `None`, i.e. off. When set, `make_locomanip_residual_env_cfg` adds a
+startup `dr.pseudo_inertia` event that scales the cart body's mass *and* inertia
+by a factor drawn from the given range — the payload mismatch the base controller
+cannot observe. `dr.body_mass` is the wrong term here: it leaves inertia behind.
+
+**Untested.** The event resolves `SceneEntityCfg("cart", body_names=["Body"])`,
+which matches the asset's only body, but no run has enabled it yet.
+
+**Re-measure if:** the cart asset's body name changes.
+
+**History:** added as the hook for the payload-adaptation experiment the JVRC1
+sweep motivates.
