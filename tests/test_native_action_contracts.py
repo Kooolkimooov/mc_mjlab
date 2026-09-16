@@ -18,11 +18,12 @@ from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionAction,
   McRtcResidualJointPositionActionCfg,
 )
+from mc_mjlab.actions.residual_mpc_joint_torque_action import (
+  ResidualMpcJointTorqueAction,
+  ResidualMpcJointTorqueActionCfg,
+)
 from mc_mjlab.actions.walking_reference_action import (
-  WALKING_REF_VEL_GETTER,
   WALKING_REF_VEL_SETTER,
-  GatedWalkingReferenceDeltaAction,
-  GatedWalkingReferenceDeltaActionCfg,
 )
 from mc_mjlab.bridge.sim_controller_bridge import SimControllerBridge
 from mc_mjlab.residuals.printer import ResidualPrinter
@@ -141,55 +142,17 @@ def test_layout() -> None:
 
 
 def test_walking_reference_feed() -> None:
-  """Check the nominal latch, the hold while perturbing and the absolute mode."""
-  action = object.__new__(GatedWalkingReferenceDeltaAction)
-  action._env = NS(num_envs=2)  # ty: ignore[invalid-assignment]
-  zero = torch.zeros(2, 3)
-  action._walking_reference_executed = zero.clone()
-  action._previous_walking_reference_executed = zero.clone()
-  action._walking_reference_nominal = zero.clone()
-  action._walking_reference_fed = zero.clone()
-  action._datastore_output_fresh = torch.ones(2, dtype=torch.bool)
-  nominal = torch.tensor([[0.1, 0.0, 0.0]] * 2)
-  action._datastore_vector_outputs = {WALKING_REF_VEL_GETTER: nominal.clone()}
+  """Absolute reference values feed directly without a getter baseline."""
+  action = object.__new__(ResidualMpcJointTorqueAction)
+  action._env = NS(num_envs=2)
+  action._walking_reference_executed = torch.tensor([[0.02, 0.0, 0.0]] * 2)
   action._datastore_vector_input_columns = {WALKING_REF_VEL_SETTER: 0}
   action._datastore_vector_input_feed = torch.zeros(2, 1, 3)
-
-  fed = action._datastore_vector_input_feed[:, 0]
-  action._walking_reference_executed.copy_(torch.tensor([[0.05, 0.0, 0.0]] * 2))
   action._feed_walking_reference()
-  torch.testing.assert_close(fed, torch.tensor([[0.15, 0.0, 0.0]] * 2))
-
-  # The getter mirrors what the term fed, so the nominal must not follow it.
-  action._datastore_vector_outputs[WALKING_REF_VEL_GETTER].copy_(fed)
-  action._walking_reference_executed.copy_(torch.tensor([[0.02, 0.0, 0.0]] * 2))
-  action._feed_walking_reference()
-  torch.testing.assert_close(action._walking_reference_nominal, nominal)
-
-  # A reset zeroes the readouts; without fresh output the nominal still holds.
-  action._walking_reference_fed.zero_()
-  action._datastore_output_fresh.zero_()
-  action._datastore_vector_outputs[WALKING_REF_VEL_GETTER].zero_()
-  action._feed_walking_reference()
-  torch.testing.assert_close(action._walking_reference_nominal, nominal)
-
-  # Mid-policy-step: the controller's own change is latched at the next collect,
-  # not lost to the cached write the intervening periods would repeat.
-  action._datastore_output_fresh.fill_(True)
-  action._walking_reference_executed.zero_()
-  action._feed_walking_reference()
-  moved = torch.tensor([[0.2, 0.0, 0.0]] * 2)
-  action._datastore_vector_outputs[WALKING_REF_VEL_GETTER].copy_(moved)
-  action._feed_walking_reference()
-  torch.testing.assert_close(action._walking_reference_nominal, moved)
-  torch.testing.assert_close(fed, moved)
-
-  absolute = type("Absolute", (GatedWalkingReferenceDeltaAction,), {})
-  absolute.walking_reference_is_absolute = True
-  action.__class__ = absolute
-  action._walking_reference_executed.copy_(torch.tensor([[0.02, 0.0, 0.0]] * 2))
-  action._feed_walking_reference()
-  torch.testing.assert_close(fed, torch.tensor([[0.02, 0.0, 0.0]] * 2))
+  torch.testing.assert_close(
+    action.datastore_vector_input(WALKING_REF_VEL_SETTER),
+    action._walking_reference_executed,
+  )
 
 
 def test_required_controller() -> None:
@@ -213,7 +176,7 @@ def test_required_controller() -> None:
     ismpc.write_text("MainRobot: HRP5P\nEnabled: [LogisticController_ismpc]\n")
 
     # The walking terms declare their controller by default, not per task.
-    walking = cfg(GatedWalkingReferenceDeltaActionCfg, other)
+    walking = cfg(ResidualMpcJointTorqueActionCfg, other)
     assert walking.required_controller == "LogisticController_ismpc"
     try:
       action._validate_cfg(walking)
@@ -223,10 +186,10 @@ def test_required_controller() -> None:
     else:
       raise AssertionError("a foreign controller must not validate")
 
-    action._validate_cfg(cfg(GatedWalkingReferenceDeltaActionCfg, ismpc))
+    action._validate_cfg(cfg(ResidualMpcJointTorqueActionCfg, ismpc))
     # None is the escape hatch the error names, and every plain term's default.
     action._validate_cfg(
-      cfg(GatedWalkingReferenceDeltaActionCfg, other, required_controller=None)
+      cfg(ResidualMpcJointTorqueActionCfg, other, required_controller=None)
     )
     plain = cfg(McRtcResidualJointPositionActionCfg, other)
     assert plain.required_controller is None
@@ -300,8 +263,6 @@ def test_pipeline() -> None:
   action._previous_executed_physical = torch.zeros(2, 2)
   action._residual_raw_actions = torch.zeros(2, 2)
   action._previous_residual_raw_actions = torch.zeros(2, 2)
-  action._walking_reference_requested = torch.empty(2, 0)
-  action._previous_walking_reference_executed = torch.empty(2, 0)
   action._previous_gate = torch.ones(2)
   action._recovery_authority = None
 
@@ -318,7 +279,13 @@ def test_pipeline() -> None:
     action.apply_actions()
   np.testing.assert_allclose([v[0, 0] for v in applied], [0, 0, 2, 4])
 
+  action._datastore_scalar_input_feed = torch.tensor([[1.0], [2.0]])
+  action._datastore_vector_input_feed = torch.arange(6.0).reshape(2, 1, 3)
   action.reset(torch.tensor([1]))
+  assert action._datastore_scalar_input_feed.tolist() == [[1.0], [2.0]]
+  torch.testing.assert_close(
+    action._datastore_vector_input_feed, torch.arange(6.0).reshape(2, 1, 3)
+  )
   assert action._manager.resets == [[1]]
   assert not action._pending_dispatch
   assert action._has_staged_control.tolist() == [True, False]

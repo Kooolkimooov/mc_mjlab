@@ -49,7 +49,7 @@ def test_rotation_composition() -> None:
 def test_modality_widths() -> None:
   """Declared widths are what the action space grows by, per modality."""
   cfg = residual_feedback_env_cfg(num_envs=2, num_workers=1)
-  action = cfg.actions[mdp.ACTION_NAME]
+  action = cfg.actions[mdp.accessors.ACTION_NAME]
   assert isinstance(action, ResidualFeedbackJointTorqueActionCfg)
   assert set(action.feedback_modalities) <= set(SUPPORTED_MODALITIES)
   assert ROOT_POSE_DIM == 6, "root pose is 3 translation plus 3 rotation"
