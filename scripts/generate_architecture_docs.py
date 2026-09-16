@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # Sibling script, resolved by the interpreter's script directory at runtime.
-import architecture_extract as ex  # ty: ignore[unresolved-import]
+import architecture_extract as ex
 
 OUT = ex.ROOT / "docs" / "architecture"
 CSS = Path(__file__).with_name("architecture_page.css")
@@ -35,7 +35,6 @@ RB = TASKS / "residual_balance"
 ZR = TASKS / "zero_residual"
 RB_CFG = RB / "residual_balance_env_cfg.py"
 ZR_CFG = ZR / "zero_residual_env_cfg.py"
-PPO_CFG = RB / "residual_balance_ppo_cfg.py"
 
 BANNER = (
   "<!-- Generated from the source. Do not edit. -->\n"
@@ -430,26 +429,6 @@ def registration_table(package: Path) -> str:
         )
       )
   return table(("Id", "Env cfg", "runner_cls", "Called in"), rows) if rows else ""
-
-
-def term_census() -> str:
-  """Manager terms by the constructor used to build them."""
-  rows = []
-  for package, path in (("residual_balance", RB_CFG), ("zero_residual", ZR_CFG)):
-    counts: dict[str, int] = {}
-    for binding in ex.term_bindings(path):
-      counts[binding.kind] = counts.get(binding.kind, 0) + 1
-    for kind in ex.TERM_KINDS:
-      if counts.get(kind):
-        rows.append((f"`{package}`", f"`{kind}`", str(counts[kind])))
-  duals = table(
-    ("Term", "Constructors"),
-    [
-      (f"`{name}`", tick(kinds))
-      for name, kinds in sorted(ex.dual_role_terms(RB_CFG).items())
-    ],
-  )
-  return table(("Package", "Constructor", "Call sites"), rows) + "\n\n" + duals
 
 
 def manager_table(

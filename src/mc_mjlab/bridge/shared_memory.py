@@ -27,13 +27,6 @@ class ShmHandle:
     self.shm.unlink()
 
 
-def attach_shm(name: str, shape: tuple[int, int]) -> ShmHandle:
-  """Attach to an existing shared block, untracked: the trainer unlinks it."""
-  shm = SharedMemory(name=name, track=False)
-  arr = np.ndarray(shape, dtype=np.float64, buffer=shm.buf)
-  return ShmHandle(shm, arr)
-
-
 def create_shm(shape: tuple[int, int]) -> ShmHandle:
   """Create a zeroed block; the creator owns it and alone unlinks it."""
   shm = SharedMemory(create=True, size=ITEM_SIZE * shape[0] * shape[1])

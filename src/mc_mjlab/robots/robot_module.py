@@ -205,15 +205,6 @@ def get_leg_joints(name: str, side: str | None = None) -> tuple[str, ...]:
   )
 
 
-def get_arm_joints(name: str, side: str | None = None) -> tuple[str, ...]:
-  """The arm chains, base to wrist -- fingers excluded (see ``get_hand_joints``)."""
-  sides = _SIDES if side is None else (side,)
-  return _in_ref_order(
-    name,
-    [j for s in sides for j in get_chain_joints(name, get_limb_body(name, "hand", s))],
-  )
-
-
 def get_hand_joints(name: str, side: str | None = None) -> tuple[str, ...]:
   """Everything past the wrist force sensor: hand yaw, fingers, thumbs."""
   sides = _SIDES if side is None else (side,)
@@ -223,11 +214,6 @@ def get_hand_joints(name: str, side: str | None = None) -> tuple[str, ...]:
       j for s in sides for j in get_subtree_joints(name, get_limb_body(name, "hand", s))
     ],
   )
-
-
-def get_lower_body_joints(name: str) -> tuple[str, ...]:
-  """The legs -- the joints the stabilizer actually balances on."""
-  return get_leg_joints(name)
 
 
 def get_upper_body_joints(name: str) -> tuple[str, ...]:
@@ -241,12 +227,6 @@ def get_fixed_joints(name: str) -> tuple[str, ...]:
   tree = _get_tree(name)
   fixed = {j for j, dof in zip(tree.joints, tree.dofs, strict=True) if dof == 0}
   return _in_ref_order(name, fixed)
-
-
-def get_mobile_joints(name: str) -> tuple[str, ...]:
-  """refJointOrder entries the module actually drives (1 DoF)."""
-  fixed = set(get_fixed_joints(name))
-  return tuple(j for j in get_ref_joint_order(name) if j not in fixed)
 
 
 def _one_dof_bounds(name: str, index: int) -> dict[str, float]:
