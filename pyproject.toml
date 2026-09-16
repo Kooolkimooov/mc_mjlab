@@ -79,6 +79,13 @@ mc_mjlab = "mc_mjlab.tasks"
 # Without it a bare `uv run pytest` walks .venv and collects torch's own test
 # modules, which error out at import.
 testpaths = ["tests"]
+# `scripts/evaluation` is repository-only and not in the wheel, so it is reached
+# by path, not by install. The ty entry below must match or it reports every
+# `evaluation.*` import unresolved.
+pythonpath = ["scripts"]
+
+[tool.ty.environment]
+extra-paths = ["scripts"]
 
 [tool.ruff]
 src = ["src"]

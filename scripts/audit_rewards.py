@@ -10,6 +10,11 @@ from pathlib import Path
 from typing import Any
 
 import torch
+from evaluation.reward_audit import (
+  RewardAuditRecorder,
+  RewardAuditShapeError,
+)
+from evaluation.rollout import managed_env
 from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 from mjlab.rl import RslRlVecEnvWrapper
 
@@ -17,18 +22,14 @@ from mc_mjlab.rl.effective_training_manifest import (
   build_effective_training_manifest,
 )
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
-  WALKING_REFERENCE_SCALE,
-  _make_env_cfg,
+  AUTHORITY_SETS,
+  make_residual_balance_env_cfg,
 )
 from mc_mjlab.tasks.residual_balance.residual_balance_ppo_cfg import (
   residual_balance_ppo_cfg,
 )
 from mc_mjlab.tasks.residual_balance.residual_balance_runner import (
   ResidualBalanceOnPolicyRunner,
-)
-from mc_mjlab.tasks.residual_balance.reward_audit import (
-  RewardAuditRecorder,
-  RewardAuditShapeError,
 )
 
 OUTPUT_DIR = Path("logs/reward_audits")
@@ -56,18 +57,12 @@ def _parse_args() -> argparse.Namespace:
     "--disturbance", choices=("finite", "velocity", "none"), default="finite"
   )
   parser.add_argument("--push-velocity", type=float, default=0.4)
-  parser.add_argument("--randomization-stage", type=int, choices=(0, 1, 2), default=0)
+  parser.add_argument("--randomization-stage", type=int, choices=(0, 1), default=0)
   parser.add_argument(
     "--authority-set",
-    choices=("uniform", "ankle", "sagittal", "hardware"),
+    choices=AUTHORITY_SETS,
     default="uniform",
   )
-  parser.add_argument(
-    "--controller-history", type=int, choices=(1, 5, 10, 20), default=20
-  )
-  parser.add_argument("--proprio-history", type=int, choices=(1, 5), default=5)
-  parser.add_argument("--walking-reference", action="store_true")
-  parser.add_argument("--recurrent", action="store_true")
   parser.add_argument("--disable-observation-corruption", action="store_true")
   parser.add_argument(
     "--drop-obs",
@@ -100,7 +95,7 @@ def _output_path(args: argparse.Namespace) -> Path:
 
 def _make_cfg(args: argparse.Namespace) -> ManagerBasedRlEnvCfg:
   """Build the requested live environment without changing reward semantics."""
-  cfg = _make_env_cfg(
+  cfg = make_residual_balance_env_cfg(
     control=args.control,
     num_envs=args.num_envs,
     num_workers=args.num_workers,
@@ -108,12 +103,7 @@ def _make_cfg(args: argparse.Namespace) -> ManagerBasedRlEnvCfg:
     console_output="none",
     disturbance=args.disturbance,
     authority_set=args.authority_set,
-    controller_history=args.controller_history,
-    proprio_history=args.proprio_history,
     randomization_stage=args.randomization_stage,
-    walking_reference_velocity_scale=(
-      WALKING_REFERENCE_SCALE if args.walking_reference else None
-    ),
   )
   cfg.seed = args.seed
   if args.disable_observation_corruption:
@@ -222,90 +212,90 @@ def main() -> None:
 
   torch.manual_seed(args.seed)
   cfg = _make_cfg(args)
-  train_cfg = asdict(residual_balance_ppo_cfg(recurrent=args.recurrent))
-  env = ManagerBasedRlEnv(cfg, device=args.device)
+  train_cfg = asdict(residual_balance_ppo_cfg())
   audit: RewardAuditRecorder | None = None
   failure: str | None = None
 
-  try:
-    wrapped = RslRlVecEnvWrapper(env)
-    policy = None
-    if args.checkpoint is not None:
-      runner = ResidualBalanceOnPolicyRunner(wrapped, train_cfg, device=args.device)
-      runner.load(
-        str(args.checkpoint.expanduser()),
-        load_cfg={"actor": True},
-        strict=True,
-        map_location=args.device,
-      )
-      policy = runner.get_inference_policy(device=args.device)
-
-    manifest = build_effective_training_manifest(env, train_cfg)
-    arms = _arms(args, str(env.device))
-    policy_ids = arms.get("checkpoint")
-    action = torch.zeros(
-      env.num_envs, env.action_manager.total_action_dim, device=env.device
-    )
-
-    env.reset()
-    print(
-      f"[reward-audit] warmup={args.warmup_steps}, sample={args.steps}, "
-      f"envs={args.num_envs}, disturbance={args.disturbance}",
-      flush=True,
-    )
-    for _ in range(args.warmup_steps):
-      _step(env, wrapped, policy, policy_ids, action)
-
-    start_step = int(env.common_step_counter)
-    audit = RewardAuditRecorder(env.reward_manager, arms, env.step_dt)
+  with managed_env(cfg, args.device) as env:
     try:
-      with audit:
-        for step in range(args.steps):
-          _step(env, wrapped, policy, policy_ids, action)
-          _capture_conditionals(env, audit)
-          if (step + 1) % 100 == 0 or step + 1 == args.steps:
-            print(f"[reward-audit] sampled {step + 1}/{args.steps}", flush=True)
-    except RewardAuditShapeError as error:
-      failure = str(error)
+      wrapped = RslRlVecEnvWrapper(env)
+      policy = None
+      if args.checkpoint is not None:
+        runner = ResidualBalanceOnPolicyRunner(wrapped, train_cfg, device=args.device)
+        runner.load(
+          str(args.checkpoint.expanduser()),
+          load_cfg={"actor": True},
+          strict=True,
+          map_location=args.device,
+        )
+        policy = runner.get_inference_policy(device=args.device)
 
-    audit_report = audit.report()
-    issues = audit.issues()
-    if failure is not None:
-      issues.insert(0, failure)
+      manifest = build_effective_training_manifest(env, train_cfg)
+      arms = _arms(args, str(env.device))
+      policy_ids = arms.get("checkpoint")
+      action = torch.zeros(
+        env.num_envs, env.action_manager.total_action_dim, device=env.device
+      )
 
-    report = {
-      "status": "failed" if issues else "passed",
-      "issues": issues,
-      "config": {
-        "checkpoint": (
-          str(args.checkpoint.expanduser().resolve())
-          if args.checkpoint is not None
-          else None
-        ),
-        "control": args.control,
-        "disturbance": args.disturbance,
-        "push_velocity": args.push_velocity,
-        "randomization_stage": args.randomization_stage,
-        "seed": args.seed,
-        "warmup_steps": args.warmup_steps,
-        "sample_steps": args.steps,
-        "common_step_start": start_step,
-        "common_step_end": int(env.common_step_counter),
-        "authority_set": args.authority_set,
-        "controller_history": args.controller_history,
-        "proprio_history": args.proprio_history,
-        "walking_reference": args.walking_reference,
-        "observation_corruption": not args.disable_observation_corruption,
-      },
-      "effective_manifest_sha256": manifest["record_sha256"],
-      "effective_reward_contract": manifest["record"]["managers"]["reward"],
-      "term_denominators": TERM_DENOMINATORS,
-      "audit": audit_report,
-    }
-  finally:
-    if audit is not None:
-      audit.restore()
-    env.close()
+      env.reset()
+      print(
+        f"[reward-audit] warmup={args.warmup_steps}, sample={args.steps}, "
+        f"envs={args.num_envs}, disturbance={args.disturbance}",
+        flush=True,
+      )
+      for _ in range(args.warmup_steps):
+        _step(env, wrapped, policy, policy_ids, action)
+
+      start_step = int(env.common_step_counter)
+      audit = RewardAuditRecorder(env.reward_manager, arms, env.step_dt)
+      try:
+        with audit:
+          for step in range(args.steps):
+            _step(env, wrapped, policy, policy_ids, action)
+            _capture_conditionals(env, audit)
+            if (step + 1) % 100 == 0 or step + 1 == args.steps:
+              print(f"[reward-audit] sampled {step + 1}/{args.steps}", flush=True)
+      except RewardAuditShapeError as error:
+        failure = str(error)
+
+      audit_report = audit.report()
+      issues = audit.issues()
+      if failure is not None:
+        issues.insert(0, failure)
+
+      report = {
+        "status": "failed" if issues else "passed",
+        "issues": issues,
+        "config": {
+          "checkpoint": (
+            str(args.checkpoint.expanduser().resolve())
+            if args.checkpoint is not None
+            else None
+          ),
+          "control": args.control,
+          "disturbance": args.disturbance,
+          "push_velocity": args.push_velocity,
+          "randomization_stage": args.randomization_stage,
+          "seed": args.seed,
+          "warmup_steps": args.warmup_steps,
+          "sample_steps": args.steps,
+          "common_step_start": start_step,
+          "common_step_end": int(env.common_step_counter),
+          "authority_set": args.authority_set,
+          "controller_history": 20,
+          "proprio_history": 5,
+          "recurrent": False,
+          "walking_reference": False,
+          "observation_corruption": not args.disable_observation_corruption,
+        },
+        "effective_manifest_sha256": manifest["record_sha256"],
+        "effective_reward_contract": manifest["record"]["managers"]["reward"],
+        "term_denominators": TERM_DENOMINATORS,
+        "audit": audit_report,
+      }
+    finally:
+      if audit is not None:
+        audit.restore()
 
   output.write_text(json.dumps(_json_safe(report), indent=2, allow_nan=False) + "\n")
   _print_report(report)
