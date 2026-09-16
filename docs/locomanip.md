@@ -140,20 +140,52 @@ changes.
 **History:** added as the barebones trainable task, alongside the zero-residual
 demo that stays play-only.
 
-## RESIDUAL_SCALE
+## RESIDUAL_FALLBACK_SCALE
 
-**Current:** `0.01` rad, applied to every actuator as a float and clipped to the
-same magnitude, matching residual balance's uniform position authority.
+**Current:** per joint, not uniform: `residuals/authority.hardware_residual_scales`
+gives each residual joint `0.2 * tau_limit / kp` rad -- a residual worth 20% of
+that joint's torque capacity at its own PD stiffness -- with no cap, and the clip
+is the same value. 53 actuators are partitioned; the residual joints span
+0.0075 rad (hip and knee pitch) to 0.0552 rad (wrist yaw).
+`RESIDUAL_FALLBACK_SCALE` only fills the partition for joints that take no
+residual.
 
-**Not measured for this task.** It is inherited, not derived: no probe has been
-run against Locomanip's own authority. `docs/residual-authority.md` explains how
-the balance task replaced its uniform scale with per-joint hardware limits, which
-is the same move available here.
+**Why not the uniform 0.01 rad it started with:** the same number is 27% of a
+knee's torque capacity and 4% of a wrist's, and the wrists and shoulders are what
+push the cart. Per joint, on HRP5P:
 
-**Re-measure if:** the residual joint set narrows, or the control mode changes to
-torque.
+| joint | tau limit (Nm) | kp | 0.2 tau/kp (rad) |
+| --- | --- | --- | --- |
+| RKP (knee pitch) | 1419.4 | 36000 | 0.0079 |
+| RCP (hip pitch) | 602.2 | 16000 | 0.0075 |
+| RAR (ankle roll) | 253.4 | 2244 | 0.0226 |
+| WP (waist pitch) | 946.3 | 8000 | 0.0237 |
+| RSY (shoulder yaw) | 250.9 | 1429 | 0.0351 |
+| RWRY (wrist yaw) | 382.5 | 1386 | 0.0552 |
 
-**History:** taken from `residual_balance`'s uniform position scale.
+`residual_balance` uses the same rule but caps it at its own uniform 0.01, which
+here would throw away two to five times the authority on exactly the joints that
+do the work.
+
+**Measured, not assumed.** `scripts/probe_locomanip_authority.py` holds one
+environment at zero residual beside constant full-clip arms on the same cart
+mass, and reports how far the cart travelled in 16 s (about 5.5 s of it holding):
+
+| cart | zero residual | +1.0 | -1.0 |
+| --- | --- | --- | --- |
+| 10 kg | +0.002 m | +0.174 m | -0.022 m |
+| 300 kg | -0.016 m | +0.189 m | -0.055 m |
+
+Nobody fell (minimum base height 0.703-0.728 m), and the authority survives a
+30x payload, which is the regime that matters. The asymmetry is the controller's
+own push direction: a positive residual adds to it.
+
+**Re-measure if:** the PD gains file, the robot, the residual joint set or
+`TORQUE_FRACTION` changes.
+
+**History:**
+- 2026-09-16 -- calibrated from a uniform 0.01 rad inherited from
+  `residual_balance`, whose ankle-authority screen has no bearing on pushing.
 
 ## OBJECT_TRACKING_STD
 

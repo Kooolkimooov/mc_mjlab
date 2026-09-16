@@ -26,6 +26,7 @@ from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionActionCfg,
 )
 from mc_mjlab.bridge.controller_datastore import CONTROL_COM, PLANNED_ZMP
+from mc_mjlab.residuals.authority import TORQUE_FRACTION, hardware_residual_scales
 from mc_mjlab.robots import robot_module as mc_rtc
 from mc_mjlab.robots.registry import (
   RobotSpec,
@@ -52,8 +53,9 @@ NUM_WORKERS = 64
 # The installed DemoFSM's reach-push-release cycle takes 52.2 s. docs/locomanip.md
 EPISODE_LENGTH_S = 60.0
 
-#: Position residual bound, in radians. docs/locomanip.md#residual_scale
-RESIDUAL_SCALE = 0.01
+#: Authority for a joint with no hardware entry, in radians. Every residual joint
+#: has one, so this only fills the partition. docs/locomanip.md#residual_fallback_scale
+RESIDUAL_FALLBACK_SCALE = 0.01
 
 #: Kernel width of the object-tracking reward, in metres. docs/locomanip.md#object_tracking_std
 OBJECT_TRACKING_STD = 0.10
@@ -118,7 +120,7 @@ def make_locomanip_residual_env_cfg(
   num_envs: int = NUM_ENVS,
   num_workers: int = NUM_WORKERS,
   episode_length_s: float = EPISODE_LENGTH_S,
-  residual_scale: float = RESIDUAL_SCALE,
+  torque_fraction: float = TORQUE_FRACTION,
   cart_pose_range: dict[str, tuple[float, float]] | None = None,
   cart_mass_range_kg: tuple[float, float] | None = CART_MASS_RANGE_KG,
   console_output: Literal["none", "single", "all"] = "none",
@@ -137,7 +139,7 @@ def make_locomanip_residual_env_cfg(
       robot_name,
       robot,
       mc_rtc_yaml,
-      residual_scale,
+      torque_fraction,
       num_workers,
       console_output,
       print_residual_every,
@@ -170,12 +172,27 @@ def _actions(
   robot_name: str,
   robot: RobotSpec,
   mc_rtc_yaml: Path,
-  residual_scale: float,
+  torque_fraction: float,
   num_workers: int | None,
   console_output: Literal["none", "single", "all"],
   print_residual_every: int,
 ) -> dict[str, ActionTermCfg]:
   """One position residual on top of the controller's joint targets."""
+  # Per joint, not uniform: 0.01 rad is 27% of a knee's torque capacity and 4% of
+  # a wrist's, and the wrists are what push. docs/locomanip.md#residual_fallback_scale
+  scales = hardware_residual_scales(
+    robot_name,
+    "position",
+    robot.get_residual_joints(),
+    robot.pd_gains_path,
+    fallback=RESIDUAL_FALLBACK_SCALE,
+  )
+  if torque_fraction != TORQUE_FRACTION:
+    scales = {
+      pattern: value * torque_fraction / TORQUE_FRACTION
+      for pattern, value in scales.items()
+    }
+
   return {
     locomanip_mdp.accessors.ACTION_NAME: McRtcResidualJointPositionActionCfg(
       entity_name="robot",
@@ -200,10 +217,10 @@ def _actions(
         locomanip_mdp.accessors.RIGHT_PHASE,
         locomanip_mdp.accessors.COMPLETE,
       ),
-      # A float covers every actuator; a partial dict leaves the joints it does
-      # not match at scale 1.0 and no clip. docs/residual-authority.md#residual_scales
-      scale=residual_scale,
-      clip={".*": (-residual_scale, residual_scale)},
+      # The dict partitions every actuator; an unmatched joint would silently get
+      # scale 1.0 and no clip. docs/residual-authority.md#residual_scales
+      scale=scales,
+      clip={pattern: (-value, value) for pattern, value in scales.items()},
       console_output=console_output,
       print_residual_every=print_residual_every,
     )

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import replace
 from pathlib import Path
 from typing import Literal, get_args
@@ -37,6 +36,7 @@ from mc_mjlab.bridge.controller_datastore import (
   CONTROL_COM_VEL,
   PLANNED_ZMP,
 )
+from mc_mjlab.residuals.authority import hardware_residual_scales
 from mc_mjlab.robots import robot_module as mc_rtc
 from mc_mjlab.robots.registry import (
   get_main_robot_spec,
@@ -91,41 +91,6 @@ def select_residual_joints(
   return tuple(joint for joint in candidates if joint in selected)
 
 
-def _reference_stiffness(robot_name: str, path: Path) -> dict[str, float]:
-  """Read the position gains in ``refJointOrder`` order."""
-  rows = [line.split() for line in path.read_text().splitlines() if line.strip()]
-  return {
-    joint: float(row[0])
-    for joint, row in zip(mc_rtc.get_ref_joint_order(robot_name), rows, strict=True)
-  }
-
-
-def _hardware_residual_scales(
-  robot_name: str,
-  control: str,
-  residual_joints: tuple[str, ...],
-  pd_gains_path: Path,
-) -> dict[str, float]:
-  """Build exact per-actuator scales from effort limits and position gains."""
-  limits = mc_rtc.get_effort_limits(robot_name)
-  stiffness = _reference_stiffness(robot_name, pd_gains_path)
-  default = 0.01 if control == "position" else 10.0
-  authority: dict[str, float] = {}
-  for joint in residual_joints:
-    if joint not in limits:
-      raise KeyError(f"no effort limit for residual joint {joint}")
-    if control == "position":
-      if joint not in stiffness or stiffness[joint] <= 0.0:
-        raise KeyError(f"no positive PD stiffness for residual joint {joint}")
-      authority[joint] = min(default, 0.20 * limits[joint] / stiffness[joint])
-    else:
-      authority[joint] = min(default, 0.20 * limits[joint])
-  return {
-    re.escape(joint): authority.get(joint, default)
-    for joint in mc_rtc.get_actuated_joints(robot_name)
-  }
-
-
 def make_residual_balance_env_cfg(
   control: Literal["position", "torque"],
   *,
@@ -167,11 +132,17 @@ def make_residual_balance_env_cfg(
   candidates = tuple(j for j in robot.get_residual_joints() if j not in upper_body)
   residual_joints = select_residual_joints(robot_name, candidates, authority_set)
 
+  default_scale = 0.01 if control == "position" else 10.0
   residual_scale = (
-    (0.01 if control == "position" else 10.0)
+    default_scale
     if authority_set == "uniform"
-    else _hardware_residual_scales(
-      robot_name, control, residual_joints, robot.pd_gains_path
+    else hardware_residual_scales(
+      robot_name,
+      control,
+      residual_joints,
+      robot.pd_gains_path,
+      fallback=default_scale,
+      cap=default_scale,
     )
   )
 

@@ -13,6 +13,7 @@ from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionActionCfg,
 )
 from mc_mjlab.bridge.controller_datastore import CONTROL_COM, PLANNED_ZMP
+from mc_mjlab.residuals.authority import TORQUE_FRACTION
 from mc_mjlab.tasks.locomanip import DEMO_TASK_ID, RESIDUAL_TASK_ID
 from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
   CART_MASS_RANGE_KG,
@@ -21,12 +22,18 @@ from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
   FORCE_SENSORS,
   FRAMESKIP,
   OBJECT_HISTORY,
-  RESIDUAL_SCALE,
   ZMP_TRACKING_STD,
   make_locomanip_residual_env_cfg,
   mass_alpha_range,
 )
 from mc_mjlab.tasks.locomanip.mdp import accessors
+
+
+def _scales(cfg: ManagerBasedRlEnvCfg) -> dict[str, float]:
+  """Return the action's per-actuator scales, which are always a dict here."""
+  scale = _action(cfg).scale
+  assert isinstance(scale, dict)
+  return scale
 
 
 def _action(cfg: ManagerBasedRlEnvCfg) -> McRtcResidualJointPositionActionCfg:
@@ -57,10 +64,24 @@ def test_control_rates_divide() -> None:
 
 def test_residual_authority_covers_every_actuator() -> None:
   """Verify no actuator can fall through to scale 1.0 with no clip."""
-  action = _action(make_locomanip_residual_env_cfg())
-  assert action.scale == RESIDUAL_SCALE
-  assert action.clip == {".*": (-RESIDUAL_SCALE, RESIDUAL_SCALE)}
+  cfg = make_locomanip_residual_env_cfg()
+  action, scales = _action(cfg), _scales(cfg)
+  assert action.clip == {k: (-v, v) for k, v in scales.items()}
   assert action.residual_actuator_names
+  patterns = {pattern.replace("\\", "") for pattern in scales}
+  assert set(action.residual_actuator_names) <= patterns
+
+
+def test_residual_authority_is_per_joint_hardware_authority() -> None:
+  """Verify each joint gets its own share of torque capacity, not one number."""
+  cfg = make_locomanip_residual_env_cfg()
+  full = _scales(cfg)
+  by_joint = {pattern.replace("\\", ""): value for pattern, value in full.items()}
+  residual = [by_joint[joint] for joint in _action(cfg).residual_actuator_names or ()]
+  assert len(set(residual)) > 1
+  halved = _scales(make_locomanip_residual_env_cfg(torque_fraction=TORQUE_FRACTION / 2))
+  for pattern, value in halved.items():
+    assert value == pytest.approx(full[pattern] / 2)
 
 
 def test_declared_datastore_outputs_cover_the_terms() -> None:

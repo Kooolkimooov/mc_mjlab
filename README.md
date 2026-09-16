@@ -289,6 +289,8 @@ uv run python scripts/compare_to_baseline.py --checkpoint <path/to/model_*.pt>
 uv run python scripts/audit_rewards.py --checkpoint <path/to/model_*.pt>
 # Can a constant residual move the centre of pressure at all?
 uv run python scripts/probe_residual_authority.py --level 1.0
+# Can the calibrated residual move the cart? (no checkpoint needed)
+uv run python scripts/probe_locomanip_authority.py --mass 300
 uv run python scripts/verify_locomanip.py            # five reset cycles
 uv run python scripts/verify_locomanip.py --cycles 1 --isolation
 uv run python scripts/inspect_controller_datastore.py

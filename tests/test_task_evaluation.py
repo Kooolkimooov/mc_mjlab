@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from compare_to_baseline import _report_task, _resolve_evaluation
 from evaluation.comparison import ComparisonEpisode, by_stratum
+from mjlab.envs import ManagerBasedRlEnv
 
 import mc_mjlab.tasks  # noqa: F401
 from mc_mjlab.tasks.evaluation import (
@@ -66,8 +68,11 @@ def test_episodes_bucket_by_their_own_metric() -> None:
 
 def test_a_missing_metric_narrows_the_declaration() -> None:
   """Verify an env without the declared metrics loses the verdict, not the run."""
-  env = SimpleNamespace(
-    metrics_manager=SimpleNamespace(active_terms=["zmp_error", "cart_mass"])
+  env = cast(
+    ManagerBasedRlEnv,
+    SimpleNamespace(
+      metrics_manager=SimpleNamespace(active_terms=["zmp_error", "cart_mass"])
+    ),
   )
   narrowed, names = _resolve_evaluation(RESIDUAL_TASK_ID, env)
   assert names == ["zmp_error", "cart_mass"]
