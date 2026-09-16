@@ -10,7 +10,9 @@ import torch
 from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
-from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import _make_env_cfg
+from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
+  make_residual_balance_env_cfg,
+)
 
 EVENT_COMPONENTS = {
   "friction": "randomize_friction",
@@ -45,7 +47,7 @@ def select_components(cfg: ManagerBasedRlEnvCfg, profile: str) -> None:
 def run_profile(profile: str, args: argparse.Namespace) -> dict[str, float]:
   """Run one no-residual cohort to its first termination or time limit."""
   stage = 0 if profile == "nominal" else 1
-  cfg = _make_env_cfg(
+  cfg = make_residual_balance_env_cfg(
     "position",
     num_envs=args.num_envs,
     num_workers=args.num_workers,

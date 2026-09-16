@@ -28,7 +28,7 @@ from mc_mjlab.robots.registry import (
 
 # Every env is its own mc_rtc controller (~70 MB, ~570 ms to construct, built
 # serially), so the env count is memory- and startup-bound rather than GPU-bound.
-# Two is what a viewer session wants; raise it to sweep throughput.
+# One is what a viewer session wants; raise it to sweep throughput.
 PLAY_NUM_ENVS = 1
 NUM_ENVS = 420
 

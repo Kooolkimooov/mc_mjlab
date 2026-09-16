@@ -14,8 +14,8 @@ from mc_mjlab import MC_RTC_YAML_PATH, mdp
 from mc_mjlab.robots import robot_module as mc_rtc
 from mc_mjlab.robots.registry import get_main_robot_spec
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
-  _make_env_cfg,
-  _select_residual_joints,
+  make_residual_balance_env_cfg,
+  select_residual_joints,
 )
 
 
@@ -37,8 +37,8 @@ def target_sets(requested: list[str] | None) -> dict[str, tuple[str, ...]]:
   upper = set(mc_rtc.get_upper_body_joints(robot_name))
   candidates = tuple(j for j in robot.get_residual_joints() if j not in upper)
   groups = {
-    "ankle": _select_residual_joints(robot_name, candidates, "ankle"),
-    "sagittal": _select_residual_joints(robot_name, candidates, "sagittal"),
+    "ankle": select_residual_joints(robot_name, candidates, "ankle"),
+    "ankle_pitch": select_residual_joints(robot_name, candidates, "ankle_pitch"),
     "all": candidates,
   }
   if requested is None:
@@ -71,7 +71,7 @@ def main() -> None:
   args = parser.parse_args()
   targets = target_sets(args.target)
 
-  cfg = _make_env_cfg(
+  cfg = make_residual_balance_env_cfg(
     args.control,
     num_envs=2 * len(targets),
     num_workers=args.num_workers,
@@ -82,7 +82,7 @@ def main() -> None:
   cfg.auto_reset = False
 
   env = ManagerBasedRlEnv(cfg, device=args.device)
-  term = mdp.sensors._residual_term(env, "mc_rtc_residual")
+  term = mdp.sensors.residual_term(env, "mc_rtc_residual")
   ids = term.residual_ids
   residual_names = (
     term.target_names if ids is None else tuple(term.target_names[i] for i in ids)
@@ -96,7 +96,7 @@ def main() -> None:
     for joint in joints:
       action[2 * pair + 1, action_col[joint]] = args.sign * args.level
 
-  sensors = mdp.sensors._ZmpSensors(env, mdp.sensors.GROUND_CONTACT_SENSORS, "robot")
+  sensors = mdp.sensors.ZmpSensors(env, mdp.sensors.GROUND_CONTACT_SENSORS, "robot")
   robot_name = term.cfg.mc_rtc_robot_name
   limits = mc_rtc.get_effort_limits(robot_name)
   residual_target_ids = (

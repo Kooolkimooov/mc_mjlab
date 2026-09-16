@@ -795,11 +795,6 @@ class McRtcResidualActionBase(BaseAction):
     output_memory.unlink()
 
   @property
-  def processed_action(self) -> torch.Tensor:
-    """Requested physical residual after scale and clip."""
-    return self._processed_actions
-
-  @property
   def requested_normalized_action(self) -> torch.Tensor:
     """Policy request in normalized action coordinates."""
     return self._residual_raw_actions

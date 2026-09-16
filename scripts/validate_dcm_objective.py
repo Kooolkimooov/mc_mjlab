@@ -15,7 +15,7 @@ from mc_mjlab import MC_RTC_YAML_PATH, mdp
 from mc_mjlab.bridge.controller_datastore import CONTROL_COM_VEL
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   DCM_STD,
-  _make_env_cfg,
+  make_residual_balance_env_cfg,
 )
 
 #: Candidate kernel widths to score the measured distribution through.
@@ -93,7 +93,7 @@ def run_regime(
   name: str, config: Path, level: float, args: argparse.Namespace
 ) -> Sample:
   """Step one regime with a fixed residual level and collect its grounded samples."""
-  cfg = _make_env_cfg(
+  cfg = make_residual_balance_env_cfg(
     control="position",
     num_envs=args.num_envs,
     num_workers=args.num_workers,
@@ -103,8 +103,8 @@ def run_regime(
   # `step()` would otherwise reset in place and erase what this measures.
   cfg.auto_reset = False
   env = ManagerBasedRlEnv(cfg, device=args.device)
-  sensors = mdp.sensors._ZmpSensors(env, mdp.sensors.GROUND_CONTACT_SENSORS, "robot")
-  term = mdp.sensors._residual_term(env, "mc_rtc_residual")
+  sensors = mdp.sensors.ZmpSensors(env, mdp.sensors.GROUND_CONTACT_SENSORS, "robot")
+  term = mdp.sensors.residual_term(env, "mc_rtc_residual")
   root = env.scene["robot"].indexing.root_body_id
 
   signs = torch.ones(env.action_manager.total_action_dim, device=env.device)

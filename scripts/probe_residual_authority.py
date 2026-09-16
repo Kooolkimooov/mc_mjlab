@@ -12,7 +12,9 @@ import torch
 from mjlab.envs import ManagerBasedRlEnv
 
 from mc_mjlab import mdp
-from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import _make_env_cfg
+from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
+  make_residual_balance_env_cfg,
+)
 
 # Bin width for the recovery profile, in policy steps (50 Hz -> 5 bins/100 ms).
 BIN_STEPS = 5
@@ -66,7 +68,7 @@ def main() -> None:
   p.add_argument("--dump", default=None, help="CSV path for the recovery profile")
   args = p.parse_args()
 
-  cfg = _make_env_cfg(
+  cfg = make_residual_balance_env_cfg(
     control="position",
     num_envs=args.num_envs,
     num_workers=args.num_workers,
@@ -80,7 +82,7 @@ def main() -> None:
   action = _build_action(args.pattern, args.level, env.num_envs, dim, env.device)
 
   # The same plumbing the reward uses, in metres before the kernel flattens it.
-  sensors = mdp.sensors._ZmpSensors(env, mdp.sensors.GROUND_CONTACT_SENSORS, "robot")
+  sensors = mdp.sensors.ZmpSensors(env, mdp.sensors.GROUND_CONTACT_SENSORS, "robot")
 
   print(
     f"[probe] level {args.level:g} pattern {args.pattern} · {args.num_envs} envs, "

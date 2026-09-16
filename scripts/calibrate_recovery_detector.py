@@ -18,14 +18,16 @@ from mc_mjlab.residuals.recovery_authority import (
   RecoveryFilter,
   detector_target,
 )
-from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import _make_env_cfg
+from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
+  make_residual_balance_env_cfg,
+)
 
 
 def collect(
   args: argparse.Namespace,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
   """Collect feature, push-age, and episode-age tensors with zero residual."""
-  cfg = _make_env_cfg(
+  cfg = make_residual_balance_env_cfg(
     "position",
     num_envs=args.num_envs,
     num_workers=args.num_workers,
@@ -39,11 +41,9 @@ def collect(
   term = env.action_manager.get_term("mc_rtc_residual")
   assert isinstance(term, McRtcResidualActionBase)
   extractor = RecoveryFeatureExtractor(env, term)
-  zmp_sensors = mdp.sensors._ZmpSensors(
-    env, mdp.sensors.GROUND_CONTACT_SENSORS, "robot"
-  )
+  zmp_sensors = mdp.sensors.ZmpSensors(env, mdp.sensors.GROUND_CONTACT_SENSORS, "robot")
   env_ids = torch.arange(env.num_envs, device=env.device)
-  mdp.disturbances._push_term(env, "push_robot").disable(env_ids[env_ids % 4 < 2])
+  mdp.disturbances.push_term(env, "push_robot").disable(env_ids[env_ids % 4 < 2])
   action = torch.zeros(
     env.num_envs, env.action_manager.total_action_dim, device=env.device
   )

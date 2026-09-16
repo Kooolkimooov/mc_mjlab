@@ -8,7 +8,9 @@ import torch
 from mjlab.envs import ManagerBasedRlEnv
 
 from mc_mjlab import mdp
-from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import _make_env_cfg
+from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
+  make_residual_balance_env_cfg,
+)
 
 
 def main() -> None:
@@ -21,10 +23,10 @@ def main() -> None:
   parser.add_argument("--steps", type=int, default=900)
   parser.add_argument("--device", default="cuda:0")
   parser.add_argument("--disturbance", choices=("finite", "velocity"), default="finite")
-  parser.add_argument("--randomization-stage", type=int, choices=(0, 1, 2), default=0)
+  parser.add_argument("--randomization-stage", type=int, choices=(0, 1), default=0)
   args = parser.parse_args()
 
-  cfg = _make_env_cfg(
+  cfg = make_residual_balance_env_cfg(
     "position",
     num_envs=args.num_envs,
     num_workers=args.num_workers,
@@ -35,7 +37,7 @@ def main() -> None:
     cfg.events["push_robot"].params["planar_speed"] = 0.4
 
   env = ManagerBasedRlEnv(cfg, device=args.device)
-  term = mdp.sensors._residual_term(env, "mc_rtc_residual")
+  term = mdp.sensors.residual_term(env, "mc_rtc_residual")
   action = torch.ones(
     env.num_envs, env.action_manager.total_action_dim, device=env.device
   )
@@ -45,7 +47,7 @@ def main() -> None:
   authority_sum = 0.0
   impulses = 0
   impulse_error = 0.0
-  push_term = mdp.disturbances._push_term(env, "push_robot")
+  push_term = mdp.disturbances.push_term(env, "push_robot")
 
   env.reset()
   for _ in range(args.steps):

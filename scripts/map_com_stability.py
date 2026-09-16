@@ -12,7 +12,9 @@ from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
 from mc_mjlab.robots import robot_module as mc_rtc
-from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import _make_env_cfg
+from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
+  make_residual_balance_env_cfg,
+)
 
 AXES = {"x": 0, "y": 1, "z": 2}
 DEFAULT_OFFSETS_MM = (-10.0, -5.0, -2.0, 0.0, 2.0, 5.0, 10.0)
@@ -45,7 +47,7 @@ def run_offset(
   axis: str, offset_mm: float, args: argparse.Namespace
 ) -> dict[str, float]:
   """Run one compiled COM mismatch cohort without policy action or pushes."""
-  cfg = _make_env_cfg(
+  cfg = make_residual_balance_env_cfg(
     "position",
     num_envs=args.num_envs,
     num_workers=args.num_workers,

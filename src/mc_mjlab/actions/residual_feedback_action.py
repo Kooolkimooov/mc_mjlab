@@ -182,13 +182,3 @@ class ResidualFeedbackJointTorqueAction(ResidualMpcJointTorqueAction):
       out[name] = feedback[:, start : start + width]
       start += width
     return out
-
-  @property
-  def feedback_offset(self) -> torch.Tensor:
-    """Per-target encoder offset currently handed to the controller, in rad."""
-    return self._feedback_offset
-
-  @property
-  def root_pose_offset(self) -> tuple[torch.Tensor, torch.Tensor]:
-    """Root translation (m) and rotation-vector (rad) offsets in force."""
-    return self._root_translation, self._root_rotation
