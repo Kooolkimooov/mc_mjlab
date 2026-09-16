@@ -39,10 +39,10 @@ def test_a_task_cannot_declare_a_verdict_it_does_not_measure() -> None:
     TaskEvaluation(metrics=("a",), stratify="a", strata=(2.0, 1.0))
 
 
-def test_locomanip_declares_completion_and_cart_mass() -> None:
+def test_locomanip_declares_physical_success_and_cart_mass() -> None:
   """Verify the registered task resolves to its own declaration."""
   assert evaluation_for(RESIDUAL_TASK_ID) is LOCOMANIP_EVALUATION
-  assert LOCOMANIP_EVALUATION.success == "task_complete"
+  assert LOCOMANIP_EVALUATION.success == "task_success"
   assert LOCOMANIP_EVALUATION.stratify == "cart_mass"
   assert evaluation_for("Mjlab-Cartpole-Balance") is EMPTY
 

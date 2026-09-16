@@ -56,6 +56,10 @@ COMPLETE = "Locomanip::complete"
 HOLD_PHASE = 4.0
 
 
+#: Terminations that mean the robot went down, whatever the FSM believes.
+FALL_TERMINATIONS = ("fell_over", "collapsed")
+
+
 def residual_action(
   env: ManagerBasedRlEnv, action_name: str = ACTION_NAME
 ) -> McRtcResidualActionBase:

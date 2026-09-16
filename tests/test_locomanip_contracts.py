@@ -16,6 +16,7 @@ from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
 from mc_mjlab.bridge.controller_datastore import CONTROL_COM, PLANNED_ZMP
 from mc_mjlab.residuals.authority import TORQUE_FRACTION
 from mc_mjlab.tasks.locomanip import DEMO_TASK_ID, RESIDUAL_TASK_ID
+from mc_mjlab.tasks.locomanip.evaluation import LOCOMANIP_EVALUATION
 from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
   CART_MASS_RANGE_KG,
   CART_NOMINAL_MASS_KG,
@@ -23,6 +24,8 @@ from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
   FORCE_SENSORS,
   FRAMESKIP,
   OBJECT_HISTORY,
+  SUCCESS_POSITION_TOLERANCE_M,
+  SUCCESS_YAW_TOLERANCE_RAD,
   ZMP_TRACKING_STD,
   make_locomanip_residual_env_cfg,
 )
@@ -169,6 +172,19 @@ def test_the_payload_avoids_the_recompute_that_blanks_sensors() -> None:
   assert payload.func.recompute == RecomputeLevel.set_const_fixed
   # The reference weights that level would have recomputed are rescaled instead.
   assert {"dof_invweight0", "body_invweight0"} <= set(payload.func.model_fields)
+
+
+def test_success_is_physical_not_the_controller_schedule() -> None:
+  """Verify the verdict is the cart's placement, not the FSM reaching its hold."""
+  cfg = make_locomanip_residual_env_cfg()
+  success = cfg.metrics["task_success"]
+  assert success.reduce == "last"
+  assert success.params["position_tolerance_m"] == SUCCESS_POSITION_TOLERANCE_M
+  assert success.params["yaw_tolerance_rad"] == SUCCESS_YAW_TOLERANCE_RAD
+  assert LOCOMANIP_EVALUATION.success == "task_success"
+  # Kept beside it: the gap between the two is how often the schedule outran it.
+  assert "task_complete" in cfg.metrics
+  assert {"task_complete", "task_success"} <= set(LOCOMANIP_EVALUATION.metrics)
 
 
 def test_the_payload_metric_names_the_randomized_body() -> None:

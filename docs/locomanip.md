@@ -299,3 +299,34 @@ identifies the payload as well.
 
 **History:** added with the payload randomization; without it the mass is not
 identifiable from the observation at all.
+
+## task_success
+
+**Current:** the metric the comparison scores, and the one
+`tasks/locomanip/evaluation.py` declares as its verdict. It is the FSM's
+`Locomanip::complete` **and** the cart within `SUCCESS_POSITION_TOLERANCE_M`
+(0.15 m) of its commanded position, **and** within `SUCCESS_YAW_TOLERANCE_RAD`
+(10 degrees) of its commanded yaw, **and** no controller or worker failure, and
+no fall termination on the step. Those tolerances are
+`verify_locomanip.py`'s own acceptance gates, so the training verdict and the
+acceptance run agree on what "done" means.
+
+**Why `task_complete` alone is not success.** `Locomanip::complete` reports that
+the executor reached `LMC::DemoHold`, and `ConfigManipState` leaves the push
+phase when its waypoint queue empties -- on a schedule, not on arrival. A cart
+that never moved completes exactly like one that arrived.
+
+Measured 2026-09-16, two zero-residual environments at the nominal 10 kg cart:
+both reported `complete = 1` at t = 47.6 s with the cart 0.154 m and 0.144 m from
+its commanded position, landing either side of the tolerance, so
+`task_success` read 0 and 1. Against a 400 kg cart the robot fell at t = 18.5 s
+with the cart 0.29-0.33 m out, where completion would never have fired at all.
+
+`task_complete` stays in the metrics beside it: the gap between the two is how
+often the schedule outran the cart.
+
+**Re-measure if:** the FSM's waypoint durations change, or the acceptance
+script's tolerances move.
+
+**History:** added when a review pointed out that the evaluation spec was scoring
+the controller's own schedule rather than where the cart ended up.

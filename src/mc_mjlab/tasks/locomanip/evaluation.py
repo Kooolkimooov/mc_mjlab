@@ -16,10 +16,11 @@ LOCOMANIP_EVALUATION = TaskEvaluation(
     "zmp_error",
     "zmp_grounded",
     "task_complete",
+    "task_success",
     "hands_released",
     "cart_mass",
   ),
-  success="task_complete",
+  success="task_success",
   stratify="cart_mass",
   strata=CART_MASS_STRATA,
 )

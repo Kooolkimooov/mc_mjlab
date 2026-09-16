@@ -87,6 +87,10 @@ CART_MASS_RANGE_KG = (1.0, 1000.0)
 
 FALL_LIMIT_ANGLE = math.radians(45.0)
 
+#: What `verify_locomanip.py` accepts as a placed cart. docs/locomanip.md#task_success
+SUCCESS_POSITION_TOLERANCE_M = 0.15
+SUCCESS_YAW_TOLERANCE_RAD = math.radians(10.0)
+
 
 def locomanip_residual_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   """Build the trainable locomanip residual task, or its viewer variant."""
@@ -358,8 +362,18 @@ def _metrics() -> dict[str, MetricsTermCfg]:
       func=mdp.metrics.zmp_grounded, params=dict(ZMP_PARAMS)
     ),
     "object_yaw_error": MetricsTermCfg(func=locomanip_mdp.metrics.object_yaw_error),
+    # `task_complete` is the FSM's own verdict; `task_success` is the physical
+    # one, and they are not the same. docs/locomanip.md#task_success
     "task_complete": MetricsTermCfg(
       func=locomanip_mdp.metrics.task_complete, reduce="last"
+    ),
+    "task_success": MetricsTermCfg(
+      func=locomanip_mdp.metrics.task_success,
+      params={
+        "position_tolerance_m": SUCCESS_POSITION_TOLERANCE_M,
+        "yaw_tolerance_rad": SUCCESS_YAW_TOLERANCE_RAD,
+      },
+      reduce="last",
     ),
     "hands_released": MetricsTermCfg(
       func=locomanip_mdp.metrics.hands_released, reduce="last"

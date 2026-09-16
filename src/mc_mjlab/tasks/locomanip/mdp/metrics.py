@@ -34,6 +34,29 @@ def task_complete(
   return term.datastore_scalar_output(accessors.COMPLETE)
 
 
+def task_success(
+  env: ManagerBasedRlEnv,
+  position_tolerance_m: float,
+  yaw_tolerance_rad: float,
+  action_name: str = accessors.ACTION_NAME,
+) -> torch.Tensor:
+  """Completion the acceptance script would accept; read it with ``reduce="last"``."""
+  term = accessors.residual_action(env, action_name)
+  # `complete` alone is the FSM reaching its hold state, which happens when the
+  # waypoints expire whether or not the cart went anywhere.
+  success = term.datastore_scalar_output(accessors.COMPLETE) > 0.0
+  success &= (
+    accessors.object_position_error(env, action_name).norm(dim=-1)
+    <= position_tolerance_m
+  )
+  success &= accessors.object_yaw_error(env, action_name).abs() <= yaw_tolerance_rad
+  success &= ~(term.controller_failed | term.controller_worker_failed)
+  for name in accessors.FALL_TERMINATIONS:
+    if name in env.termination_manager.active_terms:
+      success &= ~env.termination_manager.get_term(name)
+  return success.to(torch.float32)
+
+
 def hands_released(
   env: ManagerBasedRlEnv, action_name: str = accessors.ACTION_NAME
 ) -> torch.Tensor:
