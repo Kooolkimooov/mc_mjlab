@@ -7,6 +7,7 @@ from typing import cast
 
 import pytest
 from mjlab.envs import ManagerBasedRlEnvCfg
+from mjlab.managers.event_manager import RecomputeLevel
 
 import mc_mjlab.tasks  # noqa: F401
 from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
@@ -24,9 +25,9 @@ from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
   OBJECT_HISTORY,
   ZMP_TRACKING_STD,
   make_locomanip_residual_env_cfg,
-  mass_alpha_range,
 )
 from mc_mjlab.tasks.locomanip.mdp import accessors
+from mc_mjlab.tasks.locomanip.mdp.events import mass_alpha_range
 
 
 def _scales(cfg: ManagerBasedRlEnvCfg) -> dict[str, float]:
@@ -151,18 +152,23 @@ def test_cart_pose_hook_is_opt_in() -> None:
   assert "reset_cart" in varied.events
 
 
-def test_payload_randomization_stays_off_by_default() -> None:
-  """Verify the cart's model is left alone, which is what keeps the sensors alive."""
-  assert "cart_payload" not in make_locomanip_residual_env_cfg().events
-
-
-def test_payload_is_drawn_every_episode_when_asked_for() -> None:
-  """Verify the swept mass range resamples at reset once enabled."""
-  payload = make_locomanip_residual_env_cfg(
-    cart_mass_range_kg=CART_MASS_RANGE_KG
-  ).events["cart_payload"]
+def test_payload_is_drawn_every_episode() -> None:
+  """Verify the swept mass range is on by default and resampled at reset."""
+  payload = make_locomanip_residual_env_cfg().events["cart_payload"]
   assert payload.mode == "reset"
-  assert payload.params["alpha_range"] == mass_alpha_range(CART_MASS_RANGE_KG)
+  assert payload.params["mass_range_kg"] == CART_MASS_RANGE_KG
+  assert (
+    "cart_payload"
+    not in make_locomanip_residual_env_cfg(cart_mass_range_kg=None).events
+  )
+
+
+def test_the_payload_avoids_the_recompute_that_blanks_sensors() -> None:
+  """Verify the term stays below `set_const_0`, which empties `data.sensordata`."""
+  payload = make_locomanip_residual_env_cfg().events["cart_payload"]
+  assert payload.func.recompute == RecomputeLevel.set_const_fixed
+  # The reference weights that level would have recomputed are rescaled instead.
+  assert {"dof_invweight0", "body_invweight0"} <= set(payload.func.model_fields)
 
 
 def test_the_payload_metric_names_the_randomized_body() -> None:
@@ -175,11 +181,13 @@ def test_the_payload_metric_names_the_randomized_body() -> None:
 
 def test_mass_alpha_range_is_the_log_scale_pseudo_inertia_wants() -> None:
   """Verify the conversion inverts `mass = nominal * exp(2 * alpha)`."""
-  low, high = mass_alpha_range((CART_NOMINAL_MASS_KG, 4.0 * CART_NOMINAL_MASS_KG))
+  low, high = mass_alpha_range(
+    (CART_NOMINAL_MASS_KG, 4.0 * CART_NOMINAL_MASS_KG), CART_NOMINAL_MASS_KG
+  )
   assert low == 0.0
   assert math.isclose(CART_NOMINAL_MASS_KG * math.exp(2.0 * high), 40.0)
   with pytest.raises(ValueError):
-    mass_alpha_range((0.0, 1.0))
+    mass_alpha_range((0.0, 1.0), CART_NOMINAL_MASS_KG)
 
 
 def test_sparse_jacobian_is_kept() -> None:

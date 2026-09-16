@@ -9,7 +9,6 @@ from typing import Literal
 from mjlab.entity import EntityCfg
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
-from mjlab.envs.mdp import dr
 from mjlab.managers.action_manager import ActionTermCfg
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.metrics_manager import MetricsTermCfg
@@ -83,26 +82,10 @@ ZMP_PARAMS = {
 #: The cart asset's own mass, which is what mc_rtc's model keeps believing.
 CART_NOMINAL_MASS_KG = 10.0
 
-#: The masses the mc_mujoco sweep characterised. Off by default: randomizing the
-#: cart's model zeroes every sensor above four environments.
-#: docs/locomanip.md#cart_mass_range_kg
+#: The masses the mc_mujoco sweep characterised. docs/locomanip.md#cart_mass_range_kg
 CART_MASS_RANGE_KG = (1.0, 1000.0)
 
 FALL_LIMIT_ANGLE = math.radians(45.0)
-
-
-def mass_alpha_range(
-  mass_range_kg: tuple[float, float],
-  nominal_mass_kg: float = CART_NOMINAL_MASS_KG,
-) -> tuple[float, float]:
-  """Convert a mass range to `pseudo_inertia`'s log scale, where mass is e^(2a)."""
-  low, high = mass_range_kg
-  if low <= 0.0 or high < low:
-    raise ValueError(f"invalid cart mass range {mass_range_kg}")
-  return (
-    0.5 * math.log(low / nominal_mass_kg),
-    0.5 * math.log(high / nominal_mass_kg),
-  )
 
 
 def locomanip_residual_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
@@ -124,7 +107,7 @@ def make_locomanip_residual_env_cfg(
   episode_length_s: float = EPISODE_LENGTH_S,
   torque_fraction: float = TORQUE_FRACTION,
   cart_pose_range: dict[str, tuple[float, float]] | None = None,
-  cart_mass_range_kg: tuple[float, float] | None = None,
+  cart_mass_range_kg: tuple[float, float] | None = CART_MASS_RANGE_KG,
   console_output: Literal["none", "single", "all"] = "none",
   print_residual_every: int = 0,
   mc_rtc_yaml: Path = MC_RTC_YAML,
@@ -349,12 +332,11 @@ def _events(
     )
   if cart_mass_range_kg is not None:
     events["cart_payload"] = EventTermCfg(
-      func=dr.pseudo_inertia,
+      func=locomanip_mdp.events.randomize_object_mass,
       mode="reset",
       params={
-        # Uniform in the log scale is log-uniform in mass, which is how the
-        # sweep spaced its samples. docs/locomanip.md#cart_mass_range_kg
-        "alpha_range": mass_alpha_range(cart_mass_range_kg),
+        "mass_range_kg": cart_mass_range_kg,
+        "nominal_mass_kg": CART_NOMINAL_MASS_KG,
         "asset_cfg": SceneEntityCfg(
           locomanip_mdp.accessors.OBJECT_ENTITY,
           body_names=(locomanip_mdp.accessors.OBJECT_BODY,),

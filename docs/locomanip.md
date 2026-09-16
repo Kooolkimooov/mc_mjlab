@@ -211,47 +211,50 @@ choice. Place it before reading anything into the reward curve.
 
 ## cart_mass_range_kg
 
-**Current:** `None` -- **off**, because it is broken at training scale. The range
-it takes when enabled is `(1.0, 1000.0)` kg on the 10 kg cart asset, drawn per
-episode by a `reset`-mode `dr.pseudo_inertia` event on the cart body.
-`pseudo_inertia`'s `alpha` is a *log* scale (mass and inertia both scale by
-`e^(2a)`), so `mass_alpha_range` converts kilograms to it, and a uniform draw in
-`alpha` is log-uniform in mass -- the spacing the sweep used. `dr.body_mass` is
-the wrong term here: it leaves inertia behind.
+**Current:** `(1.0, 1000.0)` kg on the 10 kg cart asset -- the range the mc_mujoco
+sweep characterised -- drawn per episode by `mdp.events.randomize_object_mass`, a
+`reset` event on the cart body. It wraps `dr.pseudo_inertia`, whose `alpha` is a
+*log* scale (mass and inertia both scale by `e^(2a)`), so `mass_alpha_range`
+converts kilograms to it and a uniform draw in `alpha` is log-uniform in mass --
+the spacing the sweep used. `dr.body_mass` is the wrong term: it leaves inertia
+behind.
 
-**Why it is off: randomizing the cart's model zeroes every sensor.** With any
-model-randomization event pointed at the `cart` entity, `data.sensordata` goes
-partly (5 environments: 105 of 280 values) or entirely (8 environments: 0 of 448)
-zero. The controller then gets no force or IMU feedback at all, its stabilizer
-has nothing to work with, and the robot falls after about 3.8 s -- silently,
-since the fall reads as a policy failure. Measured 2026-09-16:
+**Why it is not `dr.pseudo_inertia` directly: `set_const_0` blanks every sensor.**
+Any event declaring `RecomputeLevel.set_const_0` or above empties
+`data.sensordata` from five environments up -- 105 of 280 values at five, 0 of 448
+at eight. The controller then sees no force or IMU feedback, its stabilizer has
+nothing, and the robot falls after about 3.8 s, which reads as a policy failure.
+Measured 2026-09-16, with a no-op event that declares only the level, so nothing
+but the recompute differs:
 
-| scene | randomization | envs | foot force | root z |
-| --- | --- | --- | --- | --- |
-| robot + cart | none | 8 | 992 N | 0.747 |
-| robot + cart | on the **robot** (`geom_friction`) | 8 | 992 N | 0.747 |
-| robot + cart | on the **cart** (`pseudo_inertia` or `body_mass`) | 4 | 992 N | 0.747 |
-| robot + cart | on the **cart** | 5 | **0 N** | 0.783 |
-| robot + cart | on the **cart** | 8 | **0 N** | 0.783 |
-| robot only (balance, stage 1) | full DR | 8 | 984-999 N | 0.784 |
+| recompute level | what it recomputes | sensors at 8 envs | foot force |
+| --- | --- | --- | --- |
+| `none` (expansion only) | -- | 384 of 448 | 992 N |
+| `set_const_fixed` | `body_subtreemass` | 384 of 448 | 992 N |
+| `set_const_0` | `dof_invweight0`, `body_invweight0`, `tendon_*0` | **0 of 448** | **0 N** |
+| `set_const` | both of the above | **0 of 448** | **0 N** |
 
-So it is neither the payload term, nor its mode, nor the contact budget
-(`nconmax` 100 to 2000 and `njmax` 1500 to 40000 change nothing), nor the
-`cart_floor` pair: it is randomizing a *second, passive entity's* model fields
-above four environments.
+It is not this task's scene: adding a `dr.body_mass` term to *residual balance*,
+one entity and no cart, breaks it identically at 8 envs. Nor is it the contact
+budget (`nconmax` 100 to 2000, `njmax` 1500 to 40000 change nothing), CUDA graph
+capture (off changes nothing), the event's mode, or the `cart_floor` pair.
 
-**Until that is fixed** the cart stays at its asset mass of 10 kg and the payload
-experiment cannot run at scale. `cart_mass_range_kg=(1.0, 1000.0)` with four
-environments or fewer still reproduces it for a probe, which is what
-`probe_locomanip_authority.py` relies on.
+**So the term declares `set_const_fixed` and rescales the reference weights
+itself.** The cart is an isolated free body, so its `dof_invweight0` and
+`body_invweight0` are exactly inverse in the uniform density scale
+`pseudo_inertia` applied; `_rescale_reference_weights` divides the defaults by
+the mass scale the draw achieved. Without that the solver treats a heavy cart as
+far softer than it is -- a full-clip residual moved a 300 kg cart 0.39 m instead
+of the 0.22 m the upstream recompute gives. With it, 0.18 m, inside the
+run-to-run spread of the reference itself (0.19-0.22 m over three runs).
 
-**Re-measure if:** mjlab's model-variant path changes, or the cart asset's body
-name changes.
+**Re-measure if:** mjlab's recompute path changes, the cart stops being a single
+free body, or `pseudo_inertia` changes what `alpha` scales.
 
 **History:**
-- 2026-09-16 -- added as an opt-in hook, defaulted to the swept range, then
-  turned back off when the first smoke run showed `zmp_grounded` pinned at 0 and
-  episodes ending at 3.7 s.
+- 2026-09-16 -- added, defaulted to the swept range, turned off when a smoke run
+  showed `zmp_grounded` pinned at 0 and episodes ending at 3.7 s, then turned
+  back on once the recompute level was identified as the cause.
 
 ## ZMP_TRACKING_STD
 
