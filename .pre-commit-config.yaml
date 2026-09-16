@@ -27,6 +27,15 @@ repos:
         types: [python]
         files: ^(src|scripts|tests)/
 
+      # The per-file hook above cannot see a heading orphaned by a file it was
+      # not handed, so the whole-tree pass runs strict and fails the commit.
+      - id: check-docs
+        name: check docs references
+        entry: python3 scripts/check_prose.py --strict src scripts tests
+        language: system
+        types_or: [python, c++, c, markdown]
+        pass_filenames: false
+
       # A Python-only commit never builds the C++ side. The native hook below
       # excludes ctest's `python` test, which this one already ran.
       - id: pytest
