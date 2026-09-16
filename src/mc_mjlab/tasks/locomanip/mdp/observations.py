@@ -65,3 +65,17 @@ def task_complete(
   """The controller's own completion flag, as one column."""
   term = accessors.residual_action(env, action_name)
   return term.datastore_scalar_output(accessors.COMPLETE).unsqueeze(-1)
+
+
+def object_mass(
+  env: ManagerBasedRlEnv, entity_name: str = accessors.OBJECT_ENTITY
+) -> torch.Tensor:
+  """Privileged: the log of the simulated payload, which spans three decades."""
+  return accessors.object_mass_kg(env, entity_name).log().unsqueeze(-1)
+
+
+def hand_contact_force(
+  env: ManagerBasedRlEnv, sensor_names: tuple[str, ...] = accessors.HAND_CONTACT_SENSORS
+) -> torch.Tensor:
+  """Privileged: the true hand-object contact force, not the robot's own sensor."""
+  return accessors.hand_contact_forces(env, sensor_names)

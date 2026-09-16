@@ -33,6 +33,10 @@ OBJECT_BODY = "Body"
 REQUIRED_CONTROLLER = "LocomanipController"
 
 
+#: The scene's hand-object contact sensors, in left-then-right order.
+HAND_CONTACT_SENSORS = ("left_hand_cart", "right_hand_cart")
+
+
 OBJECT_REFERENCE_POSITION = "Locomanip::objectReferencePosition"
 
 
@@ -85,6 +89,22 @@ def object_yaw_error(
   quat = object_entity(env, entity_name).data.root_link_quat_w
   _, _, measured = euler_xyz_from_quat(quat)
   return wrap_to_pi(reference - measured)
+
+
+def object_mass_kg(
+  env: ManagerBasedRlEnv, entity_name: str = OBJECT_ENTITY
+) -> torch.Tensor:
+  """The mass MuJoCo is simulating for the object, in kilograms."""
+  body = env.sim.mj_model.body(f"{entity_name}/{OBJECT_BODY}").id
+  return torch.as_tensor(env.sim.model.body_mass[:, int(body)])
+
+
+def hand_contact_forces(
+  env: ManagerBasedRlEnv, sensor_names: tuple[str, ...] = HAND_CONTACT_SENSORS
+) -> torch.Tensor:
+  """Net contact force between each hand and the object, flattened per hand."""
+  forces = [env.scene[name].data.force.sum(dim=-2) for name in sensor_names]
+  return torch.cat(forces, dim=-1)
 
 
 def to_base_frame(

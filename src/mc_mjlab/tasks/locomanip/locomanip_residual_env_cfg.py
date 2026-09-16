@@ -25,6 +25,7 @@ from mc_mjlab import mdp
 from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionActionCfg,
 )
+from mc_mjlab.bridge.controller_datastore import CONTROL_COM, PLANNED_ZMP
 from mc_mjlab.robots import robot_module as mc_rtc
 from mc_mjlab.robots.registry import (
   RobotSpec,
@@ -56,6 +57,22 @@ RESIDUAL_SCALE = 0.01
 
 #: Kernel width of the object-tracking reward, in metres. docs/locomanip.md#object_tracking_std
 OBJECT_TRACKING_STD = 0.10
+
+#: Kernel width of the ZMP-tracking reward, in metres. docs/locomanip.md#zmp_tracking_std
+ZMP_TRACKING_STD = 0.05
+
+#: The wrench channels the policy gets: both feet, both hands.
+FORCE_SENSORS = (
+  "LeftFootForceSensor_fsensor",
+  "RightFootForceSensor_fsensor",
+  "LeftHandForceSensor_fsensor",
+  "RightHandForceSensor_fsensor",
+)
+
+ZMP_PARAMS = {
+  "sensor_names": mdp.sensors.GROUND_CONTACT_SENSORS,
+  "asset_cfg": SceneEntityCfg("robot"),
+}
 
 #: The cart asset's own mass, which is what mc_rtc's model keeps believing.
 CART_NOMINAL_MASS_KG = 10.0
@@ -170,6 +187,9 @@ def _actions(
       datastore_vectors_outputs=(
         locomanip_mdp.accessors.OBJECT_REFERENCE_POSITION,
         locomanip_mdp.accessors.OBJECT_REFERENCE_RPY,
+        # The ZMP reward compares these two. docs/coupling.md#planned_zmp
+        PLANNED_ZMP,
+        CONTROL_COM,
       ),
       datastore_scalar_outputs=(
         locomanip_mdp.accessors.LEFT_PHASE,
@@ -187,7 +207,7 @@ def _actions(
 
 
 def _observations() -> dict[str, ObservationGroupCfg]:
-  """Proprioception plus what the policy can know about the object."""
+  """Proprioception and object state for both, plus what only the critic may see."""
   terms = {
     "base_lin_vel": ObservationTermCfg(func=envs_mdp.base_lin_vel),
     "base_ang_vel": ObservationTermCfg(func=envs_mdp.base_ang_vel),
@@ -209,10 +229,24 @@ def _observations() -> dict[str, ObservationGroupCfg]:
       func=locomanip_mdp.observations.manipulation_phase
     ),
     "task_complete": ObservationTermCfg(func=locomanip_mdp.observations.task_complete),
+    **{
+      name: ObservationTermCfg(
+        func=envs_mdp.builtin_sensor, params={"sensor_name": f"robot/{name}"}
+      )
+      for name in FORCE_SENSORS
+    },
+  }
+
+  # Privileged: exogenous, and the single largest source of return variance here.
+  critic_terms = dict(terms) | {
+    "object_mass": ObservationTermCfg(func=locomanip_mdp.observations.object_mass),
+    "hand_contact_force": ObservationTermCfg(
+      func=locomanip_mdp.observations.hand_contact_force
+    ),
   }
   return {
-    "actor": ObservationGroupCfg(terms=dict(terms), concatenate_terms=True),
-    "critic": ObservationGroupCfg(terms=dict(terms), concatenate_terms=True),
+    "actor": ObservationGroupCfg(terms=terms, concatenate_terms=True),
+    "critic": ObservationGroupCfg(terms=critic_terms, concatenate_terms=True),
   }
 
 
@@ -223,6 +257,11 @@ def _rewards() -> dict[str, RewardTermCfg]:
       func=locomanip_mdp.rewards.object_position_tracking,
       weight=1.0,
       params={"std": OBJECT_TRACKING_STD},
+    ),
+    "zmp_tracking": RewardTermCfg(
+      func=locomanip_mdp.rewards.zmp_tracking,
+      weight=1.0,
+      params={**ZMP_PARAMS, "std": ZMP_TRACKING_STD},
     ),
     "termination_penalty": RewardTermCfg(func=envs_mdp.is_terminated, weight=-200.0),
     "upright": RewardTermCfg(func=envs_mdp.flat_orientation_l2, weight=-2.0),
@@ -303,6 +342,11 @@ def _metrics() -> dict[str, MetricsTermCfg]:
   return {
     "object_position_error": MetricsTermCfg(
       func=locomanip_mdp.metrics.object_position_error
+    ),
+    # Read tracking quality as `zmp_error / zmp_grounded`, never zmp_error alone.
+    "zmp_error": MetricsTermCfg(func=mdp.metrics.zmp_error, params=dict(ZMP_PARAMS)),
+    "zmp_grounded": MetricsTermCfg(
+      func=mdp.metrics.zmp_grounded, params=dict(ZMP_PARAMS)
     ),
     "object_yaw_error": MetricsTermCfg(func=locomanip_mdp.metrics.object_yaw_error),
     "task_complete": MetricsTermCfg(

@@ -198,3 +198,24 @@ verdict.
 **History:**
 - 2026-09-16 -- wired as an opt-in `cart_mass_scale` hook, then given the swept
   range as its default and moved to per-episode resampling.
+
+## ZMP_TRACKING_STD
+
+**Current:** `0.05` m, the Gaussian kernel width of the `zmp_tracking` reward,
+which scores the distance between the measured centre of pressure and the ZMP the
+controller planned, and scores **zero** on any step whose feet carry less than
+`min_normal_force` (20 N) -- an unloaded foot has no centre of pressure, and
+without the mask a robot in flight would collect the maximum.
+
+Read the companion metrics as a pair, `zmp_error / zmp_grounded`: `zmp_error`
+alone averages over every step, so it *falls* when the robot spends more time off
+the ground.
+
+**Not measured for this task.** Standing, the baseline already scores 0.997 on
+this kernel, so at this width the term says almost nothing until the push loads
+the feet; the width has to be placed against the error distribution during the
+push, which has not been taken on HRP5P.
+
+**Re-measure if:** the robot, the cart or the foot force sensors change.
+
+**History:** chosen as a round number, half of `residual_balance`'s `DCM_STD`.

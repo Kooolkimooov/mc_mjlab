@@ -12,13 +12,16 @@ import mc_mjlab.tasks  # noqa: F401
 from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionActionCfg,
 )
+from mc_mjlab.bridge.controller_datastore import CONTROL_COM, PLANNED_ZMP
 from mc_mjlab.tasks.locomanip import DEMO_TASK_ID, RESIDUAL_TASK_ID
 from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
   CART_MASS_RANGE_KG,
   CART_NOMINAL_MASS_KG,
   DECIMATION,
+  FORCE_SENSORS,
   FRAMESKIP,
   RESIDUAL_SCALE,
+  ZMP_TRACKING_STD,
   make_locomanip_residual_env_cfg,
   mass_alpha_range,
 )
@@ -65,6 +68,8 @@ def test_declared_datastore_outputs_cover_the_terms() -> None:
   assert set(action.datastore_vectors_outputs) == {
     accessors.OBJECT_REFERENCE_POSITION,
     accessors.OBJECT_REFERENCE_RPY,
+    PLANNED_ZMP,
+    CONTROL_COM,
   }
   assert set(action.datastore_scalar_outputs) == {
     accessors.LEFT_PHASE,
@@ -73,6 +78,25 @@ def test_declared_datastore_outputs_cover_the_terms() -> None:
   }
   assert action.controller_objects == {"obj": accessors.OBJECT_ENTITY}
   assert action.required_controller == accessors.REQUIRED_CONTROLLER
+
+
+def test_the_zmp_reward_has_the_callbacks_it_compares() -> None:
+  """Verify the planned ZMP and its CoM reference are collected for the reward."""
+  cfg = make_locomanip_residual_env_cfg()
+  outputs = set(_action(cfg).datastore_vectors_outputs)
+  assert {PLANNED_ZMP, CONTROL_COM} <= outputs
+  assert cfg.rewards["zmp_tracking"].params["std"] == ZMP_TRACKING_STD
+  assert set(cfg.metrics) >= {"zmp_error", "zmp_grounded"}
+
+
+def test_the_critic_sees_more_than_the_actor() -> None:
+  """Verify the privileged terms are critic-only and the force sensors are shared."""
+  observations = make_locomanip_residual_env_cfg().observations
+  actor = set(observations["actor"].terms)
+  critic = set(observations["critic"].terms)
+  assert actor < critic
+  assert critic - actor == {"object_mass", "hand_contact_force"}
+  assert set(FORCE_SENSORS) <= actor
 
 
 def test_worker_failure_truncates_instead_of_penalising() -> None:

@@ -48,5 +48,4 @@ def cart_mass(
   env: ManagerBasedRlEnv, entity_name: str = accessors.OBJECT_ENTITY
 ) -> torch.Tensor:
   """The payload this episode drew, in kilograms; read it with ``reduce="last"``."""
-  body = env.sim.mj_model.body(f"{entity_name}/{accessors.OBJECT_BODY}").id
-  return torch.as_tensor(env.sim.model.body_mass[:, int(body)])
+  return accessors.object_mass_kg(env, entity_name)
