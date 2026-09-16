@@ -41,6 +41,7 @@ are *deciding* something, not when you are reading the line that implements it.
 | [coupling.md](coupling.md) | action term, pool and host: interpolation, dispatch lag, reset ordering |
 | [process-workers.md](process-workers.md) | native process backend, IPC ownership and worker recovery contract |
 | [robots.md](robots.md) | collision geoms, PD gains, extra sensors, refJointOrder, assets |
+| [build.md](build.md) | scikit-build-core settings: the editable rebuild and why it is quiet |
 
 ## Finding a note
 

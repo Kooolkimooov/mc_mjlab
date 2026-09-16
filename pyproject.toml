@@ -51,6 +51,10 @@ cmake.source-dir = "src/mc_rtc_interface"
 build-dir = "build"
 # Stale .cpp edits rebuild on import; uv sync alone never sees them.
 editable.rebuild = true
+# That rebuild's banner is the one thing it writes to stdout, so it corrupts
+# any `$(uv run python -c ...)` capture. SKBUILD_EDITABLE_VERBOSE=1 brings it
+# back; a failed rebuild still prints.
+editable.verbose = false
 minimum-version = "build-system.requires"
 
 [tool.scikit-build.wheel]

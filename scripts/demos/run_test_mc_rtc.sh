@@ -10,9 +10,9 @@
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")/../.."
 
-# The id embeds the robot and controller from etc/mc_rtc.yaml. Resolved through
-# mc_mjlab.tasks.naming, which imports no mjlab, so this costs milliseconds
-# rather than a full torch/warp import.
+# The id embeds the robot and controller from etc/mc_rtc.yaml. Importing
+# mc_mjlab.tasks builds every task cfg, so this pays a full torch/warp import
+# and must not print to stdout -- see editable.verbose in pyproject.toml.
 control="${MC_MJLAB_CONTROL:-position}"
 task_id="$(uv run python -c "
 from mc_mjlab.tasks.naming import get_task_name
