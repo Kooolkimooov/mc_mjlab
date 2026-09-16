@@ -35,7 +35,7 @@ def main() -> None:
   cfg.auto_reset = False
 
   env = ManagerBasedRlEnv(cfg, device=args.device)
-  term = env.action_manager.get_term(mdp.ACTION_NAME)
+  term = env.action_manager.get_term(mdp.accessors.ACTION_NAME)
   if not isinstance(term, ResidualMpcJointTorqueAction):
     raise TypeError(f"unexpected action term {type(term).__name__}")
 
@@ -56,11 +56,13 @@ def main() -> None:
       assert bool(torch.isfinite(term.nominal_torque).all())
       assert bool(torch.isfinite(term.residual_torque).all())
       assert bool(
-        torch.isfinite(term.datastore_scalar_output(mdp.QP_OBJECTIVE_CALLBACK)).all()
+        torch.isfinite(
+          term.datastore_scalar_output(mdp.accessors.QP_OBJECTIVE_CALLBACK)
+        ).all()
       )
-      support = term.datastore_scalar_output(mdp.SUPPORT_FOOT_CALLBACK)
+      support = term.datastore_scalar_output(mdp.accessors.SUPPORT_FOOT_CALLBACK)
       assert bool(((support == 0.0) | (support == 1.0)).all())
-      phase = mdp.controller_contact_phases(env)
+      phase = mdp.observations.controller_contact_phases(env)
       assert bool(((phase >= 0.0) & (phase <= 1.0)).all())
       assert float(term.blended_residual_torque[0].abs().max()) == 0.0
       assert bool((term.final_effort.abs() <= term.effort_limit + 1.0e-5).all())
