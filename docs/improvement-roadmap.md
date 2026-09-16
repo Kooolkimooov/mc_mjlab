@@ -4,7 +4,7 @@ This roadmap turns the findings in `MC_MJLAB_CRITIQUE.md` into an ordered
 implementation and qualification program. Safety and measurement changes land
 before experiments; no training default changes unless the final gates pass.
 
-## BOUNDED_POLICY
+## Bounded policy
 
 **Current:** Replace the unbounded Gaussian action with a local tanh-squashed
 Gaussian. Preserve the zero latent-mean initialization, learn one scalar
@@ -21,7 +21,7 @@ distribution contract changes.
 - 2026-08-24 — selected as the first implementation milestone because the
   current Gaussian can request actions outside the declared normalized range.
 
-## EXECUTED_RESIDUAL
+## Executed residual
 
 **Current:** Rewards and diagnostics use the residual actually delivered after
 squashing, scaling, authority gating, and feasibility projection. The action
@@ -35,7 +35,7 @@ zero executed residual.
 - 2026-08-24 — raw policy penalties were rejected because they charge commands
   the robot never receives and hide commands removed by safety projection.
 
-## FEASIBILITY_PROJECTION
+## Feasibility projection
 
 **Current:** Read position, velocity, and effort bounds from the mc_rtc
 `RobotModule`. Position and torque residuals are projected as
@@ -50,7 +50,7 @@ Log settled projection frequency and near-bound activity per joint.
 - 2026-08-24 — the settled baseline reaches median/p90/p99/max effort ratios
   `0.133/0.203/0.229/0.40`; the reset transient is excluded from settled gates.
 
-## CHECKPOINT_QUALIFICATION
+## Checkpoint qualification
 
 **Current:** Evaluate every saved validation checkpoint from a run directory or
 glob using fixed completed-episode counts and paired environment schedules.
@@ -67,7 +67,7 @@ change.
 - 2026-08-24 — selected to prevent post-hoc choice from a single checkpoint or
   treating correlated environment episodes as independent samples.
 
-## RECOVERY_DETECTOR
+## Recovery detector
 
 **Current:** Authority is a transparent monotonic score over command-relative
 DCM, base angular velocity, tilt, and total foot-load deviation. A calibrated
@@ -93,7 +93,7 @@ distribution changes.
 - 2026-08-24 — accepted held-out calibration at 0.000% nominal duty, 96.825%
   two-second recovery recall, and 0.000% late activation (n=4620/882).
 
-## SELECTIVE_AUTHORITY
+## Selective authority
 
 **Current:** Position authority per joint is
 `min(0.01 rad, 0.20 * effort_limit / kp)` and torque authority is
@@ -111,7 +111,7 @@ other task ids are archived.
   groups produced measurable two-second DCM and centre-of-pressure responses;
   promotion remains gated on training and checkpoint qualification.
 
-## FINITE_DISTURBANCE
+## Finite disturbance
 
 **Current:** Keep velocity teleport only as a compatibility evaluation. Train
 with a finite torso impulse: uniform planar direction, duration
@@ -137,7 +137,7 @@ hardware changes.
   integral live, retained the velocity-kick compatibility path, and registered
   both robustness stages without enabling them in the standard task.
 
-## ACTOR_OBSERVATIONS
+## Actor observations
 
 **Current:** Remove sole velocities from the actor; keep them for the critic
 and reward computation. Screen history lengths `20`, `10`, and `5`, then a
@@ -154,7 +154,7 @@ changes.
   5-frame feed-forward screens plus a one-frame GRU-256 screen, and preserved
   the velocimeters for critic value estimation and slip measurement.
 
-## PPO_KL_SCHEDULE
+## PPO KL schedule
 
 **Current:** A local PPO subclass keeps the learning rate fixed within an
 update, computes full-rollout KL after the update, and changes the learning
@@ -175,7 +175,7 @@ Screen adaptive scheduling against fixed learning rates `1e-4`, `3e-4`, and
 - 2026-08-24 — implemented a local full-rollout scheduler, retained selectable
   legacy adaptive and fixed-rate arms, and logged its independent schedule KL.
 
-## EXTERNAL_CONTROLLER_API
+## External controller API
 
 **Current:** the local mc_rtc binding provides generic datastore accessor calls.
 This repository implements recovery-gated walking-reference velocity plus
@@ -208,7 +208,7 @@ versioned residual interface.
 - 2026-08-24 — documented the versioned recovery, residual, reference, and
   compatibility contracts, including fail-closed behavior and sequence pairing.
 
-## EXPERIMENT_PROGRAM
+## Experiment program
 
 **Current:** Run all training in tmux and obtain task identifiers from
 `uv run list-envs`. Screens use seed `42`, `128` environments, `30` workers,

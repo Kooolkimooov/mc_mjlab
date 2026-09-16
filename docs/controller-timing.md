@@ -92,9 +92,12 @@ inside the existing budget regardless.
 **Re-measure if:** the robot, the controller, or the QP formulation changes, or
 controllers per worker rises far above 16.
 
-## probe_step_duration
+## Retired: the probe_step_duration screen
 
-**Current:** `scripts/probe_step_duration.py` runs all cohorts concurrently from
+**Retired:** 2026-09-16 — `scripts/probe_step_duration.py` was deleted with the
+gated datastore commands it exercised. The screen below is kept for its numbers.
+
+**Was:** `scripts/probe_step_duration.py` runs all cohorts concurrently from
 identical reset states and encoder bias, applies one fixed finite impulse, and
 reports two-second command-relative DCM error, hazards, worker failures, applied
 timing, and restoration error. It probes the generic scalar channel without

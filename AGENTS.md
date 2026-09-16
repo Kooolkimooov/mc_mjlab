@@ -66,21 +66,22 @@ uv run python scripts/compare_to_baseline.py --checkpoint <model.pt>
 uv run python scripts/probe_residual_authority.py --level 1.0
 # The DCM objective's own gate: standing must not outscore walking (~1 min/regime).
 uv run python scripts/validate_dcm_objective.py
-uv run python scripts/verify_improvement_contracts.py
 # Regenerate docs/architecture/ from the source; --check fails on drift.
 uv run python scripts/generate_architecture_docs.py
 uv run ruff format && uv run ruff check --fix    # format + lint
-uv run ty check                                  # type check (110 pre-existing
+uv run ty check                                  # type check (115 pre-existing
                                                  # diagnostics: unresolvable
                                                  # mc_rtc bindings + mujoco stubs)
 uv run pytest                                    # tests/: bindings + action contracts
 cd build && ctest                                # C++ tests, worker recovery, and pytest
                                                  # (--target check-native skips pytest)
 python3 scripts/check_prose.py src scripts tests # prose budget + docs/ links
+python3 scripts/check_prose.py --strict src scripts tests  # ... as pre-commit runs it
 ```
 
-The deterministic improvement-contract suite does not replace a live controller
-check; the demo is the simulation verification. A healthy run holds a steady
+`pytest` carries the improvement contracts; they moved out of a standalone
+script into `tests/`, grouped by subject, so they are run rather than merely
+runnable. They still do not replace a live controller check; the demo is the simulation verification. A healthy run holds a steady
 root height (HRP5P z≈0.79, JVRC1 z≈0.83, RHPS1 z≈0.84) — a dropping z means the
 robot is falling.
 
@@ -126,7 +127,7 @@ PUSH_VELOCITY = 0.4
 
 The link is a convenience, not the mechanism — grep by identifier is. So **skip
 the link where the docs heading is already the function's own name** (`grep`
-finds `zmp_tracking` either way); spend the line only where the connection is
+finds `dcm_stability` either way); spend the line only where the connection is
 not guessable.
 
 If a file cannot meet 10%, it is too big or doing too many jobs — split it
@@ -217,7 +218,22 @@ From mjlab down to mc_rtc:
   velocity targets, residual on position); and
   `mc_rtc_residual_joint_torque_actions.py` →
   `McRtcResidualJointTorqueAction(Cfg)` (adds channel `tau` → effort targets,
-  residual on torque).
+  residual on torque). Three more modules extend that base rather than widening
+  it: `walking_reference_action.py` feeds `ismpc_walking::set_ref_vel` through
+  the generic extension hooks (`AbsoluteWalkingReferenceMixin` is the surviving
+  drive mode, a command-manager target adding no action dimensions; the
+  recovery-gated delta variant is retired, docs/walking-reference.md);
+  `residual_feedback_action.py` puts the residual on the controller's own
+  feedback rather than its output; and `residual_mpc_joint_torque_action.py`
+  combines the torque action with the absolute walking reference.
+- `residuals/` — the residual machinery the action terms compose, one concern
+  per module: `safety` (feasibility projection against the `RobotModule`'s
+  bounds), `recovery_authority` (the calibrated detector and its gate),
+  `mpc_math` and `printer`. It depends on `bridge/`, never on `mdp/` or `tasks/`.
+- `mc_mjlab/bridge/sensors.py` — the low-level MuJoCo sensor lookups
+  (`wrench_sensor`) that both `mdp/sensors.py` and `residuals/recovery_authority.py`
+  need. It imports neither actions nor MDP terms, which is the whole reason it
+  is its own module rather than a helper on either caller.
 - `mc_mjlab/bridge/sim_controller_bridge.py` — simulation-side reference-order scatter/gather,
   biased encoders, measured effort, local root coordinates, wxyz-to-xyzw
   conversion and named sensors. Use native layout offset methods throughout.
@@ -253,10 +269,12 @@ From mjlab down to mc_rtc:
   sub-*packages* are walked, so a task added as a bare module never registers;
   and `register_mjlab_task` takes built cfgs, so `import mjlab` now builds this
   repo's env cfgs — without a sourced mc_rtc workspace mjlab's loader reports
-  that as a `[WARN]` plus traceback rather than failing. Only ten supported ids
-  register by default (six residual-balance, two zero-residual, one each for
-  residual_mpc and residual_feedback); `MC_MJLAB_REGISTER_ARCHIVED_TASKS=1`
-  restores ten historical residual ablations for old-checkpoint compatibility.
+  that as a `[WARN]` plus traceback rather than failing. Ten ids register, and
+  they are all of them (six residual-balance, two zero-residual, one each for
+  residual_mpc and residual_feedback): the ten archived ablations and their
+  `MC_MJLAB_REGISTER_ARCHIVED_TASKS` switch are gone. Reproducing an archived
+  experiment means checking out the revision before that cleanup; every
+  *supported* checkpoint still loads.
 - `rl/` — what every task shares: the zero-init actor, the squashed Gaussian,
   `RolloutAdaptivePPO`, and `runner.py`'s `McRtcResidualOnPolicyRunner`, which
   snapshots external base controller inputs into the run directory
@@ -271,6 +289,18 @@ From mjlab down to mc_rtc:
   training budget and the watchdog, the MPC one an action-semantics gate.
   Position and torque registrations use distinct full task ids as experiment
   names, so automatic resume cannot cross control modes.
+- `scripts/` — the measurement and maintenance tools, and **not** part of the
+  wheel: `[tool.scikit-build.wheel] packages` ships `src/mc_mjlab` only. The
+  analysis machinery those scripts share lives in `scripts/evaluation/`, a
+  package on pytest's `pythonpath` rather than in the library, because its only
+  callers are the scripts and the tests: `rollout` (environment lifecycle,
+  reset-without-history-update, pre-reset episode snapshots), `comparison` and
+  `qualification` (which share that plumbing but keep their own sampling,
+  statistics and episode records — they are different experimental designs, not
+  one design twice), `qualification_strata`, `reward_audit`, `disturbances` and
+  `scenarios`. A retired script goes with its docs section, which keeps its
+  measurements under a `Retired:` heading; see docs/evaluation.md for what each
+  surviving one measures.
 - `mdp/` — the terms every task builds its managers from, split by
   responsibility: `sensors` (the `_ZmpSensors` plumbing and the action-term
   accessors the rest read through), then `observations`, `rewards`, `metrics`,
@@ -369,10 +399,10 @@ Cross-cutting invariants:
   `DataStore.call()` for zero-argument getters and one-argument setters over
   the binding's supported scalar/vector/spatial types. Callback lookup is
   runtime-checked and must be re-resolved after reset like every controller
-  handle. `mdp.zmp_tracking` deliberately keeps the control-centroid plan for
-  checkpoint compatibility: it is the QP-commanded ZMP, while ismpc's reachable
-  `zmp_target` differs by delay compensation before the stabilizer builds its
-  CoM-acceleration target.
+  handle. The `PLANNED_ZMP` column `mdp.metrics.zmp_error` reads is deliberately
+  the control-centroid plan, not ismpc's reachable `zmp_target`: it is the
+  QP-commanded ZMP, and the two differ by delay compensation before the
+  stabilizer builds its CoM-acceleration target. Never return zero there.
 - mc_rtc terminal output is C++ spdlog. Native per-row log flags implement
   `console_output="none"`, `"single"` (environment zero), or `"all"`; play uses
   `"single"`. `controller_timeout_ms` defaults to 60000. Native workers own

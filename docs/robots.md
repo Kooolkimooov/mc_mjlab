@@ -104,8 +104,9 @@ added here, uniformly, keyed on frames every robot already has: the
 floating-base body.
 
 The root angular-momentum sensor is a subtree sensor, which is what makes
-`mj_subtreeVel` run — and therefore what makes `subtree_linvel` available to
-`com_velocity_tracking`.
+`mj_subtreeVel` run — and therefore what makes `subtree_linvel` available to the
+`com_velocity_error` metric (and, until 2026-08-19, to the `com_velocity_tracking`
+reward it replaced).
 
 ## Actuated joint sets
 
@@ -136,3 +137,11 @@ commands a finger away from zero — which is why it can hide.
 
 To leave a joint fully passive on any robot, pass it to `get_actuated_joints`'s
 `non_actuated`; nothing needs it today.
+
+`coupled_fingers` is threaded through six functions in `jvrc1_constants.py` and
+is never passed `False` in this repo. That is **intentional and retained**: the
+two configurations are not interchangeable — the spec and the actuator set must
+pick the same one, and picking differently is the invisible failure described
+above — so the parameter is the only safe way to switch, and deleting it would
+leave `True` hardcoded in six places. A 2026-09-16 scope review proposed
+removing it; it was kept for this reason.

@@ -1,6 +1,6 @@
 # Residual feedback learning
 
-## SCOPE
+## Scope
 
 **Current:** `Mc-Mjlab-Residual-Feedback-...-Joint-Torque` reproduces the
 residual-feedback formulation of
@@ -21,7 +21,7 @@ two tasks are only comparable while they share them.
 - 2026-09-01 — added after the ResidualMPC residual was measured spending more
   torque for no tracking gain, the signature Ranjbar describes.
 
-## WHY_FEEDBACK
+## Why a feedback residual
 
 **Current:** a residual added to a controller's *output* fights that
 controller's own feedback loop. Ranjbar states it directly: the residual "causes
@@ -34,7 +34,7 @@ injected torque is observed and opposed. The measurements match: across every
 ResidualMPC comparison the residual spent *more* torque
 (`+5.2%`, p `0.010` on `ent001`) while gaining nothing on the objective, and
 under domain randomization it was significantly worse than the bare prior
-(`-4.2%`, p `0.009`). `docs/residual-mpc.md#POWERED_RESULT`
+(`-4.2%`, p `0.009`). `docs/residual-mpc.md#powered-mode-result`
 
 **The formulation.** Where residual *action* learning computes
 `a = f(o) + a_rl`, residual *feedback* learning computes `a = f(o + o_rl)`, and
@@ -49,7 +49,7 @@ the competition possible in the first place.
 **History:**
 - 2026-09-01 — recorded with the ResidualMPC torque evidence that motivated it.
 
-## RESULT
+## Result
 
 **Current:** residual feedback roughly halves survival on this prior. The
 formulation transfers structurally but not behaviourally: what a compliant
@@ -161,7 +161,7 @@ one is not.
 - 2026-09-01 — three runs plus a control; the feedback channel halves survival
   and the curriculum is exonerated.
 
-## WRENCH_RESULT
+## Wrench-modality result
 
 **THE RESULT BELOW DOES NOT REPLICATE.** Five seeds, each scored by the same
 paired protocol on `model_999`, are all significantly *worse* than their own
@@ -208,7 +208,7 @@ own `git/` directory.
 
 **Wrench feedback does not beat the ISMPC.** Nor does any other residual
 configuration tested here — torque residual (`-2.64%`,
-`docs/residual-mpc.md#POWERED_RESULT`), joint-position feedback (halves
+`docs/residual-mpc.md#powered-mode-result`), joint-position feedback (halves
 survival), or this. The seed-to-seed spread is `~6` percentage points, which is
 larger than every effect any single run has claimed all session.
 
@@ -340,6 +340,16 @@ end-effector wrench channel, and for a walking stabilizer it is the loop the
 controller actually closes on. `joint_velocity` is the modality Ranjbar names as
 optional beside joint position.
 
+**All four are a retained API, and two are deliberately off by default.** The
+action dataclass defaults to `("joint_position",)`, the minimum that makes the
+term mean anything; the task builds `("joint_position", "root_pose")`, the pair
+the screens below promoted. The two defaults differ on purpose — the dataclass
+says what the term needs, the task says what was measured. `joint_velocity` and
+`wrench` stay reachable through `feedback_modalities` because the widths, scales
+and isolation below were measured and are worth not re-deriving. A 2026-09-16
+scope review proposed pruning them to what the task uses; they were kept for
+that reason.
+
 **Verified isolated.** Saturating each block in turn, every other modality stays
 at exactly zero: `joint_position` `0.02000`, `joint_velocity` `0.05000`,
 `root_pose` `0.00500`, `wrench` `5.00000`, no leakage in any direction, robot
@@ -403,7 +413,7 @@ false tilt. **mc_rtc does not take base orientation from the root block**: its
 observer derives it from the IMU columns (`_gyro_adr` / `_accel_adr`), so
 offsetting `ro+3:ro+7` writes something nothing reads. Fixing the modality means
 offsetting the IMU instead; as written it is a knob that drives nothing, the
-failure mode `docs/residual-mpc.md#mean_speed` records.
+failure mode `docs/residual-mpc.md#mean-speed` records.
 
 `wrench` at `5 N` against a per-foot load near `260 N` is likewise below the
 noise the stabilizer already tolerates.
@@ -439,7 +449,7 @@ elsewhere; the numbers are kept below only to record what was mismeasured.
 
 These differences are the trajectory's own evolution across four consecutive
 windows, not the channel's authority. The probe was written to catch a knob that
-drives nothing (`docs/residual-mpc.md#mean_speed`) and instead demonstrated a
+drives nothing (`docs/residual-mpc.md#mean-speed`) and instead demonstrated a
 subtler failure: a measurement that moves for a reason other than the one under
 test.
 
@@ -471,7 +481,7 @@ the termination buffers during `curriculum_manager.compute`, which runs before
 `_reset_idx` clears them.
 
 **It invalidates the recorded ResidualMPC comparisons.** Every figure under
-`docs/residual-mpc.md#POWERED_RESULT` and `#tuning_plateau` was trained at fixed
+`docs/residual-mpc.md#powered-mode-result` and `#tuning-plateau` was trained at fixed
 difficulty. Re-baseline before comparing anything against them, at `--num-envs 64`
 with the clustered test — never at 16
 (`docs/evaluation.md#episodes-are-not-independent-samples`).

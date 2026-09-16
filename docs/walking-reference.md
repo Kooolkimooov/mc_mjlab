@@ -1,8 +1,11 @@
 # Walking-reference modulation
 
-## WALKING_REFERENCE_SCALE
+## Retired: WALKING_REFERENCE_SCALE
 
-**Current:** `(0.20, 0.15, 0.30)` bounds the recovery-only `vx`, `vy`, and yaw
+**Retired:** 2026-09-16 — with the gated delta channel the screen below did not
+promote. The measurements are kept verbatim.
+
+**Was:** `(0.20, 0.15, 0.30)` bounds the recovery-only `vx`, `vy`, and yaw
 rate offsets. The command reaches these bounds in at least `0.10 s`, is multiplied
 by the calibrated recovery authority, and becomes exactly zero when authority
 does. The live nominal reference is restored rather than assuming the installed
@@ -39,9 +42,13 @@ or disturbance profile changes.
   controller failure; these are exploration bounds, not promoted hardware
   limits.
 
-## GatedWalkingReferenceDeltaActionCfg
+## Retired: GatedWalkingReferenceDeltaActionCfg
 
-**Current:** the recovery-gated delta channel is its own action term in
+**Retired:** 2026-09-16 — the gated delta mode is gone;
+`AbsoluteWalkingReferenceMixin`, the mode `residual_mpc` and `residual_feedback`
+use, is what survives.
+
+**Was:** the recovery-gated delta channel is its own action term in
 `actions/walking_reference_action.py`, not a pair of optional fields on the
 shared mc_rtc residual action. Its `__post_init__` reads `Enabled` out of the
 configured mc_rtc yaml and refuses to build unless the walking controller named
@@ -93,9 +100,11 @@ the reset path stops zeroing the datastore readouts.
   `(0.1, 0, 0)` when `Walking::WalkCmdVelImpl` enters at about `3.4 s`; before
   the fix it stayed `(0, 0, 0)` for the whole episode.
 
-## walking_reference_velocity_slew_rate
+## Retired: walking_reference_velocity_slew_rate
 
-**Current:** `(2.0, 1.5, 3.0)` per second reaches any action bound in at least
+**Retired:** 2026-09-16 — the slew existed only for the gated delta channel.
+
+**Was:** `(2.0, 1.5, 3.0)` per second reaches any action bound in at least
 `0.10 s`. Slew applies while authority is nonzero; zero authority bypasses the
 ramp to guarantee exact zero executed offset and immediate nominal restoration.
 
@@ -106,9 +115,11 @@ attack changes.
 - 2026-08-25 — added before the final gain map so a policy cannot jump a walking
   reference faster than the recovery gate's own attack.
 
-## probe_walking_reference
+## Retired: the probe_walking_reference screen
 
-**Current:** run all gain cohorts concurrently with identical reset state,
+**Retired:** 2026-09-16 — the script was deleted with the channel it probed.
+
+**Was:** run all gain cohorts concurrently with identical reset state,
 encoder bias, and a fixed sagittal finite impulse. Feedback is the signed
 deployable command-relative DCM error rotated into the robot frame. The joint
 residual remains zero, so the screen isolates the walking-reference channel.

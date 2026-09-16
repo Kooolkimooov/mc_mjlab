@@ -242,17 +242,17 @@ uv run play  Mc-Mjlab-Residual-Balance-Logisticcontroller-Ismpc-Hrp5P-Position \
   --checkpoint-file <path/to/model_*.pt>
 ```
 
-The default mc_mjlab surface is ten tasks. One of them, the achievement-gated
-ankle curriculum, advances only from held-out qualification reports — see
+The mc_mjlab surface is ten tasks, and `uv run list-envs` shows all of them.
+One, the achievement-gated ankle curriculum, advances only from held-out
+qualification reports — see
 [docs/difficulty.md](docs/difficulty.md#achievement_finite_impulse_curriculum)
-for how to drive it. Ten completed ablations are hidden so `import mjlab` does
-not build them. To play an old checkpoint under its original id:
+for how to drive it.
 
-```sh
-MC_MJLAB_REGISTER_ARCHIVED_TASKS=1 uv run list-envs
-MC_MJLAB_REGISTER_ARCHIVED_TASKS=1 uv run play <archived-task-id> \
-  --checkpoint-file <path/to/model_*.pt>
-```
+Ten completed ablations used to register behind an environment variable, for
+replaying their checkpoints under their original ids. They are gone, along with
+the task dials and the gated walking-reference code that existed only for them.
+Reproducing one of those experiments means checking out the revision before that
+cleanup; every supported checkpoint still loads on the ten ids above.
 
 Every residual-balance training run publishes a PID-bound heartbeat under
 `<run>/watchdog/`. For an unattended run, attach the cooperative monitor from a
@@ -283,9 +283,7 @@ uv run python scripts/compare_to_baseline.py --checkpoint <path/to/model_*.pt>
 uv run python scripts/audit_rewards.py --checkpoint <path/to/model_*.pt>
 # Can a constant residual move the centre of pressure at all?
 uv run python scripts/probe_residual_authority.py --level 1.0
-uv run python scripts/probe_walking_reference.py
 uv run python scripts/inspect_controller_datastore.py
-uv run python scripts/probe_step_duration.py
 # Does the DCM objective still prefer standing to walking? (no checkpoint needed)
 uv run python scripts/validate_dcm_objective.py
 ```
@@ -297,12 +295,11 @@ defaults low on both, to leave room for a training job.
 
 ### Environment variables
 
-| Variable                           | Effect                                                                 |
-| ---------------------------------- | ---------------------------------------------------------------------- |
-| `MC_MJLAB_CONTROL`                 | `position` (default) or `torque`, for the demo                         |
-| `MC_MJLAB_PRINT_RESIDUAL`          | Steps between `[residual]` printouts during `play`; `0` silences       |
-| `MC_MJLAB_REGISTER_ARCHIVED_TASKS` | `1` also registers the ten archived ablation ids                       |
-| `MC_MJLAB_PUSH_DEBUG`              | Positive float: scale pushes, cap warm-up at 1 s, print `[push]` lines |
+| Variable                  | Effect                                                                 |
+| ------------------------- | ---------------------------------------------------------------------- |
+| `MC_MJLAB_CONTROL`        | `position` (default) or `torque`, for the demo                         |
+| `MC_MJLAB_PRINT_RESIDUAL` | Steps between `[residual]` printouts during `play`; `0` silences       |
+| `MC_MJLAB_PUSH_DEBUG`     | Positive float: scale pushes, cap warm-up at 1 s, print `[push]` lines |
 
 ### External paths
 

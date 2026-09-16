@@ -1,6 +1,6 @@
 # Critique improvement screens
 
-## CRITIQUE_SCREEN_2026_08_25
+## Critique screen 2026-08-25
 
 **Current:** The fixed-budget matrix completed all 13 arms at seed `42`, `128`
 environments, `30` workers, and `188` PPO iterations. Every arm reached

@@ -333,7 +333,7 @@ Both need a process boundary; no in-process guard reaches them.
   further steps complete in `0.00 s`. Parallel construction still soaks clean at
   6 controllers x 6 threads x 10 host rounds.
 
-## ControllerSlice
+## Retired: ControllerSlice
 
 **Current:** removed together with `SliceJob`; the synchronous host iterates
 its uniquely owned instances directly. There are no abandoned dispatches.
@@ -368,7 +368,7 @@ process supervisor should configure worker logging before host construction.
   banner is only the second of two leaks. Current note:
   [OutputGuard](process-workers.md#outputguard).
 
-## WorkerPool
+## Retired: WorkerPool
 
 **Current:** removed. No host-owned worker threads are created or retained.
 The loader observations below explain why future process workers should execute
@@ -564,7 +564,7 @@ Returns `None` on a binding without the `controller()` accessor. This runs in
 `await_ready()` — a hard startup failure in place of a run that merely goes
 unseeded (and warns).
 
-## VECTOR_OUTPUTS
+## Retired: VECTOR_OUTPUTS
 
 Per-env 3-vectors a host can publish; `IoLayout.output_vectors` names a subset
 and the action term reads them back by the same name. Unlike the per-joint
@@ -606,7 +606,7 @@ error. CoM rather than base because the LIPM relation is written on the
 CoM-to-ZMP offset. `control_com_vel` needs no such correction — the observers
 integrate position, so position is what drifts; velocity is differential.
 
-## ControllerPool
+## Retired: ControllerPool
 
 Controllers live in worker processes because construction (~570 ms, ~70 MB each,
 serial-only) and Cython marshalling are GIL-bound; only the patched binding's
@@ -769,7 +769,7 @@ manager must be serialized even though other Python threads can run.
 **History:** The old bindings referenced removed layout members and a removed
 host constructor, preventing the extension from building.
 
-## DIRECT_JOINTS
+## Retired: DIRECT_JOINTS
 
 **Current:** Python probe tests compare the first 17 HRP5P joints (legs, torso,
 head) directly with encoder inputs. They supply the full reference-order layout;
@@ -780,7 +780,7 @@ fixed and coupled finger outputs are not identity copies of those inputs.
 **History:** Before the supplied-layout API, the probe tests selected these same
 17 joints through the host's actuator-subset mapping.
 
-## build_timeout_ms
+## Retired: build_timeout_ms
 
 **Current:** `max(300 s, 30 s * controllers_per_worker)` — the window
 `ControllersManager`'s constructor waits for a worker's startup `Reply`, which the
