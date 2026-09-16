@@ -15,7 +15,7 @@ from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionCfg
 from mc_mjlab.tasks.locomanip.cart import cart_cfg, cart_floor_contact
 from mc_mjlab.tasks.zero_residual.zero_residual_env_cfg import _make_env_cfg
 
-LOCOMANIP_CONFIG = MC_RTC_YAML_PATH.with_name("mc_rtc_locomanip.yaml")
+LOCOMANIP_CONFIG = MC_RTC_YAML_PATH.with_name("mc_rtc_hrp5_locomanip_patched.yaml")
 
 
 def locomanip_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
