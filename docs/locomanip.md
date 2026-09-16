@@ -330,3 +330,34 @@ script's tolerances move.
 
 **History:** added when a review pointed out that the evaluation spec was scoring
 the controller's own schedule rather than where the cart ended up.
+
+## OBJECT_POSE_NOISE
+
+**Current:** `OBJECT_POSE_NOISE_M` 0.02 m and `OBJECT_YAW_NOISE_RAD` 2 degrees,
+uniform, on the actor's `object_pose`, `object_velocity`,
+`object_position_error` and `object_yaw_error`. The proprioception terms carry
+`residual_balance`'s own levels, which were measured on this robot
+(docs/observations.md): base linear velocity 0.02, angular 0.03, projected
+gravity 0.05, joint position 0.01 with `biased=True` behind an `encoder_bias`
+startup event, joint velocity 0.05. The force sensors carry none -- they are
+already real measurements. The actor group sets `enable_corruption=True`; without
+it every `noise=` on the cfg is inert.
+
+**Why the object terms need any at all:** they are simulator truth. Nothing on
+the robot measures where the cart is; on hardware that pose comes from vision or
+motion capture, with centimetre error and latency, and a policy trained on a
+perfect 50 Hz pose with 0.4 s of history will lean on precision it will not have.
+
+**Not measured.** No tracker has been characterised for this cart; 2 cm and 2
+degrees is a deliberately loose stand-in. Replace it with the real sensor's error
+before claiming anything about transfer.
+
+**The critic keeps the clean copy.** Its terms are the actor's with `noise=None`
+and the encoder bias dropped, so the value function sees the true state while the
+policy pays for the noise.
+
+**Re-measure if:** an actual pose source is chosen, or the robot's own noise
+levels are re-measured.
+
+**History:** added when the actor turned out to be training on clean simulator
+state -- no noise specs and `enable_corruption` false on both groups.

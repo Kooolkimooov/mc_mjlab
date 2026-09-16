@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
 from mjlab.entity import EntityCfg
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
+from mjlab.envs.mdp import dr
 from mjlab.managers.action_manager import ActionTermCfg
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.metrics_manager import MetricsTermCfg
@@ -19,6 +21,7 @@ from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.scene import SceneCfg
 from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.terrains import TerrainEntityCfg
+from mjlab.utils.noise import UniformNoiseCfg as Unoise
 
 from mc_mjlab import mdp
 from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
@@ -86,6 +89,10 @@ CART_NOMINAL_MASS_KG = 10.0
 CART_MASS_RANGE_KG = (1.0, 1000.0)
 
 FALL_LIMIT_ANGLE = math.radians(45.0)
+
+#: Stand-in for a pose tracker, in metres and radians. docs/locomanip.md#object_pose_noise
+OBJECT_POSE_NOISE_M = 0.02
+OBJECT_YAW_NOISE_RAD = math.radians(2.0)
 
 #: What `verify_locomanip.py` accepts as a placed cart. docs/locomanip.md#task_success
 SUCCESS_POSITION_TOLERANCE_M = 0.15
@@ -218,23 +225,47 @@ def _actions(
 
 def _observations() -> dict[str, ObservationGroupCfg]:
   """Proprioception and object state for both, plus what only the critic may see."""
+  # Noise levels are residual_balance's, measured on this robot. The object terms
+  # are the exception: they are simulator truth standing in for a pose tracker.
+  # docs/observations.md docs/locomanip.md#object_pose_noise
   terms = {
-    "base_lin_vel": ObservationTermCfg(func=envs_mdp.base_lin_vel),
-    "base_ang_vel": ObservationTermCfg(func=envs_mdp.base_ang_vel),
-    "projected_gravity": ObservationTermCfg(func=envs_mdp.projected_gravity),
-    "joint_pos": ObservationTermCfg(func=envs_mdp.joint_pos_rel),
-    "joint_vel": ObservationTermCfg(func=envs_mdp.joint_vel_rel),
+    "base_lin_vel": ObservationTermCfg(
+      func=envs_mdp.base_lin_vel, noise=Unoise(n_min=-0.02, n_max=0.02)
+    ),
+    "base_ang_vel": ObservationTermCfg(
+      func=envs_mdp.base_ang_vel, noise=Unoise(n_min=-0.03, n_max=0.03)
+    ),
+    "projected_gravity": ObservationTermCfg(
+      func=envs_mdp.projected_gravity, noise=Unoise(n_min=-0.05, n_max=0.05)
+    ),
+    # `biased=True` is what makes the `encoder_bias` startup event take effect.
+    "joint_pos": ObservationTermCfg(
+      func=envs_mdp.joint_pos_rel,
+      noise=Unoise(n_min=-0.01, n_max=0.01),
+      params={"biased": True},
+    ),
+    "joint_vel": ObservationTermCfg(
+      func=envs_mdp.joint_vel_rel, noise=Unoise(n_min=-0.05, n_max=0.05)
+    ),
     "actions": ObservationTermCfg(func=mdp.observations.executed_action),
-    "object_pose": ObservationTermCfg(func=locomanip_mdp.observations.object_pose),
+    "object_pose": ObservationTermCfg(
+      func=locomanip_mdp.observations.object_pose,
+      noise=Unoise(n_min=-OBJECT_POSE_NOISE_M, n_max=OBJECT_POSE_NOISE_M),
+    ),
     "object_velocity": ObservationTermCfg(
-      func=locomanip_mdp.observations.object_velocity, history_length=OBJECT_HISTORY
+      func=locomanip_mdp.observations.object_velocity,
+      noise=Unoise(n_min=-OBJECT_POSE_NOISE_M, n_max=OBJECT_POSE_NOISE_M),
+      history_length=OBJECT_HISTORY,
     ),
     "object_position_error": ObservationTermCfg(
       func=locomanip_mdp.observations.object_position_error,
+      noise=Unoise(n_min=-OBJECT_POSE_NOISE_M, n_max=OBJECT_POSE_NOISE_M),
       history_length=OBJECT_HISTORY,
     ),
     "object_yaw_error": ObservationTermCfg(
-      func=locomanip_mdp.observations.object_yaw_error, history_length=OBJECT_HISTORY
+      func=locomanip_mdp.observations.object_yaw_error,
+      noise=Unoise(n_min=-OBJECT_YAW_NOISE_RAD, n_max=OBJECT_YAW_NOISE_RAD),
+      history_length=OBJECT_HISTORY,
     ),
     "manipulation_phase": ObservationTermCfg(
       func=locomanip_mdp.observations.manipulation_phase
@@ -250,8 +281,16 @@ def _observations() -> dict[str, ObservationGroupCfg]:
     },
   }
 
+  # Copy the terms rather than rebuilding them from `func`/`params`: a rebuild
+  # silently drops every other field, history included.
+  critic_terms = {
+    name: replace(term, noise=None, params=dict(term.params))
+    for name, term in terms.items()
+  }
+  critic_terms["joint_pos"] = replace(critic_terms["joint_pos"], params={})
+
   # Privileged: exogenous, and the single largest source of return variance here.
-  critic_terms = dict(terms) | {
+  critic_terms |= {
     "object_mass": ObservationTermCfg(func=locomanip_mdp.observations.object_mass),
     "hand_contact_force": ObservationTermCfg(
       func=locomanip_mdp.observations.hand_contact_force,
@@ -259,8 +298,12 @@ def _observations() -> dict[str, ObservationGroupCfg]:
     ),
   }
   return {
-    "actor": ObservationGroupCfg(terms=terms, concatenate_terms=True),
-    "critic": ObservationGroupCfg(terms=critic_terms, concatenate_terms=True),
+    "actor": ObservationGroupCfg(
+      terms=terms, concatenate_terms=True, enable_corruption=True
+    ),
+    "critic": ObservationGroupCfg(
+      terms=critic_terms, concatenate_terms=True, enable_corruption=False
+    ),
   }
 
 
@@ -322,7 +365,12 @@ def _events(
   events = {
     "reset_scene_to_default": EventTermCfg(
       func=envs_mdp.reset_scene_to_default, mode="reset"
-    )
+    ),
+    "encoder_bias": EventTermCfg(
+      func=dr.encoder_bias,
+      mode="startup",
+      params={"asset_cfg": SceneEntityCfg("robot"), "bias_range": (-0.01, 0.01)},
+    ),
   }
   if cart_pose_range is not None:
     events["reset_cart"] = EventTermCfg(

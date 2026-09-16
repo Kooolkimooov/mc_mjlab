@@ -135,6 +135,25 @@ def test_the_payload_evidence_carries_history() -> None:
   assert actor["manipulation_phase"].history_length == 0
 
 
+def test_only_the_actor_pays_for_noise() -> None:
+  """Verify the policy trains on corrupted observations and the critic does not."""
+  observations = make_locomanip_residual_env_cfg().observations
+  actor, critic = observations["actor"], observations["critic"]
+  assert actor.enable_corruption
+  assert not critic.enable_corruption
+  noisy = {name for name, term in actor.terms.items() if term.noise is not None}
+  assert {"base_lin_vel", "joint_pos", "object_pose", "object_yaw_error"} <= noisy
+  assert all(term.noise is None for term in critic.terms.values())
+
+
+def test_the_encoder_bias_the_actor_suffers_is_applied() -> None:
+  """Verify the biased joint reading has the startup event that gives it a bias."""
+  cfg = make_locomanip_residual_env_cfg()
+  assert cfg.events["encoder_bias"].mode == "startup"
+  assert cfg.observations["actor"].terms["joint_pos"].params == {"biased": True}
+  assert cfg.observations["critic"].terms["joint_pos"].params == {}
+
+
 def test_worker_failure_truncates_instead_of_penalising() -> None:
   """Verify infrastructure noise bootstraps rather than paying the fall penalty."""
   terminations = make_locomanip_residual_env_cfg().terminations
