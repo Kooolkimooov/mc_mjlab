@@ -21,9 +21,3 @@ from mc_mjlab.actions.residual_mpc_joint_torque_action import (
 from mc_mjlab.actions.walking_reference_action import (
   AbsoluteWalkingReferenceActionCfg as AbsoluteWalkingReferenceActionCfg,
 )
-from mc_mjlab.actions.walking_reference_action import (
-  GatedWalkingReferenceDeltaAction as GatedWalkingReferenceDeltaAction,
-)
-from mc_mjlab.actions.walking_reference_action import (
-  GatedWalkingReferenceDeltaActionCfg as GatedWalkingReferenceDeltaActionCfg,
-)

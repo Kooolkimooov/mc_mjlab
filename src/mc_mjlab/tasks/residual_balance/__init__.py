@@ -1,6 +1,7 @@
 """Supported residual-balance task registrations."""
 
-import os
+from __future__ import annotations
+
 from pathlib import Path
 
 from mjlab.tasks.registry import register_mjlab_task
@@ -78,8 +79,3 @@ register_mjlab_task(
   rl_cfg=residual_balance_ppo_cfg(experiment_name=TORQUE_TASK_ID),
   runner_cls=ResidualBalanceOnPolicyRunner,
 )
-
-if os.environ.get("MC_MJLAB_REGISTER_ARCHIVED_TASKS") == "1":
-  from mc_mjlab.tasks.residual_balance.archived_tasks import register_archived_tasks
-
-  register_archived_tasks()

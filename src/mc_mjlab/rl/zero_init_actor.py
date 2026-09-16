@@ -6,19 +6,10 @@ from typing import Any
 
 import torch
 from rsl_rl.models.mlp_model import MLPModel
-from rsl_rl.models.rnn_model import RNNModel
 
 
 class ZeroInitMLPModel(MLPModel):
   """MLPModel with the final layer's mean rows zeroed after construction."""
-
-  def __init__(self, *args: Any, **kwargs: Any) -> None:
-    super().__init__(*args, **kwargs)
-    zero_mean_head(self)
-
-
-class ZeroInitRNNModel(RNNModel):
-  """RNNModel with the final layer's mean rows zeroed after construction."""
 
   def __init__(self, *args: Any, **kwargs: Any) -> None:
     super().__init__(*args, **kwargs)
