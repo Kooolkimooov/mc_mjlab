@@ -362,3 +362,34 @@ levels are re-measured.
 
 **History:** added when the actor turned out to be training on clean simulator
 state -- no noise specs and `enable_corruption` false on both groups.
+
+## NUM_ENVS
+
+**Current:** `256` environments over `NUM_WORKERS` 64 mc_rtc worker processes,
+measured on this machine 2026-09-16 over a 30-iteration run:
+
+| | 8 envs | 256 envs |
+| --- | --- | --- |
+| throughput | 240-330 steps/s | 850-1650, mean ~1250 |
+| iteration time | ~1.6 s | 11-19 s |
+| resident memory | -- | 36 of 59 GB, flat, freed at exit |
+| worker failures | 0 | 0 |
+| controller (QP) failures | 0 | 0, bar one iteration at 0.118 |
+
+That is 85 MB per environment and about five times the throughput for
+thirty-two times the environments: the controllers are the bottleneck, not the
+GPU. 23 GB stayed free, which is *not* enough to run `compare_to_baseline`
+beside a training run -- it wants its own controller pool.
+
+At this rate 2000 iterations is about 7 hours (32.8M steps, ~42 episodes per
+environment).
+
+**The iteration time does not track the fall rate.** 0.40 of ended episodes
+falling took 13.3 s, 1.00 took 14.1 s, 0.55 took 19.1 s, so the 11-19 s spread is
+something else; it has not been chased down.
+
+**Re-measure if:** the machine, the worker count, the cart asset or the
+controller build changes.
+
+**History:** raised from 32 to 256 before the first capacity run; the run
+confirmed it fits.

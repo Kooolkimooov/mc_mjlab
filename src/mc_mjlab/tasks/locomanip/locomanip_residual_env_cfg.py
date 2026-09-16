@@ -48,7 +48,7 @@ DECIMATION = 20
 FRAMESKIP = 2
 
 # One Locomanip controller per environment, built serially, plus its own cart:
-# memory-bound, not GPU-bound. Raise it once you have measured the machine.
+# memory-bound, not GPU-bound. 85 MB each. docs/locomanip.md#num_envs
 NUM_ENVS = 256
 NUM_WORKERS = 64
 
