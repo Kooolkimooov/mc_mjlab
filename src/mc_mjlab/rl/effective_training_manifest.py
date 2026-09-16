@@ -85,6 +85,40 @@ _RENAMED_MODULES = {
   "utils.task_naming": "mc_mjlab.tasks.naming",
 }
 
+_RENAMED_CALLABLES = {
+  "mc_mjlab.tasks.residual_mpc.mdp:root_position": "mc_mjlab.tasks.residual_mpc.mdp.observations:root_position",
+  "mc_mjlab.tasks.residual_mpc.mdp:root_quaternion": "mc_mjlab.tasks.residual_mpc.mdp.observations:root_quaternion",
+  "mc_mjlab.tasks.residual_mpc.mdp:joint_position": "mc_mjlab.tasks.residual_mpc.mdp.observations:joint_position",
+  "mc_mjlab.tasks.residual_mpc.mdp:joint_velocity": "mc_mjlab.tasks.residual_mpc.mdp.observations:joint_velocity",
+  "mc_mjlab.tasks.residual_mpc.mdp:body_linear_velocity": "mc_mjlab.tasks.residual_mpc.mdp.observations:body_linear_velocity",
+  "mc_mjlab.tasks.residual_mpc.mdp:body_angular_velocity": "mc_mjlab.tasks.residual_mpc.mdp.observations:body_angular_velocity",
+  "mc_mjlab.tasks.residual_mpc.mdp:controller_contact_phases": "mc_mjlab.tasks.residual_mpc.mdp.observations:controller_contact_phases",
+  "mc_mjlab.tasks.residual_mpc.mdp:controller_qp_objective": "mc_mjlab.tasks.residual_mpc.mdp.observations:controller_qp_objective",
+  "mc_mjlab.tasks.residual_mpc.mdp:linear_velocity_tracking": "mc_mjlab.tasks.residual_mpc.mdp.rewards:linear_velocity_tracking",
+  "mc_mjlab.tasks.residual_mpc.mdp:angular_velocity_tracking": "mc_mjlab.tasks.residual_mpc.mdp.rewards:angular_velocity_tracking",
+  "mc_mjlab.tasks.residual_mpc.mdp:first_action_rate": "mc_mjlab.tasks.residual_mpc.mdp.rewards:first_action_rate",
+  "mc_mjlab.tasks.residual_mpc.mdp:second_action_rate": "mc_mjlab.tasks.residual_mpc.mdp.rewards:second_action_rate",
+  "mc_mjlab.tasks.residual_mpc.mdp:torque_l2": "mc_mjlab.tasks.residual_mpc.mdp.rewards:torque_l2",
+  "mc_mjlab.tasks.residual_mpc.mdp:orientation_reward": "mc_mjlab.tasks.residual_mpc.mdp.rewards:orientation_reward",
+  "mc_mjlab.tasks.residual_mpc.mdp:height_reward": "mc_mjlab.tasks.residual_mpc.mdp.rewards:height_reward",
+  "mc_mjlab.tasks.residual_mpc.mdp:joint_regularization": "mc_mjlab.tasks.residual_mpc.mdp.rewards:joint_regularization",
+  "mc_mjlab.tasks.residual_mpc.mdp:self_collision": "mc_mjlab.tasks.residual_mpc.mdp.rewards:self_collision",
+  "mc_mjlab.tasks.residual_mpc.mdp:excessive_base_speed": "mc_mjlab.tasks.residual_mpc.mdp.terminations:excessive_base_speed",
+  "mc_mjlab.tasks.residual_mpc.mdp:excessive_angular_speed": "mc_mjlab.tasks.residual_mpc.mdp.terminations:excessive_angular_speed",
+  "mc_mjlab.tasks.residual_mpc.mdp:height_outside": "mc_mjlab.tasks.residual_mpc.mdp.terminations:height_outside",
+  "mc_mjlab.tasks.residual_mpc.mdp:refresh_action_scaling": "mc_mjlab.tasks.residual_mpc.mdp.disturbances:refresh_action_scaling",
+  "mc_mjlab.tasks.residual_mpc.mdp:initial_velocity_kick": "mc_mjlab.tasks.residual_mpc.mdp.disturbances:initial_velocity_kick",
+  "mc_mjlab.tasks.residual_mpc.mdp:survival_kick_curriculum": "mc_mjlab.tasks.residual_mpc.mdp.curricula:survival_kick_curriculum",
+  "mc_mjlab.tasks.residual_mpc.mdp:forward_speed": "mc_mjlab.tasks.residual_mpc.mdp.metrics:forward_speed",
+  "mc_mjlab.tasks.residual_mpc.mdp:commanded_speed": "mc_mjlab.tasks.residual_mpc.mdp.metrics:commanded_speed",
+  "mc_mjlab.tasks.residual_mpc.mdp:maximum_effort_ratio": "mc_mjlab.tasks.residual_mpc.mdp.metrics:active_effort_ratio",
+  "mc_mjlab.mdp.metrics:max_effort_ratio": "mc_mjlab.mdp.metrics:nominal_effort_ratio",
+  "mc_mjlab.tasks.residual_mpc.mdp:controller_failed": "mc_mjlab.mdp.terminations:controller_failed",
+  "mc_mjlab.tasks.residual_mpc.mdp:controller_worker_failed": "mc_mjlab.mdp.terminations:controller_worker_failed",
+  "mc_mjlab.tasks.residual_mpc.mdp:projection_fraction": "mc_mjlab.mdp.metrics:projection_fraction",
+  "mc_mjlab.tasks.mdp:max_effort_ratio": "mc_mjlab.mdp.metrics:nominal_effort_ratio",
+}
+
 #: Split across `mc_mjlab.mdp`, so its terms are looked up, not mapped by hand.
 _SPLIT_MDP_MODULE = "mc_mjlab.tasks.mdp"
 _MDP_SUBMODULES = (
@@ -500,11 +534,14 @@ def rename_legacy_modules(value: Any) -> Any:
 
 def _renamed_qualified_name(name: str) -> str:
   """Map one ``module:qualname`` (or bare module) onto its current spelling."""
+  if name in _RENAMED_CALLABLES:
+    return _RENAMED_CALLABLES[name]
   module, separator, attribute = name.partition(":")
   if module == _SPLIT_MDP_MODULE and attribute:
     return _split_mdp_name(attribute) or name
   renamed = _RENAMED_MODULES.get(module)
-  return f"{renamed}{separator}{attribute}" if renamed else name
+  qualified = f"{renamed}{separator}{attribute}" if renamed else name
+  return _RENAMED_CALLABLES.get(qualified, qualified)
 
 
 def _split_mdp_name(attribute: str) -> str | None:
@@ -581,6 +618,33 @@ def _drop_paths(value: Any, paths: set[str], prefix: str = "") -> Any:
   }
 
 
+def _normalize_impulse_defaults(value: Any) -> Any:
+  """Drop only legacy, unused defaults from the three surviving impulse terms."""
+  if isinstance(value, list):
+    return [_normalize_impulse_defaults(item) for item in value]
+  if not isinstance(value, dict):
+    return value
+  result = {key: _normalize_impulse_defaults(item) for key, item in value.items()}
+  name = result.get("callable", {}).get("name")
+  if name not in {
+    "mc_mjlab.mdp.disturbances:finite_impulse_curriculum",
+    "mc_mjlab.mdp.disturbances:stratified_finite_impulse_curriculum",
+    "mc_mjlab.mdp.disturbances:achievement_finite_impulse_curriculum",
+  }:
+    return result
+  parameters = result.get("effective_parameters", {})
+  for key, default in {
+    "asset_cfg": None,
+    "rehearsal_weights": None,
+    "initial_stage": 0,
+    "bands": None,
+    "band_weights": None,
+  }.items():
+    if parameters.get(key) == {"source": "default", "value": default}:
+      parameters.pop(key)
+  return result
+
+
 def validate_effective_training_manifest(
   saved: dict, active: dict, *, full_resume: bool
 ) -> None:
@@ -593,8 +657,12 @@ def validate_effective_training_manifest(
   payload_key = f"{contract}_contract" if full_resume else contract
   # Re-digest both sides: a checkpoint written before source hashes became
   # audit-only still carries them. docs/evaluation.md#source_drift
-  saved_payload = _strip_source_hashes(saved.get(payload_key))
-  active_payload = _strip_source_hashes(active.get(payload_key))
+  saved_payload = _normalize_impulse_defaults(
+    _strip_source_hashes(saved.get(payload_key))
+  )
+  active_payload = _normalize_impulse_defaults(
+    _strip_source_hashes(active.get(payload_key))
+  )
 
   # A field added after a checkpoint was written cannot appear in its manifest,
   # so an addition alone must not strand it. Removals and changed values still
