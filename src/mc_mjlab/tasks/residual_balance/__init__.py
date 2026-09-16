@@ -6,7 +6,9 @@ from pathlib import Path
 
 from mjlab.tasks.registry import register_mjlab_task
 
+from mc_mjlab.tasks.evaluation import register_evaluation
 from mc_mjlab.tasks.naming import get_task_name
+from mc_mjlab.tasks.residual_balance.evaluation import RESIDUAL_BALANCE_EVALUATION
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   MC_RTC_YAML,
   residual_balance_position_achievement_curriculum_env_cfg,
@@ -84,3 +86,13 @@ register_mjlab_task(
   rl_cfg=residual_balance_ppo_cfg(experiment_name=TORQUE_TASK_ID),
   runner_cls=ResidualBalanceOnPolicyRunner,
 )
+
+for _task_id in (
+  POSITION_TASK_ID,
+  ANKLE_TASK_ID,
+  ACHIEVEMENT_TASK_ID,
+  MATCHED_TASK_ID,
+  PITCH_TASK_ID,
+  TORQUE_TASK_ID,
+):
+  register_evaluation(_task_id, RESIDUAL_BALANCE_EVALUATION)

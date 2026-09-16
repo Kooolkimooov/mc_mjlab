@@ -8,6 +8,8 @@ from pathlib import Path
 from mjlab.tasks.registry import register_mjlab_task
 
 from mc_mjlab.rl.runner import McRtcResidualOnPolicyRunner
+from mc_mjlab.tasks.evaluation import register_evaluation
+from mc_mjlab.tasks.locomanip.evaluation import LOCOMANIP_EVALUATION
 from mc_mjlab.tasks.locomanip.locomanip_env_cfg import (
   MC_RTC_YAML,
   locomanip_env_cfg,
@@ -54,3 +56,5 @@ register_mjlab_task(
   rl_cfg=locomanip_ppo_cfg(experiment_name=RESIDUAL_TASK_ID),
   runner_cls=McRtcResidualOnPolicyRunner,
 )
+
+register_evaluation(RESIDUAL_TASK_ID, LOCOMANIP_EVALUATION)

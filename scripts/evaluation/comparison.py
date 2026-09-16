@@ -7,6 +7,8 @@ import statistics
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
+from mc_mjlab.tasks.evaluation import stratum_of
+
 
 def describe(values: Sequence[float]) -> dict[str, float]:
   """Mean/spread/quartiles for one per-episode quantity."""
@@ -74,6 +76,8 @@ class ComparisonEpisode:
   length: int
   terms: dict[str, int]
   rewards: dict[str, float]
+  #: Episode metric reductions, for the terms the task's evaluation asked for.
+  metrics: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -99,3 +103,16 @@ class Arm:
 
 def survival(eps: Sequence[ComparisonEpisode]) -> tuple[int, int]:
   return sum(e.terms.get("time_out", 0) for e in eps), len(eps)
+
+
+def by_stratum(
+  episodes: Sequence[ComparisonEpisode], metric: str, strata: tuple[float, ...]
+) -> dict[int, list[ComparisonEpisode]]:
+  """Bucket episodes by one of their metrics, keyed by stratum index."""
+  buckets: dict[int, list[ComparisonEpisode]] = {}
+  for episode in episodes:
+    value = episode.metrics.get(metric)
+    if value is None:
+      continue
+    buckets.setdefault(stratum_of(value, strata), []).append(episode)
+  return buckets

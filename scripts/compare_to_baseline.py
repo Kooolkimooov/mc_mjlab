@@ -7,7 +7,7 @@ import csv
 import sys
 import time
 from collections.abc import Sequence
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -15,17 +15,30 @@ import torch
 from evaluation.comparison import (
   Arm,
   ComparisonEpisode,
+  by_stratum,
   describe,
   survival,
   two_proportion_p,
   welch_p,
   wilson,
 )
-from evaluation.rollout import episode_snapshot, managed_env, reset_done
+from evaluation.rollout import (
+  episode_snapshot,
+  managed_env,
+  metric_snapshot,
+  reset_done,
+)
 from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 
+from mc_mjlab.tasks.evaluation import (
+  EMPTY,
+  TaskEvaluation,
+  evaluation_for,
+  stratum_labels,
+)
+from mc_mjlab.tasks.residual_balance.evaluation import RESIDUAL_BALANCE_EVALUATION
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   AUTHORITY_SETS,
   make_residual_balance_env_cfg,
@@ -88,6 +101,7 @@ def _run_both(
   minutes: float,
   policy_ids: Sequence[int],
   skip_steps: int = 0,
+  metric_names: Sequence[str] = (),
 ) -> tuple[Arm, Arm]:
   """Step both arms at once, split by env index -- docs/evaluation.md#both-arms-at-once."""
   policy_set = set(policy_ids)
@@ -136,6 +150,8 @@ def _run_both(
 
     snapshot = episode_snapshot(env, done)
     sums, lengths, flags = snapshot.rewards, snapshot.lengths, snapshot.terminations
+    # Read before `reset_done` below: reset clears the metric buffers too.
+    metrics = metric_snapshot(env, done) if metric_names else {}
 
     for i, env_id in enumerate(done.tolist()):
       length = int(lengths[i]) - skip_steps
@@ -153,6 +169,7 @@ def _run_both(
           rewards={
             n: float((sums[n][i] - skip_sums[n][env_id]).item()) for n in reward_terms
           },
+          metrics={n: float(metrics[n][i]) for n in metric_names},
         )
       )
     for n in reward_terms:
@@ -167,6 +184,104 @@ def _run_both(
   return base, pol
 
 
+def _resolve_evaluation(
+  task_id: str | None, env: ManagerBasedRlEnv
+) -> tuple[TaskEvaluation, list[str]]:
+  """The task's declaration, narrowed to the metrics this environment provides."""
+  evaluation = evaluation_for(task_id) if task_id else RESIDUAL_BALANCE_EVALUATION
+  available = set(env.metrics_manager.active_terms)
+  metrics = [name for name in evaluation.metrics if name in available]
+  missing = [name for name in evaluation.metrics if name not in available]
+  if missing:
+    print(f"[compare] task metrics this env does not provide: {', '.join(missing)}")
+  narrowed = replace(
+    evaluation,
+    metrics=tuple(metrics),
+    success=evaluation.success if evaluation.success in metrics else None,
+    stratify=evaluation.stratify if evaluation.stratify in metrics else None,
+    strata=evaluation.strata if evaluation.stratify in metrics else (),
+  )
+  if metrics:
+    print(f"[compare] task metrics: {', '.join(metrics)}")
+  return narrowed, metrics
+
+
+def _report_task(
+  b_eps: Sequence[ComparisonEpisode],
+  p_eps: Sequence[ComparisonEpisode],
+  evaluation: TaskEvaluation,
+  metric_names: Sequence[str],
+) -> None:
+  """The half of the report the task defines: its metrics, verdict and strata."""
+  if not metric_names:
+    return
+
+  print("\n  task metrics per episode (the task's own declaration)")
+  print(f"    {'metric':<24} {'baseline':>10} {'policy':>10} {'delta':>10} {'p':>10}")
+  print("    " + "-" * 68)
+  for name in metric_names:
+    b = describe([e.metrics[name] for e in b_eps])
+    p = describe([e.metrics[name] for e in p_eps])
+    print(
+      f"    {name:<24} {b['mean']:10.4f} {p['mean']:10.4f} "
+      f"{p['mean'] - b['mean']:+10.4f} {welch_p(b, p):10.2e}"
+    )
+
+  success = evaluation.success
+  if success is not None:
+    bk = sum(round(e.metrics[success]) for e in b_eps)
+    pk = sum(round(e.metrics[success]) for e in p_eps)
+    bl, bh = wilson(bk, len(b_eps))
+    pl, ph = wilson(pk, len(p_eps))
+    print(f"\n  {success} rate")
+    print(
+      f"    {'baseline':<10} {bk / len(b_eps):7.1%}  [{bl:5.1%},{bh:5.1%}]  n={len(b_eps)}"
+    )
+    print(
+      f"    {'policy':<10} {pk / len(p_eps):7.1%}  [{pl:5.1%},{ph:5.1%}]  n={len(p_eps)}"
+    )
+    print(
+      f"    {'delta':<10} {pk / len(p_eps) - bk / len(b_eps):+7.1%}"
+      f"   p = {two_proportion_p(pk, len(p_eps), bk, len(b_eps)):.2e}"
+    )
+
+  if evaluation.stratify is None:
+    return
+
+  key = evaluation.stratify
+  labels = stratum_labels(evaluation.strata)
+  b_buckets = by_stratum(b_eps, key, evaluation.strata)
+  p_buckets = by_stratum(p_eps, key, evaluation.strata)
+  headline = success or metric_names[0]
+  print(f"\n  {headline} by {key}")
+  print(
+    f"    {'stratum':<14} {'n base':>7} {'n pol':>7} {'baseline':>10} {'policy':>10} {'delta':>10}"
+  )
+  for index, label in enumerate(labels):
+    b_rows = b_buckets.get(index, [])
+    p_rows = p_buckets.get(index, [])
+    if not b_rows and not p_rows:
+      continue
+    b = (
+      describe([e.metrics[headline] for e in b_rows])
+      if b_rows
+      else {"mean": float("nan")}
+    )
+    p = (
+      describe([e.metrics[headline] for e in p_rows])
+      if p_rows
+      else {"mean": float("nan")}
+    )
+    print(
+      f"    {label:<14} {len(b_rows):7d} {len(p_rows):7d} "
+      f"{b['mean']:10.4f} {p['mean']:10.4f} {p['mean'] - b['mean']:+10.4f}"
+    )
+  print(
+    "\n  Strata are the point of this table, not a breakdown: a mean over all of"
+    "\n  them hides which regime the policy actually changed."
+  )
+
+
 def _report(
   base: Arm,
   pol: Arm,
@@ -174,6 +289,8 @@ def _report(
   cfg: ManagerBasedRlEnvCfg,
   term_names: Sequence[str],
   reward_terms: Sequence[str],
+  evaluation: TaskEvaluation = EMPTY,
+  metric_names: Sequence[str] = (),
 ) -> None:
   b_eps, b_k = base.trimmed()
   p_eps, p_k = pol.trimmed()
@@ -281,6 +398,8 @@ def _report(
     "\n  Survival is the headline but the weakest test here: it needs n~150 per"
     "\n  arm to resolve 5pp. Read the per-step rates first."
   )
+
+  _report_task(b_eps, p_eps, evaluation, metric_names)
 
 
 def main() -> None:
@@ -475,6 +594,7 @@ def main() -> None:
 
     term_names = env.termination_manager.active_terms
     reward_terms = env.reward_manager.active_terms
+    evaluation, metric_names = _resolve_evaluation(args.task, env)
     print(
       f"[compare] {args.num_envs} envs, {args.num_workers} workers, "
       f"episode {cfg.episode_length_s:.0f} s, {args.minutes:.0f} min per arm\n"
@@ -485,7 +605,13 @@ def main() -> None:
     # window and the worker pool instead of running in sequence.
     policy_ids = list(range(env.num_envs // 2, env.num_envs))
     base, pol = _run_both(
-      env, wrapped, policy, args.minutes, policy_ids, round(args.skip_s / env.step_dt)
+      env,
+      wrapped,
+      policy,
+      args.minutes,
+      policy_ids,
+      round(args.skip_s / env.step_dt),
+      metric_names,
     )
     print(
       f"[compare] done: {len(base.episodes)} baseline / {len(pol.episodes)} "
@@ -495,7 +621,10 @@ def main() -> None:
   with open(dump_path, "w", newline="") as fh:
     w = csv.writer(fh)
     w.writerow(
-      ["arm", "env", "nth_in_env", "length"] + list(term_names) + list(reward_terms)
+      ["arm", "env", "nth_in_env", "length"]
+      + list(term_names)
+      + list(reward_terms)
+      + list(metric_names)
     )
     for arm in (base, pol):
       for e in arm.episodes:
@@ -503,13 +632,14 @@ def main() -> None:
           [arm.label, e.env_id, e.nth, e.length]
           + [e.terms[n] for n in term_names]
           + [e.rewards[n] for n in reward_terms]
+          + [e.metrics[n] for n in metric_names]
         )
   print(f"[compare] per-episode rows -> {dump_path}")
 
   if not base.episodes or not pol.episodes:
     print("[compare] an arm finished no episodes; raise --minutes")
     return
-  _report(base, pol, env, cfg, term_names, reward_terms)
+  _report(base, pol, env, cfg, term_names, reward_terms, evaluation, metric_names)
 
 
 if __name__ == "__main__":

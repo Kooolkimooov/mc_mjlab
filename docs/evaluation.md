@@ -966,3 +966,34 @@ multi-GPU the seed is `agent.seed + rank`, so `-1` randomizes rank 0 only and
 hands ranks `1, 2, 3` the fixed seeds `0, 1, 2`.
 
 **Re-measure if:** n/a — structural.
+
+## TaskEvaluation
+
+**Current:** `mc_mjlab/tasks/evaluation.py` holds the task-specific half of a
+comparison, and each task registers one beside its task id. It declares three
+things and nothing else: the metric terms to record per episode, the metric that
+is 1.0 on success (`reduce="last"`), and the metric that buckets the report with
+its strata edges. `compare_to_baseline.py` keeps the engine -- fixed episodes per
+env, survival, length, terminations, reward per step -- and adds one section per
+declaration: a metric table with Welch p values, a Wilson-bounded success rate,
+and the headline metric by stratum.
+
+Two declarations exist. Locomanip records cart tracking, ZMP, completion and the
+drawn payload, succeeds on `task_complete`, and buckets by `cart_mass` at
+10/30/100/300 kg -- the sweep's own breakpoints. Residual balance records its ZMP
+and DCM terms and buckets by `impulse_speed` at the qualifier's bands.
+
+**A missing metric narrows rather than fails.** `_resolve_evaluation` intersects
+the declaration with the live metrics manager, prints what is missing, and drops
+the verdict or the strata if their key is not there -- so a cfg that trims metrics
+still scores, it just answers less.
+
+**Why per task and not per script:** the engine's sampling, statistics and
+episode records are the same experiment everywhere; the *question* is not. A ZMP
+mean over a cart sweep that spans three decades of mass hides which regime
+changed, which is exactly what the strata exist to stop.
+
+**Re-measure if:** a task's metrics are renamed, or its strata breakpoints move.
+
+**History:** added when the locomanip task needed completion rate stratified by
+payload, which the balance-shaped report had no way to express.
