@@ -45,10 +45,15 @@ def cart_spec() -> mujoco.MjSpec:  # ty: ignore[unresolved-attribute]
   return spec
 
 
+#: The grasped handle sits 0.35 m BEHIND this origin, so the robot's hands reach
+#: to `CART_INIT_X - 0.35`, not to `CART_INIT_X`. docs/locomanip.md#cart_init_x
+CART_INIT_X = 0.90
+
+
 def cart_cfg() -> EntityCfg:
-  """Create a passive free body at the controller's initial object pose."""
+  """Create a passive free body in front of the robot's initial stance."""
   return EntityCfg(
-    spec_fn=cart_spec, init_state=EntityCfg.InitialStateCfg(pos=(0.75, 0, 0))
+    spec_fn=cart_spec, init_state=EntityCfg.InitialStateCfg(pos=(CART_INIT_X, 0, 0))
   )
 
 

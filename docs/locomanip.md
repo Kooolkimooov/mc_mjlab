@@ -48,6 +48,35 @@ after overwrite processing, or equivalent datastore callbacks land upstream.
 **History:** The patch retains ROS behavior by default. The demo sets
 `enableRos: false`, preventing node creation, subscription setup, and spinning.
 
+## CART_INIT_X
+
+**Current:** `0.90` m, the cart body's initial x in front of the robot's stance.
+
+**The number that matters is not this one.** `Cart.xml` puts the grasped handle
+bar at cart-local `x = -0.35, z = 1.0`, matching the controller's
+`ManipManager.objToHandTranss` of `[-0.35, +/-0.3, 1.0]`. So the hands reach to
+`CART_INIT_X - 0.35`, while the cart box's rear face — the part that looks like
+"the cart" — starts at `CART_INIT_X` itself and runs 0.85 m forward from there
+(box half-size 0.425 centred at local `x = 0.425`).
+
+At the original `0.75` the handle sat **0.40 m** in front of the robot, which
+read as the cart crowding it. `0.90` puts the handle at **0.55 m** and the box
+rear face at 0.90 m.
+
+**This is a free choice, not a value the controller pins.** The environment
+feeds the measured cart pose to mc_rtc through `controller_objects = {obj:
+cart}`, so the controller grasps wherever the cart actually is; it does not
+assume an initial pose. Only reachability bounds it — the hands must still make
+`[-0.35, +/-0.3, 1.0]` in the object frame from the initial stance.
+
+**Re-measure if:** the cart asset changes, `objToHandTranss` changes, or the
+robot's initial stance moves.
+
+**History:**
+- 2026-09-16 — raised `0.75` -> `0.90` on the report that the cart was too close
+  to the robot. Geometry above read from `Cart.xml` and
+  `LocomanipController.yaml`; the handle offset is what set the spacing.
+
 ## HRP5P Locomanip cart acceptance
 
 **Current:** Run `uv run python scripts/verify_locomanip.py`. It disables automatic

@@ -6,4 +6,4 @@ from mc_mjlab import MC_RTC_YAML_PATH
 from mc_mjlab.tasks.naming import get_task_name
 print(get_task_name("locomanip", "position", MC_RTC_YAML_PATH.with_name("mc_rtc_locomanip.yaml")))
 ')"
-exec uv run play "$task_id" --agent zero --viewer viser "$@"
+exec uv run play "$task_id" --agent zero --viewer native "$@"
