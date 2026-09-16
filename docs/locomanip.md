@@ -212,49 +212,40 @@ choice. Place it before reading anything into the reward curve.
 ## cart_mass_range_kg
 
 **Current:** `(1.0, 1000.0)` kg on the 10 kg cart asset -- the range the mc_mujoco
-sweep characterised -- drawn per episode by `mdp.events.randomize_object_mass`, a
-`reset` event on the cart body. It wraps `dr.pseudo_inertia`, whose `alpha` is a
-*log* scale (mass and inertia both scale by `e^(2a)`), so `mass_alpha_range`
-converts kilograms to it and a uniform draw in `alpha` is log-uniform in mass --
-the spacing the sweep used. `dr.body_mass` is the wrong term: it leaves inertia
-behind.
+sweep characterised -- drawn per episode by a `reset`-mode `dr.pseudo_inertia`
+event on the cart body. Its `alpha` is a *log* scale (mass and inertia both scale
+by `e^(2a)`), so `mdp.events.mass_alpha_range` converts kilograms to it and a
+uniform draw in `alpha` is log-uniform in mass, the spacing the sweep used.
+`dr.body_mass` is the wrong term: it leaves inertia behind.
 
-**Why it is not `dr.pseudo_inertia` directly: `set_const_0` blanks every sensor.**
-Any event declaring `RecomputeLevel.set_const_0` or above empties
-`data.sensordata` from five environments up -- 105 of 280 values at five, 0 of 448
+**It needs mujoco-warp >= 3.11.** On 3.10.0.2 -- the version the PyPI mjlab 1.6.0
+resolved -- any event declaring `RecomputeLevel.set_const_0` or above empties
+`data.sensordata` from five environments up: 105 of 280 values at five, 0 of 448
 at eight. The controller then sees no force or IMU feedback, its stabilizer has
 nothing, and the robot falls after about 3.8 s, which reads as a policy failure.
-Measured 2026-09-16, with a no-op event that declares only the level, so nothing
-but the recompute differs:
+Measured 2026-09-16 with a no-op event that declares only the level, so nothing
+but the recompute differed:
 
-| recompute level | what it recomputes | sensors at 8 envs | foot force |
+| recompute level | recomputes | sensors, mjwarp 3.10.0.2 | sensors, mjwarp 3.11.0 |
 | --- | --- | --- | --- |
-| `none` (expansion only) | -- | 384 of 448 | 992 N |
-| `set_const_fixed` | `body_subtreemass` | 384 of 448 | 992 N |
-| `set_const_0` | `dof_invweight0`, `body_invweight0`, `tendon_*0` | **0 of 448** | **0 N** |
-| `set_const` | both of the above | **0 of 448** | **0 N** |
+| `none` | -- | 384 of 448 | 384 of 448 |
+| `set_const_fixed` | `body_subtreemass` | 384 of 448 | 384 of 448 |
+| `set_const_0` | `dof_invweight0`, `body_invweight0`, `tendon_*0` | **0 of 448** | 384 of 448 |
+| `set_const` | both of the above | **0 of 448** | 384 of 448 |
 
-It is not this task's scene: adding a `dr.body_mass` term to *residual balance*,
-one entity and no cart, breaks it identically at 8 envs. Nor is it the contact
-budget (`nconmax` 100 to 2000, `njmax` 1500 to 40000 change nothing), CUDA graph
-capture (off changes nothing), the event's mode, or the `cart_floor` pair.
+It was never this task's scene: on 3.10.0.2 a `dr.body_mass` term added to
+*residual balance*, one entity and no cart, broke identically at 8 environments.
+Nor was it the contact budget (`nconmax` 100 to 2000, `njmax` 1500 to 40000
+change nothing), CUDA graph capture, the event's mode, or the `cart_floor` pair.
 
-**So the term declares `set_const_fixed` and rescales the reference weights
-itself.** The cart is an isolated free body, so its `dof_invweight0` and
-`body_invweight0` are exactly inverse in the uniform density scale
-`pseudo_inertia` applied; `_rescale_reference_weights` divides the defaults by
-the mass scale the draw achieved. Without that the solver treats a heavy cart as
-far softer than it is -- a full-clip residual moved a 300 kg cart 0.39 m instead
-of the 0.22 m the upstream recompute gives. With it, 0.18 m, inside the
-run-to-run spread of the reference itself (0.19-0.22 m over three runs).
-
-**Re-measure if:** mjlab's recompute path changes, the cart stops being a single
-free body, or `pseudo_inertia` changes what `alpha` scales.
+**Re-measure if:** the mujoco-warp pin moves below 3.11, or `pseudo_inertia`
+changes what `alpha` scales.
 
 **History:**
-- 2026-09-16 -- added, defaulted to the swept range, turned off when a smoke run
-  showed `zmp_grounded` pinned at 0 and episodes ending at 3.7 s, then turned
-  back on once the recompute level was identified as the cause.
+- 2026-09-16 -- added and defaulted to the swept range; turned off when a smoke
+  run showed `zmp_grounded` pinned at 0 and episodes ending at 3.7 s; carried a
+  `set_const_fixed` term that rescaled the cart's own reference weights by hand
+  until mujoco-warp 3.11 made the workaround unnecessary, and it was dropped.
 
 ## ZMP_TRACKING_STD
 

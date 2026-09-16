@@ -7,7 +7,6 @@ from typing import cast
 
 import pytest
 from mjlab.envs import ManagerBasedRlEnvCfg
-from mjlab.managers.event_manager import RecomputeLevel
 
 import mc_mjlab.tasks  # noqa: F401
 from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
@@ -178,19 +177,13 @@ def test_payload_is_drawn_every_episode() -> None:
   """Verify the swept mass range is on by default and resampled at reset."""
   payload = make_locomanip_residual_env_cfg().events["cart_payload"]
   assert payload.mode == "reset"
-  assert payload.params["mass_range_kg"] == CART_MASS_RANGE_KG
+  assert payload.params["alpha_range"] == mass_alpha_range(
+    CART_MASS_RANGE_KG, CART_NOMINAL_MASS_KG
+  )
   assert (
     "cart_payload"
     not in make_locomanip_residual_env_cfg(cart_mass_range_kg=None).events
   )
-
-
-def test_the_payload_avoids_the_recompute_that_blanks_sensors() -> None:
-  """Verify the term stays below `set_const_0`, which empties `data.sensordata`."""
-  payload = make_locomanip_residual_env_cfg().events["cart_payload"]
-  assert payload.func.recompute == RecomputeLevel.set_const_fixed
-  # The reference weights that level would have recomputed are rescaled instead.
-  assert {"dof_invweight0", "body_invweight0"} <= set(payload.func.model_fields)
 
 
 def test_success_is_physical_not_the_controller_schedule() -> None:

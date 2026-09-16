@@ -159,6 +159,15 @@ then run:
 uv sync
 ```
 
+> [!WARNING] Use **mujoco-warp >= 3.11**. On 3.10.0.2 any domain-randomization
+> term that recomputes derived constants -- `dr.body_mass`, `dr.pseudo_inertia`,
+> anything at `RecomputeLevel.set_const_0` or above -- leaves `data.sensordata`
+> entirely zero from five environments up. Force and IMU feedback then read 0,
+> the mc_rtc stabilizer has nothing to work with, and the robot falls a few
+> seconds in, which looks like a policy failure rather than a broken sensor.
+> The locomanip task's payload randomization needs it.
+> docs/locomanip.md#cart_mass_range_kg
+
 The ROS workspace's own dependencies are Debian packages under
 `/usr/lib/python3/dist-packages`, which a plain venv hides. If that bites — a
 bare `pytest` aborts importing `launch_testing` — create the venv with them
