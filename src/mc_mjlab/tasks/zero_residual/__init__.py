@@ -9,6 +9,7 @@ from mjlab.tasks.registry import register_mjlab_task
 
 from mc_mjlab.tasks.naming import get_task_name
 from mc_mjlab.tasks.zero_residual.zero_residual_env_cfg import (
+  MC_RTC_YAML,
   zero_residual_position_env_cfg,
   zero_residual_rl_cfg,
   zero_residual_torque_env_cfg,
@@ -36,14 +37,14 @@ def _refuse_to_train() -> None:
 _refuse_to_train()
 
 register_mjlab_task(
-  task_id=get_task_name(TASK_DIR, "position"),
+  task_id=get_task_name(TASK_DIR, MC_RTC_YAML, "position"),
   env_cfg=zero_residual_position_env_cfg(),
   play_env_cfg=zero_residual_position_env_cfg(play=True),
   rl_cfg=zero_residual_rl_cfg(),
 )
 
 register_mjlab_task(
-  task_id=get_task_name(TASK_DIR, "torque"),
+  task_id=get_task_name(TASK_DIR, MC_RTC_YAML, "torque"),
   env_cfg=zero_residual_torque_env_cfg(),
   play_env_cfg=zero_residual_torque_env_cfg(play=True),
   rl_cfg=zero_residual_rl_cfg(),

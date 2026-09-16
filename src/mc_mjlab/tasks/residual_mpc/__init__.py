@@ -5,14 +5,17 @@ from pathlib import Path
 from mjlab.tasks.registry import register_mjlab_task
 
 from mc_mjlab.tasks.naming import get_task_name
-from mc_mjlab.tasks.residual_mpc.residual_mpc_env_cfg import residual_mpc_env_cfg
+from mc_mjlab.tasks.residual_mpc.residual_mpc_env_cfg import (
+  MC_RTC_YAML,
+  residual_mpc_env_cfg,
+)
 from mc_mjlab.tasks.residual_mpc.residual_mpc_ppo_cfg import residual_mpc_ppo_cfg
 from mc_mjlab.tasks.residual_mpc.residual_mpc_runner import (
   ResidualMpcOnPolicyRunner,
 )
 
 TASK_DIR = Path(__file__).resolve().parent.name
-TASK_ID = get_task_name(TASK_DIR, "joint_torque")
+TASK_ID = get_task_name(TASK_DIR, MC_RTC_YAML, "joint_torque")
 
 register_mjlab_task(
   task_id=TASK_ID,

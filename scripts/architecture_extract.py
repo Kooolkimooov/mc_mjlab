@@ -797,22 +797,23 @@ def _enclosing_loops(root: ast.Module) -> dict[int, list[ast.For]]:
   return found
 
 
-def task_name_calls(path: Path) -> list[tuple[str, bool]]:
-  """Suffixes passed to get_task_name, expanding f-strings over literal loops."""
+def task_name_calls(path: Path) -> list[tuple[str, str, bool]]:
+  """Config path and suffix of each get_task_name call, f-strings expanded over loops."""
   root = tree(path)
   loops = _enclosing_loops(root)
-  found: list[tuple[str, bool]] = []
+  found: list[tuple[str, str, bool]] = []
   for node in ast.walk(root):
     if not isinstance(node, ast.Call) or ast.unparse(node.func) != "get_task_name":
       continue
-    if len(node.args) < 2:
+    if len(node.args) < 3:
       continue
-    suffix = node.args[1]
+    config = ast.unparse(node.args[1])
+    suffix = node.args[2]
     if isinstance(suffix, ast.Constant) and isinstance(suffix.value, str):
-      found.append((suffix.value, True))
+      found.append((config, suffix.value, True))
       continue
     if not isinstance(suffix, ast.JoinedStr):
-      found.append((ast.unparse(suffix), False))
+      found.append((config, ast.unparse(suffix), False))
       continue
     template = ast.unparse(suffix)[2:-1]
     options: list[list[str]] = [[template]]
@@ -833,7 +834,7 @@ def task_name_calls(path: Path) -> list[tuple[str, bool]]:
         for value in values
       ]
     expanded = [text for group in options for text in group]
-    found += [(text, "{" not in text) for text in expanded]
+    found += [(config, text, "{" not in text) for text in expanded]
   return sorted(set(found))
 
 

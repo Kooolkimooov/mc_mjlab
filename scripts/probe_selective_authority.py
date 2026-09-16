@@ -10,13 +10,15 @@ from pathlib import Path
 import torch
 from mjlab.envs import ManagerBasedRlEnv
 
-from mc_mjlab import MC_RTC_YAML_PATH, mdp
+from mc_mjlab import MC_RTC_CONFIG_PATH, mdp
 from mc_mjlab.robots import robot_module as mc_rtc
 from mc_mjlab.robots.registry import get_main_robot_spec
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   make_residual_balance_env_cfg,
   select_residual_joints,
 )
+
+MC_RTC_YAML = MC_RTC_CONFIG_PATH / "mc_rtc_hrp5_logistic_ismpc_patched.yaml"
 
 
 @dataclass
@@ -33,7 +35,7 @@ class Response:
 
 def target_sets(requested: list[str] | None) -> dict[str, tuple[str, ...]]:
   """Resolve individual joints and anatomy groups before constructing the env."""
-  robot_name, robot = get_main_robot_spec(MC_RTC_YAML_PATH)
+  robot_name, robot = get_main_robot_spec(MC_RTC_YAML)
   upper = set(mc_rtc.get_upper_body_joints(robot_name))
   candidates = tuple(j for j in robot.get_residual_joints() if j not in upper)
   groups = {

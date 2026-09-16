@@ -11,12 +11,14 @@ from pathlib import Path
 import torch
 from mjlab.envs import ManagerBasedRlEnv
 
-from mc_mjlab import MC_RTC_YAML_PATH, mdp
+from mc_mjlab import MC_RTC_CONFIG_PATH, mdp
 from mc_mjlab.bridge.controller_datastore import CONTROL_COM_VEL
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   DCM_STD,
   make_residual_balance_env_cfg,
 )
+
+MC_RTC_YAML = MC_RTC_CONFIG_PATH / "mc_rtc_hrp5_logistic_ismpc_patched.yaml"
 
 #: Candidate kernel widths to score the measured distribution through.
 STD_CANDIDATES = (0.03, 0.04, 0.05, 0.06, 0.08, 0.10)
@@ -79,7 +81,10 @@ class Sample:
 def quantiles(values: list[float]) -> dict[str, float]:
   """Mean, median, p75, p90 and p99 of a sample."""
   ordered = sorted(values)
-  pick = lambda q: ordered[min(len(ordered) - 1, int(q * len(ordered)))]  # noqa: E731
+
+  def pick(q: float) -> float:
+    return ordered[min(len(ordered) - 1, int(q * len(ordered)))]
+
   return {
     "mean": statistics.fmean(ordered),
     "median": statistics.median(ordered),
@@ -284,11 +289,11 @@ def main() -> None:
   out_dir = Path(args.out_dir)
   out_dir.mkdir(parents=True, exist_ok=True)
   regimes = [
-    ("walking", MC_RTC_YAML_PATH, 0.0),
-    ("standing", posture_config(MC_RTC_YAML_PATH, out_dir), 0.0),
+    ("walking", MC_RTC_YAML, 0.0),
+    ("standing", posture_config(MC_RTC_YAML, out_dir), 0.0),
   ]
   if args.residual_level:
-    regimes.append(("walking+residual", MC_RTC_YAML_PATH, args.residual_level))
+    regimes.append(("walking+residual", MC_RTC_YAML, args.residual_level))
 
   samples = {name: run_regime(name, cfg, level, args) for name, cfg, level in regimes}
   report(samples)

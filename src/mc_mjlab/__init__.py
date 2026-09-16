@@ -3,4 +3,5 @@
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2].absolute().resolve()
-MC_RTC_YAML_PATH = REPO_ROOT / "etc" / "mc_rtc.yaml"
+
+MC_RTC_CONFIG_PATH = REPO_ROOT / "etc"

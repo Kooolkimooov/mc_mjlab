@@ -8,7 +8,7 @@ from pathlib import Path
 from mjlab.tasks.registry import register_mjlab_task
 
 from mc_mjlab.tasks.locomanip.locomanip_env_cfg import (
-  LOCOMANIP_CONFIG,
+  MC_RTC_YAML,
   locomanip_env_cfg,
 )
 from mc_mjlab.tasks.naming import get_task_name
@@ -20,7 +20,7 @@ if Path(sys.argv[0]).name == "train" and any(
   raise SystemExit("Locomanip is a play-only task; launch play with --agent zero")
 
 register_mjlab_task(
-  task_id=get_task_name("locomanip", "position", LOCOMANIP_CONFIG),
+  task_id=get_task_name("locomanip", MC_RTC_YAML, "position"),
   env_cfg=locomanip_env_cfg(),
   play_env_cfg=locomanip_env_cfg(play=True),
   rl_cfg=zero_residual_rl_cfg(),

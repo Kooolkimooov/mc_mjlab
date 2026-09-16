@@ -25,7 +25,7 @@ from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.terrains import TerrainEntityCfg
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 
-from mc_mjlab import MC_RTC_YAML_PATH, mdp
+from mc_mjlab import MC_RTC_CONFIG_PATH, mdp
 from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionActionCfg,
 )
@@ -43,6 +43,8 @@ from mc_mjlab.robots.registry import (
   prepare_cfg_for_mc_rtc,
 )
 from mc_mjlab.tasks.residual_balance.curriculum_stages import ACHIEVEMENT_STAGES
+
+MC_RTC_YAML = MC_RTC_CONFIG_PATH / "mc_rtc_hrp5_logistic_ismpc_patched.yaml"
 
 # Only values used twice or more live here; the rest sit in the term that uses them.
 # Training bands chosen to cover the qualifier's own push magnitudes (0.40 and
@@ -135,7 +137,7 @@ def make_residual_balance_env_cfg(
   push_velocity: float = 0.4,
   console_output: Literal["none", "single", "all"] = "none",
   print_residual_every: int = 0,
-  mc_rtc_yaml: Path = MC_RTC_YAML_PATH,
+  mc_rtc_yaml: Path = MC_RTC_YAML,
   recovery_detector_path: Path | None = RECOVERY_DETECTOR_PATH,
   disturbance: Literal["finite", "velocity", "none"] = "finite",
   authority_set: AuthoritySet = "uniform",

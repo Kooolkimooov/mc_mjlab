@@ -14,7 +14,7 @@ from mjlab.scene import SceneCfg
 from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.terrains import TerrainEntityCfg
 
-from mc_mjlab import MC_RTC_YAML_PATH
+from mc_mjlab import MC_RTC_CONFIG_PATH
 from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionActionCfg,
 )
@@ -25,6 +25,8 @@ from mc_mjlab.robots.registry import (
   get_main_robot_spec,
   prepare_cfg_for_mc_rtc,
 )
+
+MC_RTC_YAML = MC_RTC_CONFIG_PATH / "mc_rtc.yaml"
 
 # Every env is its own mc_rtc controller (~70 MB, ~570 ms to construct, built
 # serially), so the env count is memory- and startup-bound rather than GPU-bound.
@@ -41,7 +43,7 @@ def _make_env_cfg(
   num_envs: int = NUM_ENVS,
   num_workers: int | None = None,
   console_output: Literal["none", "single", "all"] = "none",
-  mc_rtc_yaml: Path = MC_RTC_YAML_PATH,
+  mc_rtc_yaml: Path = MC_RTC_YAML,
 ) -> ManagerBasedRlEnvCfg:
   """Build the zero-residual env cfg for the config's ``MainRobot``."""
   robot_name, robot = get_main_robot_spec(mc_rtc_yaml)

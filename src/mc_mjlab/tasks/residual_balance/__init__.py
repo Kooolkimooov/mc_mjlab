@@ -8,6 +8,7 @@ from mjlab.tasks.registry import register_mjlab_task
 
 from mc_mjlab.tasks.naming import get_task_name
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
+  MC_RTC_YAML,
   residual_balance_position_achievement_curriculum_env_cfg,
   residual_balance_position_env_cfg,
   residual_balance_position_matched_impulse_env_cfg,
@@ -21,12 +22,16 @@ from mc_mjlab.tasks.residual_balance.residual_balance_runner import (
 )
 
 TASK_DIR = Path(__file__).resolve().parent.name
-POSITION_TASK_ID = get_task_name(TASK_DIR, "position")
-ANKLE_TASK_ID = get_task_name(TASK_DIR, "position-ankle")
-ACHIEVEMENT_TASK_ID = get_task_name(TASK_DIR, "position-ankle-curriculum-achievement")
-MATCHED_TASK_ID = get_task_name(TASK_DIR, "position-ankle-matched-impulse")
-PITCH_TASK_ID = get_task_name(TASK_DIR, "position-ankle-pitch-matched-impulse")
-TORQUE_TASK_ID = get_task_name(TASK_DIR, "torque")
+POSITION_TASK_ID = get_task_name(TASK_DIR, MC_RTC_YAML, "position")
+ANKLE_TASK_ID = get_task_name(TASK_DIR, MC_RTC_YAML, "position-ankle")
+ACHIEVEMENT_TASK_ID = get_task_name(
+  TASK_DIR, MC_RTC_YAML, "position-ankle-curriculum-achievement"
+)
+MATCHED_TASK_ID = get_task_name(TASK_DIR, MC_RTC_YAML, "position-ankle-matched-impulse")
+PITCH_TASK_ID = get_task_name(
+  TASK_DIR, MC_RTC_YAML, "position-ankle-pitch-matched-impulse"
+)
+TORQUE_TASK_ID = get_task_name(TASK_DIR, MC_RTC_YAML, "torque")
 
 register_mjlab_task(
   task_id=POSITION_TASK_ID,

@@ -10,12 +10,12 @@ from mjlab.envs import mdp as env_mdp
 from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 
-from mc_mjlab import MC_RTC_YAML_PATH, mdp
+from mc_mjlab import MC_RTC_CONFIG_PATH, mdp
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionCfg
 from mc_mjlab.tasks.locomanip.cart import cart_cfg, cart_floor_contact
 from mc_mjlab.tasks.zero_residual.zero_residual_env_cfg import _make_env_cfg
 
-LOCOMANIP_CONFIG = MC_RTC_YAML_PATH.with_name("mc_rtc_hrp5_locomanip_patched.yaml")
+MC_RTC_YAML = MC_RTC_CONFIG_PATH / "mc_rtc_hrp5_locomanip_patched.yaml"
 
 
 def locomanip_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
@@ -24,7 +24,7 @@ def locomanip_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     "position",
     num_envs=1,
     num_workers=1,
-    mc_rtc_yaml=LOCOMANIP_CONFIG,
+    mc_rtc_yaml=MC_RTC_YAML,
     console_output="single" if play else "none",
   )
   cfg.scene.entities["cart"] = cart_cfg()

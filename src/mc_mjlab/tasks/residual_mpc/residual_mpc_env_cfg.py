@@ -26,7 +26,7 @@ from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.terrains import TerrainEntityCfg
 
-from mc_mjlab import MC_RTC_YAML_PATH
+from mc_mjlab import MC_RTC_CONFIG_PATH
 from mc_mjlab import mdp as shared_mdp
 from mc_mjlab.actions.residual_mpc_joint_torque_action import (
   ResidualMpcJointTorqueActionCfg,
@@ -38,6 +38,8 @@ from mc_mjlab.robots.registry import (
   prepare_cfg_for_mc_rtc,
 )
 from mc_mjlab.tasks.residual_mpc import mdp
+
+MC_RTC_YAML = MC_RTC_CONFIG_PATH / "mc_rtc_hrp5_logistic_ismpc_patched.yaml"
 
 BLEND_FACTOR = 0.1
 SELF_COLLISION_SENSOR = "self_collision"
@@ -75,7 +77,7 @@ def residual_mpc_env_cfg(
   pushes: bool = True,
   fixed_twist: tuple[float, float, float] | None = None,
   console_output: Literal["none", "single", "all"] = "none",
-  mc_rtc_yaml: Path = MC_RTC_YAML_PATH,
+  mc_rtc_yaml: Path = MC_RTC_YAML,
 ) -> ManagerBasedRlEnvCfg:
   """Build the forward-only paper-style ResidualMPC task."""
   robot_name, robot = get_main_robot_spec(mc_rtc_yaml)

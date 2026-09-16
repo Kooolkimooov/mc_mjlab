@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import ast
 import difflib
+import importlib
 import re
 import sys
 import tempfile
@@ -396,6 +397,14 @@ def rate_stack() -> str:
   return table(("Rate", "Set by", "Runs at", "Sim steps per period"), rows)
 
 
+def config_of(path: Path, name: str) -> Path:
+  """The mc_rtc yaml a get_task_name call names, read from that call's own module."""
+  parts = path.relative_to(ex.SRC).with_suffix("").parts
+  if parts[-1] == "__init__":
+    parts = parts[:-1]
+  return getattr(importlib.import_module(".".join(parts)), name)
+
+
 def task_ids(package: Path) -> str:
   """Every id this package builds, resolved through the repo's naming helper."""
   from mc_mjlab.tasks.naming import get_task_name
@@ -403,8 +412,12 @@ def task_ids(package: Path) -> str:
   gates = ex.conditional_imports(package / "__init__.py")
   rows = []
   for path in sorted(package.rglob("*.py")):
-    for suffix, literal in ex.task_name_calls(path):
-      resolved = get_task_name(package.name, suffix) if literal else suffix
+    for config, suffix, literal in ex.task_name_calls(path):
+      resolved = (
+        get_task_name(package.name, config_of(path, config), suffix)
+        if literal
+        else suffix
+      )
       rows.append(
         (
           f"`{resolved}`",
