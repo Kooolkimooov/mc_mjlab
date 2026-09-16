@@ -211,33 +211,47 @@ choice. Place it before reading anything into the reward curve.
 
 ## cart_mass_range_kg
 
-**Current:** `(1.0, 1000.0)` kg on a 10 kg cart asset, drawn per episode by a
-`reset`-mode `dr.pseudo_inertia` event on the cart body. It is the range the
-mc_mujoco sweep characterised: 50 log-spaced masses from 1 kg to 1000 kg.
+**Current:** `None` -- **off**, because it is broken at training scale. The range
+it takes when enabled is `(1.0, 1000.0)` kg on the 10 kg cart asset, drawn per
+episode by a `reset`-mode `dr.pseudo_inertia` event on the cart body.
+`pseudo_inertia`'s `alpha` is a *log* scale (mass and inertia both scale by
+`e^(2a)`), so `mass_alpha_range` converts kilograms to it, and a uniform draw in
+`alpha` is log-uniform in mass -- the spacing the sweep used. `dr.body_mass` is
+the wrong term here: it leaves inertia behind.
 
-`pseudo_inertia`'s `alpha` is a *log* scale -- mass and inertia both scale by
-`e^(2a)` -- so `mass_alpha_range` converts kilograms to it, and sampling `alpha`
-uniformly makes the mass log-uniform, the spacing the sweep used.
-`dr.body_mass` is the wrong term here: it leaves inertia behind.
+**Why it is off: randomizing the cart's model zeroes every sensor.** With any
+model-randomization event pointed at the `cart` entity, `data.sensordata` goes
+partly (5 environments: 105 of 280 values) or entirely (8 environments: 0 of 448)
+zero. The controller then gets no force or IMU feedback at all, its stabilizer
+has nothing to work with, and the robot falls after about 3.8 s -- silently,
+since the fall reads as a policy failure. Measured 2026-09-16:
 
-**This is the whole experiment.** mc_rtc keeps modelling the 10 kg `LMC/Cart`
-URDF whatever MuJoCo simulates, and the object feedback carries pose, never mass,
-so a heavy cart is exactly the feedforward mismatch the base controller cannot
-observe. On JVRC1 in mc_mujoco that mismatch dropped the robot from 105 kg
-upward, while the same controller given the true mass pushed 868 kg without
-falling.
+| scene | randomization | envs | foot force | root z |
+| --- | --- | --- | --- | --- |
+| robot + cart | none | 8 | 992 N | 0.747 |
+| robot + cart | on the **robot** (`geom_friction`) | 8 | 992 N | 0.747 |
+| robot + cart | on the **cart** (`pseudo_inertia` or `body_mass`) | 4 | 992 N | 0.747 |
+| robot + cart | on the **cart** | 5 | **0 N** | 0.783 |
+| robot + cart | on the **cart** | 8 | **0 N** | 0.783 |
+| robot only (balance, stage 1) | full DR | 8 | 984-999 N | 0.784 |
 
-**Expect most sampled episodes to fail** until something closes that gap: two
-thirds of a log-uniform draw over 1-1000 kg sits above 100 kg. Narrow the range
-for a first training run rather than reading the reward curve as a policy
-verdict.
+So it is neither the payload term, nor its mode, nor the contact budget
+(`nconmax` 100 to 2000 and `njmax` 1500 to 40000 change nothing), nor the
+`cart_floor` pair: it is randomizing a *second, passive entity's* model fields
+above four environments.
 
-**Re-measure if:** the cart asset's mass or body name changes, or the robot does
--- the 105 kg threshold is a JVRC1 measurement, not an HRP5P one.
+**Until that is fixed** the cart stays at its asset mass of 10 kg and the payload
+experiment cannot run at scale. `cart_mass_range_kg=(1.0, 1000.0)` with four
+environments or fewer still reproduces it for a probe, which is what
+`probe_locomanip_authority.py` relies on.
+
+**Re-measure if:** mjlab's model-variant path changes, or the cart asset's body
+name changes.
 
 **History:**
-- 2026-09-16 -- wired as an opt-in `cart_mass_scale` hook, then given the swept
-  range as its default and moved to per-episode resampling.
+- 2026-09-16 -- added as an opt-in hook, defaulted to the swept range, then
+  turned back off when the first smoke run showed `zmp_grounded` pinned at 0 and
+  episodes ending at 3.7 s.
 
 ## ZMP_TRACKING_STD
 

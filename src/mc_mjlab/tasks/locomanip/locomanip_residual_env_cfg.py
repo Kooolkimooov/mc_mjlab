@@ -83,7 +83,9 @@ ZMP_PARAMS = {
 #: The cart asset's own mass, which is what mc_rtc's model keeps believing.
 CART_NOMINAL_MASS_KG = 10.0
 
-#: The masses the mc_mujoco sweep characterised. docs/locomanip.md#cart_mass_range_kg
+#: The masses the mc_mujoco sweep characterised. Off by default: randomizing the
+#: cart's model zeroes every sensor above four environments.
+#: docs/locomanip.md#cart_mass_range_kg
 CART_MASS_RANGE_KG = (1.0, 1000.0)
 
 FALL_LIMIT_ANGLE = math.radians(45.0)
@@ -122,7 +124,7 @@ def make_locomanip_residual_env_cfg(
   episode_length_s: float = EPISODE_LENGTH_S,
   torque_fraction: float = TORQUE_FRACTION,
   cart_pose_range: dict[str, tuple[float, float]] | None = None,
-  cart_mass_range_kg: tuple[float, float] | None = CART_MASS_RANGE_KG,
+  cart_mass_range_kg: tuple[float, float] | None = None,
   console_output: Literal["none", "single", "all"] = "none",
   print_residual_every: int = 0,
   mc_rtc_yaml: Path = MC_RTC_YAML,

@@ -151,20 +151,23 @@ def test_cart_pose_hook_is_opt_in() -> None:
   assert "reset_cart" in varied.events
 
 
-def test_payload_is_drawn_every_episode() -> None:
-  """Verify the swept mass range is on by default and resampled at reset."""
-  payload = make_locomanip_residual_env_cfg().events["cart_payload"]
+def test_payload_randomization_stays_off_by_default() -> None:
+  """Verify the cart's model is left alone, which is what keeps the sensors alive."""
+  assert "cart_payload" not in make_locomanip_residual_env_cfg().events
+
+
+def test_payload_is_drawn_every_episode_when_asked_for() -> None:
+  """Verify the swept mass range resamples at reset once enabled."""
+  payload = make_locomanip_residual_env_cfg(
+    cart_mass_range_kg=CART_MASS_RANGE_KG
+  ).events["cart_payload"]
   assert payload.mode == "reset"
   assert payload.params["alpha_range"] == mass_alpha_range(CART_MASS_RANGE_KG)
-  assert (
-    "cart_payload"
-    not in make_locomanip_residual_env_cfg(cart_mass_range_kg=None).events
-  )
 
 
 def test_the_payload_metric_names_the_randomized_body() -> None:
   """Verify the drawn mass is reported, from the body the event actually varies."""
-  cfg = make_locomanip_residual_env_cfg()
+  cfg = make_locomanip_residual_env_cfg(cart_mass_range_kg=CART_MASS_RANGE_KG)
   asset_cfg = cfg.events["cart_payload"].params["asset_cfg"]
   assert asset_cfg.body_names == (accessors.OBJECT_BODY,)
   assert cfg.metrics["cart_mass"].reduce == "last"
