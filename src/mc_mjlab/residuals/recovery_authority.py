@@ -12,6 +12,7 @@ import mujoco
 import torch
 
 from mc_mjlab.bridge.controller_datastore import CONTROL_COM_VEL
+from mc_mjlab.bridge.sensors import wrench_sensor
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -21,17 +22,6 @@ if TYPE_CHECKING:
 
 FEATURE_NAMES = ("dcm_error", "base_ang_speed", "tilt", "load_deviation")
 mjtSensor = vars(mujoco)["mjtSensor"]
-
-
-def _wrench_sensor(
-  mj_model: mujoco.MjModel, suffix: str, sensor_type: int
-) -> tuple[int, int]:
-  """Resolve the data offset and site id of one suffix-matched wrench sensor."""
-  for index in range(mj_model.nsensor):
-    sensor = mj_model.sensor(index)
-    if sensor.name.endswith(suffix) and int(sensor.type[0]) == sensor_type:
-      return int(sensor.adr[0]), int(sensor.objid[0])
-  raise ValueError(f"missing detector sensor '*{suffix}'")
 
 
 class RecoveryFeatureExtractor:
@@ -50,10 +40,10 @@ class RecoveryFeatureExtractor:
     torque_cols: list[int] = []
     site_ids: list[int] = []
     for name in sensor_names:
-      address, site_id = _wrench_sensor(
+      address, site_id = wrench_sensor(
         env.sim.mj_model, f"{name}_fsensor", mjtSensor.mjSENS_FORCE
       )
-      torque_address, _ = _wrench_sensor(
+      torque_address, _ = wrench_sensor(
         env.sim.mj_model, f"{name}_tsensor", mjtSensor.mjSENS_TORQUE
       )
       force_cols.extend((address, address + 1, address + 2))

@@ -8,7 +8,7 @@ import torch
 from mjlab.envs.mdp import terminations as mjlab_terminations
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
-from mc_mjlab.mdp.sensors import _residual_term
+from mc_mjlab.mdp.sensors import residual_term
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -18,7 +18,7 @@ def controller_failed(
   env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
 ) -> torch.Tensor:
   """Terminate envs whose mc_rtc controller gave up."""
-  return _residual_term(env, action_name).controller_failed
+  return residual_term(env, action_name).controller_failed
 
 
 def controller_worker_failed(
@@ -27,7 +27,7 @@ def controller_worker_failed(
   """End envs whose controller *process* died -- as a truncation, not a failure."""
   # Correlated across a worker's envs and unrelated to the action, so it must be
   # configured `time_out=True`. docs/coupling.md#worker-failure-is-a-truncation
-  return _residual_term(env, action_name).controller_worker_failed
+  return residual_term(env, action_name).controller_worker_failed
 
 
 def collapsed(

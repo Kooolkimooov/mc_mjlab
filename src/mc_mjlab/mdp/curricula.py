@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 import torch
 
 from mc_mjlab.mdp.disturbances import (
-  _push_term,
   achievement_finite_impulse_curriculum,
+  push_term,
   stratified_finite_impulse_curriculum,
 )
 
@@ -22,7 +22,7 @@ class episode_length_impulse_curriculum:
   """Move a stratified impulse mixture on smoothed terminal episode length."""
 
   def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
-    push = _push_term(env, cfg.params.get("term_name", "push_robot"))
+    push = push_term(env, cfg.params.get("term_name", "push_robot"))
     if not isinstance(push, stratified_finite_impulse_curriculum):
       raise TypeError("episode-length curriculum needs a stratified impulse term")
 
@@ -92,7 +92,7 @@ def achievement_curriculum_state(
 ) -> dict[str, float | int]:
   """Report the achievement event's reset-cohort mixture."""
   del env_ids
-  term = _push_term(env, term_name)
+  term = push_term(env, term_name)
   if not isinstance(term, achievement_finite_impulse_curriculum):
     raise TypeError(f"event term {term_name!r} is not achievement gated")
 

@@ -11,7 +11,7 @@ from mjlab.envs.mdp import events
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.utils.lab_api.math import quat_apply, quat_apply_inverse
 
-from mc_mjlab.mdp.sensors import _residual_term
+from mc_mjlab.mdp.sensors import residual_term
 
 if TYPE_CHECKING:
   from collections.abc import Iterable
@@ -33,7 +33,7 @@ def randomize_current_pd_gains(
   else:
     env_ids = env_ids.to(env.device)
 
-  term = _residual_term(env, action_name)
+  term = residual_term(env, action_name)
   kp = getattr(term, "_kp", None)
   kd = getattr(term, "_kd", None)
   if kp is not None and kd is not None:
@@ -123,6 +123,8 @@ class push_and_record(recorded_disturbance):
 class finite_impulse_curriculum(recorded_disturbance):
   """Apply finite, mass-scaled torso impulses with a global-step curriculum."""
 
+  constructor_parameters = frozenset({"interval_range_s", "warmup_s", "asset_cfg"})
+
   def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
     super().__init__(cfg, env)
     self._env = env
@@ -160,29 +162,17 @@ class finite_impulse_curriculum(recorded_disturbance):
     self,
     env: ManagerBasedRlEnv,
     env_ids: torch.Tensor | None,
-    interval_range_s: tuple[float, float],
-    warmup_s: float,
     duration_range_s: tuple[float, float],
     height_range_m: tuple[float, float],
     stages: tuple[tuple[int, tuple[float, float]], ...],
     enabled: bool = True,
-    asset_cfg: SceneEntityCfg | None = None,
-    rehearsal_weights: tuple[tuple[float, ...], ...] | None = None,
-    initial_stage: int = 0,
-    bands: tuple[tuple[float, float], ...] | None = None,
-    band_weights: tuple[float, ...] | None = None,
+    **configuration: object,
   ) -> None:
     """Expire the current wrench and trigger any due curriculum impulse."""
-    del (
-      env_ids,
-      interval_range_s,
-      warmup_s,
-      asset_cfg,
-      rehearsal_weights,
-      initial_stage,
-      bands,
-      band_weights,
-    )
+    del env_ids
+    unknown = configuration.keys() - self.constructor_parameters
+    if unknown:
+      raise TypeError(f"unknown impulse parameters: {sorted(unknown)}")
 
     active = self.remaining > 0
     self.remaining[active] -= 1
@@ -283,53 +273,13 @@ class finite_impulse_curriculum(recorded_disturbance):
     self.remaining[env_ids] = 0
 
 
-def interpolated_impulse_range(
-  step: int,
-  stages: tuple[tuple[int, tuple[float, float]], ...],
-) -> tuple[float, float]:
-  """Linearly interpolate an impulse range between ordered curriculum stages."""
-  if not stages:
-    raise ValueError("impulse curriculum requires at least one stage")
-  previous_step, previous_range = stages[0]
-  for next_step, next_range in stages[1:]:
-    if next_step <= previous_step:
-      raise ValueError("impulse curriculum stages must have increasing steps")
-    if step < next_step:
-      if step <= previous_step:
-        return previous_range
-      fraction = (step - previous_step) / (next_step - previous_step)
-      return (
-        previous_range[0] + fraction * (next_range[0] - previous_range[0]),
-        previous_range[1] + fraction * (next_range[1] - previous_range[1]),
-      )
-    previous_step, previous_range = next_step, next_range
-  return previous_range
-
-
-class gradual_finite_impulse_curriculum(finite_impulse_curriculum):
-  """Apply the finite impulse curriculum with linear stage interpolation."""
-
-  def _trigger(
-    self,
-    env: ManagerBasedRlEnv,
-    env_ids: torch.Tensor,
-    duration_range_s: tuple[float, float],
-    height_range_m: tuple[float, float],
-    stages: tuple[tuple[int, tuple[float, float]], ...],
-  ) -> None:
-    """Sample an impulse from the range interpolated at the current step."""
-    velocity_range = interpolated_impulse_range(env.common_step_counter, stages)
-    super()._trigger(
-      env,
-      env_ids,
-      duration_range_s,
-      height_range_m,
-      ((0, velocity_range),),
-    )
-
-
 class stratified_finite_impulse_curriculum(finite_impulse_curriculum):
   """Draw each reset cohort from a stationary standing-plus-band mixture."""
+
+  constructor_parameters = finite_impulse_curriculum.constructor_parameters | {
+    "bands",
+    "band_weights",
+  }
 
   def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
     super().__init__(cfg, env)
@@ -401,6 +351,11 @@ class stratified_finite_impulse_curriculum(finite_impulse_curriculum):
 
 class achievement_finite_impulse_curriculum(finite_impulse_curriculum):
   """Apply checkpointed difficulty with standing and prior-stage rehearsal."""
+
+  constructor_parameters = finite_impulse_curriculum.constructor_parameters | {
+    "rehearsal_weights",
+    "initial_stage",
+  }
 
   is_achievement_curriculum = True
 
@@ -489,12 +444,12 @@ def record_disturbance(
   term_name: str = "push_robot",
 ) -> None:
   """Record a deterministic external disturbance for recovery terms."""
-  term = _push_term(env, term_name)
+  term = push_term(env, term_name)
   term.last_push_vel[env_ids] = equivalent_velocity_b
   term.last_push_step[env_ids] = env.common_step_counter
 
 
-def _push_term(env: ManagerBasedRlEnv, term_name: str) -> recorded_disturbance:
+def push_term(env: ManagerBasedRlEnv, term_name: str) -> recorded_disturbance:
   """The recorded disturbance behind ``term_name``, or a ``TypeError``."""
   term = env.event_manager.get_term_cfg(term_name).func
   if not isinstance(term, recorded_disturbance):
@@ -505,7 +460,7 @@ def _push_term(env: ManagerBasedRlEnv, term_name: str) -> recorded_disturbance:
   return term
 
 
-def _age_since_push(env: ManagerBasedRlEnv, term: recorded_disturbance) -> torch.Tensor:
+def age_since_push(env: ManagerBasedRlEnv, term: recorded_disturbance) -> torch.Tensor:
   """See :func:`steps_since_push`; this is that, with the term already resolved."""
   # Python int on the left: `torch.as_tensor` here would be an H2D copy per step.
   age = env.common_step_counter - term.last_push_step

@@ -10,12 +10,12 @@ import torch
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
-from mc_mjlab.actions.walking_reference_action import WalkingReferenceMixin
 from mc_mjlab.bridge.controller_datastore import (
   CONTROL_COM,
   CONTROL_COM_VEL,
   PLANNED_ZMP,
 )
+from mc_mjlab.bridge.sensors import wrench_sensor
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -32,7 +32,7 @@ GRAVITY = 9.81
 MIN_COM_HEIGHT = 0.1
 
 
-def _residual_term(env: ManagerBasedRlEnv, action_name: str) -> McRtcResidualActionBase:
+def residual_term(env: ManagerBasedRlEnv, action_name: str) -> McRtcResidualActionBase:
   """The mc_rtc residual action term behind ``action_name``, or a ``TypeError``."""
   term = env.action_manager.get_term(action_name)
   if not isinstance(term, McRtcResidualActionBase):
@@ -43,38 +43,15 @@ def _residual_term(env: ManagerBasedRlEnv, action_name: str) -> McRtcResidualAct
   return term
 
 
-def _walking_term(env: ManagerBasedRlEnv, action_name: str) -> WalkingReferenceMixin:
-  """The walking-reference side of ``action_name``, or a ``TypeError``."""
-  term = env.action_manager.get_term(action_name)
-  if not isinstance(term, WalkingReferenceMixin):
-    raise TypeError(
-      f"action term {action_name!r} does not drive the walking reference, "
-      f"got {type(term).__name__}"
-    )
-  return term
-
-
-def _restrict(term: McRtcResidualActionBase, values: torch.Tensor) -> torch.Tensor:
+def residual_columns(
+  term: McRtcResidualActionBase, values: torch.Tensor
+) -> torch.Tensor:
   """Keep only the columns carrying the residual (see ``residual_ids``)."""
   ids = term.residual_ids
   return values if ids is None else values[:, ids]
 
 
-def _wrench_sensor(
-  mj_model: mujoco.MjModel, suffix: str, sensor_type: int
-) -> tuple[int, int]:
-  """``(sensordata offset, site id)`` of the model sensor named ``*suffix``."""
-  for i in range(mj_model.nsensor):
-    sensor = mj_model.sensor(i)
-    if sensor.name.endswith(suffix) and int(sensor.type[0]) == sensor_type:
-      return int(sensor.adr[0]), int(sensor.objid[0])
-  raise ValueError(
-    f"the MuJoCo model has no force/torque sensor named '*{suffix}'; the ZMP "
-    f"reward needs the mc_mujoco F/T sensor pair on every contact it sums."
-  )
-
-
-def _scalar_sensor_range(
+def scalar_sensor_range(
   mj_model: mujoco.MjModel, name: str, dim: int, device: torch.device | str
 ) -> torch.Tensor:
   """``sensordata`` columns of the ``dim``-wide model sensor named exactly ``name``."""
@@ -90,7 +67,7 @@ def _scalar_sensor_range(
   )
 
 
-class _ZmpSensors:
+class ZmpSensors:
   """Sensor plumbing for the measured centre of pressure, resolved once."""
 
   def __init__(
@@ -101,10 +78,10 @@ class _ZmpSensors:
     torque_cols: list[int] = []
     site_ids: list[int] = []
     for name in sensor_names:
-      f_adr, site_id = _wrench_sensor(
+      f_adr, site_id = wrench_sensor(
         mj_model, f"{name}_fsensor", mujoco.mjtSensor.mjSENS_FORCE
       )
-      t_adr, _ = _wrench_sensor(
+      t_adr, _ = wrench_sensor(
         mj_model, f"{name}_tsensor", mujoco.mjtSensor.mjSENS_TORQUE
       )
       force_cols += [f_adr, f_adr + 1, f_adr + 2]
@@ -135,7 +112,7 @@ class _ZmpSensors:
     plane_height: float = 0.0,
   ) -> tuple[torch.Tensor, torch.Tensor]:
     """``(CoM-to-ZMP offset xy, vertical contact force)``, both ``(num_envs, ...)``."""
-    # Memoised per step; five terms now read this. docs/reward-shaping.md#_zmpsensors
+    # Memoised per step; five terms now read this. docs/reward-shaping.md#zmpsensors
     key = (env.common_step_counter, min_normal_force, plane_height)
     if self._cache_key == key and self._cache is not None:
       return self._cache
@@ -202,31 +179,29 @@ class _ZmpSensors:
     data = env.sim.data
     com = data.subtree_com[:, self.root_body_id]
     com_vel = data.subtree_linvel[:, self.root_body_id]
-    commanded = _residual_term(env, action_name).datastore_vector_output(
-      CONTROL_COM_VEL
-    )
+    commanded = residual_term(env, action_name).datastore_vector_output(CONTROL_COM_VEL)
 
     omega = torch.sqrt(GRAVITY / com[:, 2].clamp(min=MIN_COM_HEIGHT)).unsqueeze(-1)
     offset = (com_vel[:, :2] - commanded[:, :2]) / omega - measured
     return torch.linalg.vector_norm(offset, dim=1), normal_force
 
 
-#: Per-env ``_ZmpSensors``, keyed weakly so they die with their env.
+#: Per-env ``ZmpSensors``, keyed weakly so they die with their env.
 _ZMP_SENSOR_CACHE: WeakKeyDictionary[
-  ManagerBasedRlEnv, dict[tuple[tuple[str, ...], str], _ZmpSensors]
+  ManagerBasedRlEnv, dict[tuple[tuple[str, ...], str], ZmpSensors]
 ] = WeakKeyDictionary()
 
 
-def _zmp_sensors(
+def zmp_sensors(
   env: ManagerBasedRlEnv, sensor_names: tuple[str, ...], asset_name: str
-) -> _ZmpSensors:
-  """The one :class:`_ZmpSensors` for this env and sensor set."""
+) -> ZmpSensors:
+  """The one :class:`ZmpSensors` for this env and sensor set."""
   cache = _ZMP_SENSOR_CACHE.setdefault(env, {})
   key = (tuple(sensor_names), asset_name)
 
   sensors = cache.get(key)
   if sensors is None:
-    sensors = cache[key] = _ZmpSensors(env, sensor_names, asset_name)
+    sensors = cache[key] = ZmpSensors(env, sensor_names, asset_name)
   return sensors
 
 
@@ -234,7 +209,7 @@ def planned_zmp_offset(
   env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
 ) -> torch.Tensor:
   """The controller's own CoM-to-ZMP offset, the target side of the comparison."""
-  term = _residual_term(env, action_name)
+  term = residual_term(env, action_name)
   return (
     term.datastore_vector_output(PLANNED_ZMP)
     - term.datastore_vector_output(CONTROL_COM)
@@ -248,7 +223,7 @@ def foot_load_share(
   min_normal_force: float = 20.0,
 ) -> torch.Tensor:
   """Each foot's share of the vertical contact force: the support state, in 0..1."""
-  forces = _zmp_sensors(env, sensor_names, asset_name).normal_forces(env).clamp(min=0.0)
+  forces = zmp_sensors(env, sensor_names, asset_name).normal_forces(env).clamp(min=0.0)
   return forces / forces.sum(dim=1, keepdim=True).clamp(min=min_normal_force)
 
 
@@ -256,7 +231,7 @@ class gait_phase:
   """``(cos, sin)`` of gait phase, inferred from the foot-load phase plane."""
 
   def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
-    self._sensors = _zmp_sensors(
+    self._sensors = zmp_sensors(
       env, cfg.params["sensor_names"], cfg.params["asset_cfg"].name
     )
     self._prev = torch.zeros(env.num_envs, device=env.device)
@@ -301,7 +276,7 @@ def measured_zmp_offset(
   asset_name: str = "robot",
 ) -> torch.Tensor:
   """The *measured* CoM-to-CoP offset, free of the observer drift the actor sees."""
-  measured, _ = _zmp_sensors(env, sensor_names, asset_name).measured_offset(env)
+  measured, _ = zmp_sensors(env, sensor_names, asset_name).measured_offset(env)
   return measured
 
 
