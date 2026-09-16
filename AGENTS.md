@@ -147,6 +147,38 @@ Where each kind of writing lives:
 verbatim when moving them: a paraphrase that drops the sample size is worth much
 less than the original.
 
+# Python style
+
+The prose budget above means the code itself has to carry the explanation, so
+write it to be read top to bottom.
+
+- **Sequence a function as steps, not as a puzzle.** Do the work in the order
+  someone would describe it, and put a blank line between the steps — wherever
+  a reader would take a breath, and always around a block that does something
+  different from the line before it.
+- **Early returns over nesting.** Guard clauses first, then a flat body. A
+  second level of indentation inside a method is usually a helper waiting to be
+  extracted.
+- **Order class methods by importance.** The lifecycle and the methods callers
+  actually use come first (`__init__`, `process_actions`, `apply_actions`,
+  `reset`, `close`), then the public accessors, then the `_`-prefixed helpers,
+  and the `@property` definitions last, as one block at the bottom.
+  `McRtcResidualActionBase` is the worked example.
+- **A private helper sits below the public method that calls it, in call
+  order**, so a class reads what-before-how. One called from several places
+  goes below the first of them.
+- **One job per module.** When a module grows a second job, split it rather
+  than sectioning it with comments — that is why `mdp/` is seven submodules and
+  why the PPO config sits beside the env cfg rather than inside it. The 10%
+  comment budget is the tripwire for this, not a separate rule.
+- **Types are part of the signature.** Every module opens with
+  `from __future__ import annotations`, and every def annotates its parameters
+  and its return. Annotation-only imports (`ManagerBasedRlEnv`, mjlab's
+  `*TermCfg`, our own action terms) go under `if TYPE_CHECKING:`, which is also
+  what keeps the `mdp` ↔ `actions` direction from closing into a cycle.
+- 2-space indent (ruff `indent-width = 2`), 88-column lines. `uv run ruff
+  format` settles everything it can, and none of the above.
+
 # Commit messages
 
 Keep them concise: a subject line plus a 2-4 line body carrying the one number
@@ -377,4 +409,3 @@ Cross-cutting invariants:
 - `[tool.ruff] target-version` is pinned one interpreter below
   `requires-python` on purpose: otherwise ruff rewrites `except (A, B):`
   into PEP 758 syntax that older interpreters cannot parse. Keep the pin.
-- Style: 2-space indent (ruff `indent-width = 2`), 88-column lines.
