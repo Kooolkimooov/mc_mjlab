@@ -189,7 +189,20 @@ own push direction: a positive residual adds to it.
 
 ## OBJECT_TRACKING_STD
 
-**Current:** `0.10` m, the Gaussian kernel width of `object_position_tracking`.
+**Current:** `0.04` m, the Gaussian kernel width of `object_position_tracking`.
+
+**Placed against the baseline's own error, not guessed.** Zero-residual episodes
+on HRP5P put the cart 0.02-0.06 m from its commanded position at the nominal
+10 kg (measured 2026-09-16, two environments: 0.144 and 0.154 m at completion
+after a full 1 m push, 0.02-0.06 m through the push itself). At 0.04 m a typical
+0.03 m error scores `exp(-(0.03/0.04)^2) = 0.57`, so the policy starts mid-range
+and can move the term in both directions.
+
+**Why not the 0.10 m it started at:** the same 0.03 m error scores 0.91 there.
+The baseline begins at the ceiling, the only gradient left is in the regime where
+the cart is already lost, and the curve reads as "solved" from iteration one.
+`ZMP_TRACKING_STD` needed no such correction: at 0.05 m the measured 0.036-0.077 m
+ZMP error already lands at 0.10-0.60.
 
 **It is gated on the grasp.** Both object kernels are multiplied by
 `accessors.holding`, which is 1 only while both hands are in
@@ -199,15 +212,12 @@ the episode -- the reach, and the hold after the FSM completes. `zmp_tracking` i
 *not* gated this way: it keeps its own unloaded-feet mask, because the approach
 walk is exactly where a ZMP term still says something.
 
-**Not measured for this task.** The kernel has to be placed against the baseline's
-own error distribution, and that distribution has not been taken on HRP5P: the
-JVRC1 sweep in the knowledge base puts the zero-residual cart error between
-0.02 m and 2.1 m depending on the cart mass, which is three orders of magnitude of
-choice. Place it before reading anything into the reward curve.
+**Re-measure if:** the cart, the waypoint, the payload range or the robot
+changes.
 
-**Re-measure if:** the cart, the waypoint, or the robot changes.
-
-**History:** chosen as a round number so the task trains at all.
+**History:**
+- 2026-09-16 -- 0.10 m, a round number chosen so the task trained at all,
+  narrowed to 0.04 m once the baseline's own error distribution was measured.
 
 ## cart_mass_range_kg
 

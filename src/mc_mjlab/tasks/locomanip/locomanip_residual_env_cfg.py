@@ -60,7 +60,7 @@ EPISODE_LENGTH_S = 60.0
 RESIDUAL_FALLBACK_SCALE = 0.01
 
 #: Kernel width of the object-tracking reward, in metres. docs/locomanip.md#object_tracking_std
-OBJECT_TRACKING_STD = 0.10
+OBJECT_TRACKING_STD = 0.04
 
 #: Kernel width of the ZMP-tracking reward, in metres. docs/locomanip.md#zmp_tracking_std
 ZMP_TRACKING_STD = 0.05
