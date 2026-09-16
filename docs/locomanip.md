@@ -169,17 +169,32 @@ choice. Place it before reading anything into the reward curve.
 
 **History:** chosen as a round number so the task trains at all.
 
-## cart_mass_scale
+## cart_mass_range_kg
 
-**Current:** `None`, i.e. off. When set, `make_locomanip_residual_env_cfg` adds a
-startup `dr.pseudo_inertia` event that scales the cart body's mass *and* inertia
-by a factor drawn from the given range — the payload mismatch the base controller
-cannot observe. `dr.body_mass` is the wrong term here: it leaves inertia behind.
+**Current:** `(1.0, 1000.0)` kg on a 10 kg cart asset, drawn per episode by a
+`reset`-mode `dr.pseudo_inertia` event on the cart body. It is the range the
+mc_mujoco sweep characterised: 50 log-spaced masses from 1 kg to 1000 kg.
 
-**Untested.** The event resolves `SceneEntityCfg("cart", body_names=["Body"])`,
-which matches the asset's only body, but no run has enabled it yet.
+`pseudo_inertia`'s `alpha` is a *log* scale -- mass and inertia both scale by
+`e^(2a)` -- so `mass_alpha_range` converts kilograms to it, and sampling `alpha`
+uniformly makes the mass log-uniform, the spacing the sweep used.
+`dr.body_mass` is the wrong term here: it leaves inertia behind.
 
-**Re-measure if:** the cart asset's body name changes.
+**This is the whole experiment.** mc_rtc keeps modelling the 10 kg `LMC/Cart`
+URDF whatever MuJoCo simulates, and the object feedback carries pose, never mass,
+so a heavy cart is exactly the feedforward mismatch the base controller cannot
+observe. On JVRC1 in mc_mujoco that mismatch dropped the robot from 105 kg
+upward, while the same controller given the true mass pushed 868 kg without
+falling.
 
-**History:** added as the hook for the payload-adaptation experiment the JVRC1
-sweep motivates.
+**Expect most sampled episodes to fail** until something closes that gap: two
+thirds of a log-uniform draw over 1-1000 kg sits above 100 kg. Narrow the range
+for a first training run rather than reading the reward curve as a policy
+verdict.
+
+**Re-measure if:** the cart asset's mass or body name changes, or the robot does
+-- the 105 kg threshold is a JVRC1 measurement, not an HRP5P one.
+
+**History:**
+- 2026-09-16 -- wired as an opt-in `cart_mass_scale` hook, then given the swept
+  range as its default and moved to per-episode resampling.

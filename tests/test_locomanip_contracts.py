@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import math
 from typing import cast
 
+import pytest
 from mjlab.envs import ManagerBasedRlEnvCfg
 
 import mc_mjlab.tasks  # noqa: F401
@@ -12,10 +14,13 @@ from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
 )
 from mc_mjlab.tasks.locomanip import DEMO_TASK_ID, RESIDUAL_TASK_ID
 from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
+  CART_MASS_RANGE_KG,
+  CART_NOMINAL_MASS_KG,
   DECIMATION,
   FRAMESKIP,
   RESIDUAL_SCALE,
   make_locomanip_residual_env_cfg,
+  mass_alpha_range,
 )
 from mc_mjlab.tasks.locomanip.mdp import accessors
 
@@ -83,14 +88,39 @@ def test_scene_resets_joints_first() -> None:
   assert next(iter(events)) == "reset_scene_to_default"
 
 
-def test_cart_variation_hooks_are_opt_in() -> None:
-  """Verify the pose and payload hooks add events only when asked for."""
+def test_cart_pose_hook_is_opt_in() -> None:
+  """Verify the pose hook adds its event only when asked for."""
   assert "reset_cart" not in make_locomanip_residual_env_cfg().events
-  varied = make_locomanip_residual_env_cfg(
-    cart_pose_range={"x": (-0.05, 0.05)}, cart_mass_scale=(1.0, 4.0)
-  )
+  varied = make_locomanip_residual_env_cfg(cart_pose_range={"x": (-0.05, 0.05)})
   assert "reset_cart" in varied.events
-  assert "cart_payload" in varied.events
+
+
+def test_payload_is_drawn_every_episode() -> None:
+  """Verify the swept mass range is on by default and resampled at reset."""
+  payload = make_locomanip_residual_env_cfg().events["cart_payload"]
+  assert payload.mode == "reset"
+  assert payload.params["alpha_range"] == mass_alpha_range(CART_MASS_RANGE_KG)
+  assert (
+    "cart_payload"
+    not in make_locomanip_residual_env_cfg(cart_mass_range_kg=None).events
+  )
+
+
+def test_the_payload_metric_names_the_randomized_body() -> None:
+  """Verify the drawn mass is reported, from the body the event actually varies."""
+  cfg = make_locomanip_residual_env_cfg()
+  asset_cfg = cfg.events["cart_payload"].params["asset_cfg"]
+  assert asset_cfg.body_names == (accessors.OBJECT_BODY,)
+  assert cfg.metrics["cart_mass"].reduce == "last"
+
+
+def test_mass_alpha_range_is_the_log_scale_pseudo_inertia_wants() -> None:
+  """Verify the conversion inverts `mass = nominal * exp(2 * alpha)`."""
+  low, high = mass_alpha_range((CART_NOMINAL_MASS_KG, 4.0 * CART_NOMINAL_MASS_KG))
+  assert low == 0.0
+  assert math.isclose(CART_NOMINAL_MASS_KG * math.exp(2.0 * high), 40.0)
+  with pytest.raises(ValueError):
+    mass_alpha_range((0.0, 1.0))
 
 
 def test_sparse_jacobian_is_kept() -> None:

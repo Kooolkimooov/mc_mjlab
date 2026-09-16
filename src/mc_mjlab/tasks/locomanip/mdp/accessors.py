@@ -26,6 +26,10 @@ ROBOT_ENTITY = "robot"
 OBJECT_ENTITY = "cart"
 
 
+#: The cart asset's only body, which the payload event and metric both name.
+OBJECT_BODY = "Body"
+
+
 REQUIRED_CONTROLLER = "LocomanipController"
 
 

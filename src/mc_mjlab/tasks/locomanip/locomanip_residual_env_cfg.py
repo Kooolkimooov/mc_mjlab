@@ -57,7 +57,27 @@ RESIDUAL_SCALE = 0.01
 #: Kernel width of the object-tracking reward, in metres. docs/locomanip.md#object_tracking_std
 OBJECT_TRACKING_STD = 0.10
 
+#: The cart asset's own mass, which is what mc_rtc's model keeps believing.
+CART_NOMINAL_MASS_KG = 10.0
+
+#: The masses the mc_mujoco sweep characterised. docs/locomanip.md#cart_mass_range_kg
+CART_MASS_RANGE_KG = (1.0, 1000.0)
+
 FALL_LIMIT_ANGLE = math.radians(45.0)
+
+
+def mass_alpha_range(
+  mass_range_kg: tuple[float, float],
+  nominal_mass_kg: float = CART_NOMINAL_MASS_KG,
+) -> tuple[float, float]:
+  """Convert a mass range to `pseudo_inertia`'s log scale, where mass is e^(2a)."""
+  low, high = mass_range_kg
+  if low <= 0.0 or high < low:
+    raise ValueError(f"invalid cart mass range {mass_range_kg}")
+  return (
+    0.5 * math.log(low / nominal_mass_kg),
+    0.5 * math.log(high / nominal_mass_kg),
+  )
 
 
 def locomanip_residual_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
@@ -79,7 +99,7 @@ def make_locomanip_residual_env_cfg(
   episode_length_s: float = EPISODE_LENGTH_S,
   residual_scale: float = RESIDUAL_SCALE,
   cart_pose_range: dict[str, tuple[float, float]] | None = None,
-  cart_mass_scale: tuple[float, float] | None = None,
+  cart_mass_range_kg: tuple[float, float] | None = CART_MASS_RANGE_KG,
   console_output: Literal["none", "single", "all"] = "none",
   print_residual_every: int = 0,
   mc_rtc_yaml: Path = MC_RTC_YAML,
@@ -104,7 +124,7 @@ def make_locomanip_residual_env_cfg(
     observations=_observations(),
     rewards=_rewards(),
     terminations=_terminations(robot_name),
-    events=_events(cart_pose_range, cart_mass_scale),
+    events=_events(cart_pose_range, cart_mass_range_kg),
     metrics=_metrics(),
     decimation=DECIMATION,
     episode_length_s=episode_length_s,
@@ -241,9 +261,9 @@ def _terminations(robot_name: str) -> dict[str, TerminationTermCfg]:
 
 def _events(
   cart_pose_range: dict[str, tuple[float, float]] | None,
-  cart_mass_scale: tuple[float, float] | None,
+  cart_mass_range_kg: tuple[float, float] | None,
 ) -> dict[str, EventTermCfg]:
-  """Reset the scene, and optionally vary the cart the controller must model."""
+  """Reset the scene, and vary the cart whose mass the controller cannot see."""
   # Must come first and must not be dropped: declaring `events` replaces mjlab's
   # default, and this is the only term that resets joints.
   events = {
@@ -261,14 +281,17 @@ def _events(
         "asset_cfg": SceneEntityCfg(locomanip_mdp.accessors.OBJECT_ENTITY),
       },
     )
-  if cart_mass_scale is not None:
+  if cart_mass_range_kg is not None:
     events["cart_payload"] = EventTermCfg(
       func=dr.pseudo_inertia,
-      mode="startup",
+      mode="reset",
       params={
-        "alpha_range": cart_mass_scale,
+        # Uniform in the log scale is log-uniform in mass, which is how the
+        # sweep spaced its samples. docs/locomanip.md#cart_mass_range_kg
+        "alpha_range": mass_alpha_range(cart_mass_range_kg),
         "asset_cfg": SceneEntityCfg(
-          locomanip_mdp.accessors.OBJECT_ENTITY, body_names=("Body",)
+          locomanip_mdp.accessors.OBJECT_ENTITY,
+          body_names=(locomanip_mdp.accessors.OBJECT_BODY,),
         ),
       },
     )
@@ -288,6 +311,8 @@ def _metrics() -> dict[str, MetricsTermCfg]:
     "hands_released": MetricsTermCfg(
       func=locomanip_mdp.metrics.hands_released, reduce="last"
     ),
+    # Every readout above has to be stratified by this. docs/locomanip.md#cart_mass_range_kg
+    "cart_mass": MetricsTermCfg(func=locomanip_mdp.metrics.cart_mass, reduce="last"),
   }
 
 

@@ -42,3 +42,11 @@ def hands_released(
   left = term.datastore_scalar_output(accessors.LEFT_PHASE)
   right = term.datastore_scalar_output(accessors.RIGHT_PHASE)
   return ((left == 0.0) & (right == 0.0)).to(torch.float32)
+
+
+def cart_mass(
+  env: ManagerBasedRlEnv, entity_name: str = accessors.OBJECT_ENTITY
+) -> torch.Tensor:
+  """The payload this episode drew, in kilograms; read it with ``reduce="last"``."""
+  body = env.sim.mj_model.body(f"{entity_name}/{accessors.OBJECT_BODY}").id
+  return torch.as_tensor(env.sim.model.body_mass[:, int(body)])
