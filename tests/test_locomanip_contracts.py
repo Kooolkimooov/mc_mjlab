@@ -20,6 +20,7 @@ from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
   DECIMATION,
   FORCE_SENSORS,
   FRAMESKIP,
+  OBJECT_HISTORY,
   RESIDUAL_SCALE,
   ZMP_TRACKING_STD,
   make_locomanip_residual_env_cfg,
@@ -97,6 +98,16 @@ def test_the_critic_sees_more_than_the_actor() -> None:
   assert actor < critic
   assert critic - actor == {"object_mass", "hand_contact_force"}
   assert set(FORCE_SENSORS) <= actor
+
+
+def test_the_payload_evidence_carries_history() -> None:
+  """Verify one frame is not all the policy gets of the cart it must infer."""
+  actor = make_locomanip_residual_env_cfg().observations["actor"].terms
+  carried = {"object_velocity", "object_position_error", "object_yaw_error"}
+  carried |= set(FORCE_SENSORS)
+  for name in carried:
+    assert actor[name].history_length == OBJECT_HISTORY, name
+  assert actor["manipulation_phase"].history_length == 0
 
 
 def test_worker_failure_truncates_instead_of_penalising() -> None:

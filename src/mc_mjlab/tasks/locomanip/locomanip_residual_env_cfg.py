@@ -61,6 +61,10 @@ OBJECT_TRACKING_STD = 0.10
 #: Kernel width of the ZMP-tracking reward, in metres. docs/locomanip.md#zmp_tracking_std
 ZMP_TRACKING_STD = 0.05
 
+# 0.4 s at 50 Hz: one frame cannot separate a heavy cart from a stuck one, and
+# the payload is exactly what this task asks the policy to infer.
+OBJECT_HISTORY = 20
+
 #: The wrench channels the policy gets: both feet, both hands.
 FORCE_SENSORS = (
   "LeftFootForceSensor_fsensor",
@@ -217,13 +221,14 @@ def _observations() -> dict[str, ObservationGroupCfg]:
     "actions": ObservationTermCfg(func=mdp.observations.executed_action),
     "object_pose": ObservationTermCfg(func=locomanip_mdp.observations.object_pose),
     "object_velocity": ObservationTermCfg(
-      func=locomanip_mdp.observations.object_velocity
+      func=locomanip_mdp.observations.object_velocity, history_length=OBJECT_HISTORY
     ),
     "object_position_error": ObservationTermCfg(
-      func=locomanip_mdp.observations.object_position_error
+      func=locomanip_mdp.observations.object_position_error,
+      history_length=OBJECT_HISTORY,
     ),
     "object_yaw_error": ObservationTermCfg(
-      func=locomanip_mdp.observations.object_yaw_error
+      func=locomanip_mdp.observations.object_yaw_error, history_length=OBJECT_HISTORY
     ),
     "manipulation_phase": ObservationTermCfg(
       func=locomanip_mdp.observations.manipulation_phase
@@ -231,7 +236,9 @@ def _observations() -> dict[str, ObservationGroupCfg]:
     "task_complete": ObservationTermCfg(func=locomanip_mdp.observations.task_complete),
     **{
       name: ObservationTermCfg(
-        func=envs_mdp.builtin_sensor, params={"sensor_name": f"robot/{name}"}
+        func=envs_mdp.builtin_sensor,
+        params={"sensor_name": f"robot/{name}"},
+        history_length=OBJECT_HISTORY,
       )
       for name in FORCE_SENSORS
     },
@@ -241,7 +248,8 @@ def _observations() -> dict[str, ObservationGroupCfg]:
   critic_terms = dict(terms) | {
     "object_mass": ObservationTermCfg(func=locomanip_mdp.observations.object_mass),
     "hand_contact_force": ObservationTermCfg(
-      func=locomanip_mdp.observations.hand_contact_force
+      func=locomanip_mdp.observations.hand_contact_force,
+      history_length=OBJECT_HISTORY,
     ),
   }
   return {

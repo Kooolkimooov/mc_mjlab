@@ -52,6 +52,10 @@ RIGHT_PHASE = "Locomanip::rightPhase"
 COMPLETE = "Locomanip::complete"
 
 
+#: ManipPhaseLabel::Hold, the phase in which a hand carries the object.
+HOLD_PHASE = 4.0
+
+
 def residual_action(
   env: ManagerBasedRlEnv, action_name: str = ACTION_NAME
 ) -> McRtcResidualActionBase:
@@ -62,6 +66,14 @@ def residual_action(
 def object_entity(env: ManagerBasedRlEnv, entity_name: str = OBJECT_ENTITY) -> Entity:
   """Return the manipulated free-body entity."""
   return env.scene[entity_name]
+
+
+def holding(env: ManagerBasedRlEnv, action_name: str = ACTION_NAME) -> torch.Tensor:
+  """Whether both hands carry the object, as a 0/1 mask."""
+  term = residual_action(env, action_name)
+  left = term.datastore_scalar_output(LEFT_PHASE)
+  right = term.datastore_scalar_output(RIGHT_PHASE)
+  return ((left == HOLD_PHASE) & (right == HOLD_PHASE)).to(torch.float32)
 
 
 def object_position_error(

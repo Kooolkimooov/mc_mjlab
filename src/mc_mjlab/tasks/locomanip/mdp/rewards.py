@@ -20,7 +20,11 @@ def object_position_tracking(
 ) -> torch.Tensor:
   """Gaussian kernel on the object's distance from its commanded position."""
   error = accessors.object_position_error(env, action_name)
-  return torch.exp(-error.square().sum(dim=-1) / std**2)
+  # Before the grasp and after the release the object cannot be moved at all, so
+  # a kernel on its error is a constant the policy earns for free.
+  return torch.exp(-error.square().sum(dim=-1) / std**2) * accessors.holding(
+    env, action_name
+  )
 
 
 def object_yaw_tracking(
@@ -28,7 +32,7 @@ def object_yaw_tracking(
 ) -> torch.Tensor:
   """Gaussian kernel on the object's angle from its commanded yaw."""
   error = accessors.object_yaw_error(env, action_name)
-  return torch.exp(-error.square() / std**2)
+  return torch.exp(-error.square() / std**2) * accessors.holding(env, action_name)
 
 
 class zmp_tracking:

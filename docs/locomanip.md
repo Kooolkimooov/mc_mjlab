@@ -159,6 +159,14 @@ torque.
 
 **Current:** `0.10` m, the Gaussian kernel width of `object_position_tracking`.
 
+**It is gated on the grasp.** Both object kernels are multiplied by
+`accessors.holding`, which is 1 only while both hands are in
+`ManipPhaseLabel::Hold`. Before the grasp and after the release the object cannot
+be moved at all, so an ungated kernel pays a constant 1.0 for roughly a fifth of
+the episode -- the reach, and the hold after the FSM completes. `zmp_tracking` is
+*not* gated this way: it keeps its own unloaded-feet mask, because the approach
+walk is exactly where a ZMP term still says something.
+
 **Not measured for this task.** The kernel has to be placed against the baseline's
 own error distribution, and that distribution has not been taken on HRP5P: the
 JVRC1 sweep in the knowledge base puts the zero-residual cart error between
@@ -211,11 +219,34 @@ Read the companion metrics as a pair, `zmp_error / zmp_grounded`: `zmp_error`
 alone averages over every step, so it *falls* when the robot spends more time off
 the ground.
 
-**Not measured for this task.** Standing, the baseline already scores 0.997 on
-this kernel, so at this width the term says almost nothing until the push loads
-the feet; the width has to be placed against the error distribution during the
-push, which has not been taken on HRP5P.
+**Not measured for this task**, but it does discriminate: on one zero-residual
+HRP5P episode with a 112 kg cart, the kernel read 0.9995-0.9998 through the
+approach and dropped to 0.745 once the push loaded the feet. The width still has
+to be placed against the error distribution *during the push*, over episodes and
+masses, which has not been taken.
 
 **Re-measure if:** the robot, the cart or the foot force sensors change.
 
 **History:** chosen as a round number, half of `residual_balance`'s `DCM_STD`.
+
+## OBJECT_HISTORY
+
+**Current:** `20` frames, 0.4 s at the 50 Hz policy rate, on the object's
+velocity and tracking error and on all four force sensors -- the terms that carry
+evidence about the payload. The manipulation phase, the completion flag and the
+proprioception terms stay single-frame.
+
+**Why any history at all:** the task randomizes the cart's mass and never tells
+the controller or the policy what it is, and one frame of force and velocity
+cannot separate a heavy cart from a stuck one. 0.4 s matches
+`residual_balance`'s `CONTROLLER_HISTORY`, and covers both the hand-wrench
+filter's own 0.1 s constant and a footstep.
+
+**Cost:** the actor grows from 175 to 536 dimensions, the critic to 657, since
+`flatten_history_dim` defaults to true and each term flattens term-major.
+
+**Re-measure if:** the policy rate changes, or an ablation shows a shorter window
+identifies the payload as well.
+
+**History:** added with the payload randomization; without it the mass is not
+identifiable from the observation at all.
