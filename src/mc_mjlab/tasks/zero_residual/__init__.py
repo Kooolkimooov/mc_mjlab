@@ -1,5 +1,7 @@
 """Task ids for the zero-residual demo, one per control mode."""
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 

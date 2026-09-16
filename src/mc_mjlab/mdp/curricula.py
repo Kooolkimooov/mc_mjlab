@@ -25,12 +25,14 @@ class episode_length_impulse_curriculum:
     push = _push_term(env, cfg.params.get("term_name", "push_robot"))
     if not isinstance(push, stratified_finite_impulse_curriculum):
       raise TypeError("episode-length curriculum needs a stratified impulse term")
+
     self._push: stratified_finite_impulse_curriculum = push
     self._mixtures = tuple(
       push.validated_weights(mixture) for mixture in cfg.params["mixtures"]
     )
     if len(self._mixtures) < 2:
       raise ValueError("an episode-length ladder needs at least two mixtures")
+
     self.stage = 0
     self.smoothed = float("nan")
     self._push.set_band_weights(self._mixtures[0])
@@ -49,6 +51,7 @@ class episode_length_impulse_curriculum:
     del mixtures, term_name
     if advance_fraction <= regress_fraction:
       raise ValueError("the advance fraction must leave a deadband above regress")
+
     # `curriculum_manager.compute` runs first in `_reset_idx`, so these buffers
     # still hold the terminal lengths of exactly the envs that just finished.
     if env_ids is not None and not isinstance(env_ids, slice):
@@ -61,6 +64,7 @@ class episode_length_impulse_curriculum:
           else (1.0 - smoothing) * self.smoothed + smoothing * sample
         )
         self._step_ladder(advance_fraction, regress_fraction)
+
     return {
       "stage": float(self.stage),
       "smoothed_length_fraction": self.smoothed,
@@ -75,6 +79,7 @@ class episode_length_impulse_curriculum:
       self.stage -= 1
     else:
       return
+
     self._push.set_band_weights(self._mixtures[self.stage])
     # Re-smoothed from the new mixture: the old level is not evidence about it.
     self.smoothed = float("nan")
@@ -90,4 +95,5 @@ def achievement_curriculum_state(
   term = _push_term(env, term_name)
   if not isinstance(term, achievement_finite_impulse_curriculum):
     raise TypeError(f"event term {term_name!r} is not achievement gated")
+
   return term.curriculum_state()

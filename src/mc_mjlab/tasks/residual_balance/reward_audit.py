@@ -166,22 +166,6 @@ class RewardAuditRecorder:
     self.steps = 0
     self._installed = False
 
-  def _validate_arms(self) -> None:
-    """Require non-empty, disjoint, in-range environment assignments."""
-    seen: set[int] = set()
-    for name, ids in self.arms.items():
-      values = ids.cpu().tolist()
-      if not values:
-        raise ValueError(f"reward-audit arm {name!r} has no environments")
-      if len(set(values)) != len(values):
-        raise ValueError(f"reward-audit arm {name!r} repeats an environment")
-      if any(value < 0 or value >= self.num_envs for value in values):
-        raise ValueError(f"reward-audit arm {name!r} has an out-of-range environment")
-      overlap = seen.intersection(values)
-      if overlap:
-        raise ValueError(f"reward-audit arms overlap at environments {sorted(overlap)}")
-      seen.update(values)
-
   def install(self) -> RewardAuditRecorder:
     """Wrap the manager's already-resolved term callables and compute method."""
     if self._installed:
@@ -217,50 +201,6 @@ class RewardAuditRecorder:
 
   def __exit__(self, *_args: Any) -> None:
     self.restore()
-
-  def _compute(self, dt: float) -> torch.Tensor:
-    """Run every term once, then remove synthetic zero-weight contributions."""
-    weights = {
-      name: float(cfg.weight)
-      for name, cfg in zip(
-        self.manager.active_terms, self.manager._term_cfgs, strict=True
-      )
-    }
-    zero_terms: list[tuple[int, str, Any, torch.Tensor]] = []
-    for index, (name, cfg) in enumerate(
-      zip(self.manager.active_terms, self.manager._term_cfgs, strict=True)
-    ):
-      self._probes[name].latest = None
-      if weights[name] == 0.0:
-        zero_terms.append((index, name, cfg, self.manager._episode_sums[name].clone()))
-        cfg.weight = 1.0
-    try:
-      self._original_compute(dt)
-    finally:
-      for _, name, cfg, _ in zero_terms:
-        cfg.weight = weights[name]
-    for index, name, _, episode_before in zero_terms:
-      self.manager._episode_sums[name].copy_(episode_before)
-      self.manager._step_reward[:, index].zero_()
-    scale = dt if self.manager._scale_by_dt else 1.0
-    torch.sum(self.manager._step_reward, dim=1, out=self.manager._reward_buf)
-    self.manager._reward_buf.mul_(scale)
-    self._capture(weights)
-    return self.manager._reward_buf
-
-  def _capture(self, weights: Mapping[str, float]) -> None:
-    """Copy one manager call into arm-specific raw and weighted distributions."""
-    for name in self.manager.active_terms:
-      value = self._probes[name].latest
-      if value is None:
-        raise RuntimeError(f"reward manager did not evaluate term {name!r}")
-      weight = weights[name]
-      self._weights[name].append(weight)
-      for arm, ids in self.arms.items():
-        selected = value[ids]
-        self._samples[arm][name].raw.append(selected)
-        self._samples[arm][name].weighted_rate.append(selected * weight)
-    self.steps += 1
 
   def capture_denominator(self, name: str, values: torch.Tensor) -> None:
     """Capture a per-environment conditional indicator from the same step."""
@@ -318,3 +258,63 @@ class RewardAuditRecorder:
             f"{arm}/{name}: {samples.raw.nonfinite_count} non-finite raw values"
           )
     return problems
+
+  def _validate_arms(self) -> None:
+    """Require non-empty, disjoint, in-range environment assignments."""
+    seen: set[int] = set()
+    for name, ids in self.arms.items():
+      values = ids.cpu().tolist()
+      if not values:
+        raise ValueError(f"reward-audit arm {name!r} has no environments")
+      if len(set(values)) != len(values):
+        raise ValueError(f"reward-audit arm {name!r} repeats an environment")
+      if any(value < 0 or value >= self.num_envs for value in values):
+        raise ValueError(f"reward-audit arm {name!r} has an out-of-range environment")
+      overlap = seen.intersection(values)
+      if overlap:
+        raise ValueError(f"reward-audit arms overlap at environments {sorted(overlap)}")
+      seen.update(values)
+
+  def _compute(self, dt: float) -> torch.Tensor:
+    """Run every term once, then remove synthetic zero-weight contributions."""
+    weights = {
+      name: float(cfg.weight)
+      for name, cfg in zip(
+        self.manager.active_terms, self.manager._term_cfgs, strict=True
+      )
+    }
+    zero_terms: list[tuple[int, str, Any, torch.Tensor]] = []
+    for index, (name, cfg) in enumerate(
+      zip(self.manager.active_terms, self.manager._term_cfgs, strict=True)
+    ):
+      self._probes[name].latest = None
+      if weights[name] == 0.0:
+        zero_terms.append((index, name, cfg, self.manager._episode_sums[name].clone()))
+        cfg.weight = 1.0
+    try:
+      self._original_compute(dt)
+    finally:
+      for _, name, cfg, _ in zero_terms:
+        cfg.weight = weights[name]
+    for index, name, _, episode_before in zero_terms:
+      self.manager._episode_sums[name].copy_(episode_before)
+      self.manager._step_reward[:, index].zero_()
+    scale = dt if self.manager._scale_by_dt else 1.0
+    torch.sum(self.manager._step_reward, dim=1, out=self.manager._reward_buf)
+    self.manager._reward_buf.mul_(scale)
+    self._capture(weights)
+    return self.manager._reward_buf
+
+  def _capture(self, weights: Mapping[str, float]) -> None:
+    """Copy one manager call into arm-specific raw and weighted distributions."""
+    for name in self.manager.active_terms:
+      value = self._probes[name].latest
+      if value is None:
+        raise RuntimeError(f"reward manager did not evaluate term {name!r}")
+      weight = weights[name]
+      self._weights[name].append(weight)
+      for arm, ids in self.arms.items():
+        selected = value[ids]
+        self._samples[arm][name].raw.append(selected)
+        self._samples[arm][name].weighted_rate.append(selected * weight)
+    self.steps += 1

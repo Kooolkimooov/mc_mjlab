@@ -70,6 +70,7 @@ def main() -> None:
   parser.add_argument("--dump", type=Path)
   args = parser.parse_args()
   targets = target_sets(args.target)
+
   cfg = _make_env_cfg(
     args.control,
     num_envs=2 * len(targets),
@@ -79,6 +80,7 @@ def main() -> None:
   )
   cfg.events["reset_base"].params["pose_range"] = {}
   cfg.auto_reset = False
+
   env = ManagerBasedRlEnv(cfg, device=args.device)
   term = mdp.sensors._residual_term(env, "mc_rtc_residual")
   ids = term.residual_ids
@@ -86,12 +88,14 @@ def main() -> None:
     term.target_names if ids is None else tuple(term.target_names[i] for i in ids)
   )
   action_col = {name: index for index, name in enumerate(residual_names)}
+
   action = torch.zeros(
     env.num_envs, env.action_manager.total_action_dim, device=env.device
   )
   for pair, joints in enumerate(targets.values()):
     for joint in joints:
       action[2 * pair + 1, action_col[joint]] = args.sign * args.level
+
   sensors = mdp.sensors._ZmpSensors(env, mdp.sensors.GROUND_CONTACT_SENSORS, "robot")
   robot_name = term.cfg.mc_rtc_robot_name
   limits = mc_rtc.get_effort_limits(robot_name)
@@ -99,11 +103,14 @@ def main() -> None:
     torch.arange(len(term.target_names), device=env.device) if ids is None else ids
   )
   limit = torch.tensor([limits[name] for name in residual_names], device=env.device)
+
   settle_steps = round(args.settle_s / env.step_dt)
   pulse_steps = round(args.pulse_s / env.step_dt)
+
   env.reset()
   for _ in range(settle_steps):
     env.step(torch.zeros_like(action))
+
   accum = torch.zeros(len(targets), 4, device=env.device)
   for _ in range(pulse_steps):
     _, _, terminated, time_outs, _ = env.step(action)

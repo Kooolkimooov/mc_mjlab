@@ -54,11 +54,13 @@ class ResidualMpcJointTorqueAction(
       raise ValueError("blend_factor must be in [0, 1]")
     if cfg.action_scale_blend_factor <= 0.0:
       raise ValueError("action_scale_blend_factor must be positive")
+
     super().__init__(cfg, env)
     self._kp, self._kd = read_pd_gains(
       self._entity, self._target_names, self.num_envs, self.device
     )
     zeroed = zero_pd_gains(self._entity, self._target_names)
+
     self.blend_factor = torch.full(
       (self.num_envs,), cfg.blend_factor, device=self.device
     )
@@ -67,6 +69,7 @@ class ResidualMpcJointTorqueAction(
     self._residual_mask[:, :] = 1.0 if ids is None else 0.0
     if ids is not None:
       self._residual_mask[:, ids] = 1.0
+
     self._residual_torque = torch.zeros(
       self.num_envs, self._num_targets, device=self.device
     )
@@ -77,6 +80,7 @@ class ResidualMpcJointTorqueAction(
     self._effort_substeps = 0
     self._previous_joint_action = torch.zeros_like(self._processed_actions)
     self._second_previous_joint_action = torch.zeros_like(self._processed_actions)
+
     self.refresh_effort_limits_and_action_scale()
     print(
       f"[mc_rtc] ResidualMPC torque control: took over the PD law for "
@@ -87,17 +91,20 @@ class ResidualMpcJointTorqueAction(
     # A policy step begins, so the previous window's effort accumulator is spent.
     self._effort_sq_sum.zero_()
     self._effort_substeps = 0
+
     previous, second_previous = advance_action_history(
       self._processed_actions, self._previous_joint_action
     )
     self._previous_joint_action.copy_(previous)
     self._second_previous_joint_action.copy_(second_previous)
+
     super().process_actions(actions.clamp(-1.0, 1.0))
 
   def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
     super().reset(env_ids)
     if env_ids is None:
       env_ids = slice(None)
+
     self._processed_actions[env_ids] = 0.0
     self._previous_joint_action[env_ids] = 0.0
     self._second_previous_joint_action[env_ids] = 0.0
@@ -121,7 +128,9 @@ class ResidualMpcJointTorqueAction(
         if target is not None:
           upper[:, target] = force_limit[:, column]
           lower[:, target] = -force_limit[:, column]
+
     self._effort_lower, self._effort_upper = lower, upper
+
     ids = self._residual_ids
     effort = upper.abs() if ids is None else upper[:, ids].abs()
     kp = self._kp if ids is None else self._kp[:, ids]
@@ -138,12 +147,14 @@ class ResidualMpcJointTorqueAction(
       ((values < 0.0) | (values > 1.0)).any()
     ):
       raise ValueError("blend factor values must be finite and in [0, 1]")
+
     self.blend_factor[env_ids] = values
 
   def _seed_interpolation(self, env_ids: torch.Tensor) -> None:
     stance = self._entity.data.joint_pos_biased[:, self._target_ids]
     self._previous_control["q"][env_ids] = stance[env_ids]
     self._next_control["q"][env_ids] = stance[env_ids]
+
     for channel in ("alpha", "tau"):
       self._previous_control[channel][env_ids] = 0.0
       self._next_control[channel][env_ids] = 0.0
@@ -154,6 +165,7 @@ class ResidualMpcJointTorqueAction(
     joint_action = residual
     q_biased = self._entity.data.joint_pos_biased[:, self._target_ids]
     qd = self._entity.data.joint_vel[:, self._target_ids]
+
     nominal, residual, blended = paper_torque_blend(
       interpolated_control["q"],
       self._entity.data.default_joint_pos[:, self._target_ids],
@@ -167,9 +179,11 @@ class ResidualMpcJointTorqueAction(
       self.blend_factor,
       self._residual_mask,
     )
+
     effort, executed, projected = project_residual(
       nominal, blended, self._effort_lower, self._effort_upper
     )
+
     self._nominal_torque.copy_(nominal)
     self._residual_torque.copy_(residual)
     self._blended_residual_torque.copy_(blended)
@@ -178,6 +192,7 @@ class ResidualMpcJointTorqueAction(
     # the 500 Hz peaks between policy steps are real applied control.
     self._effort_sq_sum += effort.square()
     self._effort_substeps += 1
+
     self._entity.set_joint_effort_target(effort, joint_ids=self._target_ids)
     return executed, projected
 

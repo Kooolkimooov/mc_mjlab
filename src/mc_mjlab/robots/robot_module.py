@@ -69,6 +69,7 @@ def get_default_joint_positions(
     if drop_zeros and angle == 0.0:
       continue
     out[joint] = angle
+
   return out
 
 
@@ -106,6 +107,7 @@ def _get_tree(name: str) -> _Tree:
   bodies = tuple(_decode_joint_key(b.name()) for b in mb.bodies())
   predecessor = tuple(mb.predecessor(i) for i in range(mb.nrJoints()))
   successor = tuple(mb.successor(i) for i in range(mb.nrJoints()))
+
   return _Tree(
     joints=joints,
     dofs=dofs,
@@ -162,6 +164,7 @@ def get_chain_joints(name: str, to_body: str) -> tuple[str, ...]:
   tree = _get_tree(name)
   if to_body not in tree.body_index:
     raise ValueError(f"{name} has no body '{to_body}'")
+
   root = tree.body_index[get_root_body(name)]
   found: list[str] = []
   body = tree.body_index[to_body]
@@ -169,6 +172,7 @@ def get_chain_joints(name: str, to_body: str) -> tuple[str, ...]:
     joint = tree.joint_of_body[body]
     found.append(tree.joints[joint])
     body = tree.predecessor[joint]
+
   return _in_ref_order(name, found)
 
 
@@ -177,6 +181,7 @@ def get_subtree_joints(name: str, from_body: str) -> tuple[str, ...]:
   tree = _get_tree(name)
   if from_body not in tree.body_index:
     raise ValueError(f"{name} has no body '{from_body}'")
+
   frontier = [tree.body_index[from_body]]
   reached = set(frontier)
   found: list[str] = []
@@ -187,6 +192,7 @@ def get_subtree_joints(name: str, from_body: str) -> tuple[str, ...]:
         found.append(tree.joints[joint])
         reached.add(tree.successor[joint])
         frontier.append(tree.successor[joint])
+
   return _in_ref_order(name, found)
 
 

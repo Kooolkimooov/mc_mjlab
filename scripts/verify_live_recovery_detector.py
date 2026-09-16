@@ -23,6 +23,7 @@ def main() -> None:
   parser.add_argument("--disturbance", choices=("finite", "velocity"), default="finite")
   parser.add_argument("--randomization-stage", type=int, choices=(0, 1, 2), default=0)
   args = parser.parse_args()
+
   cfg = _make_env_cfg(
     "position",
     num_envs=args.num_envs,
@@ -32,17 +33,20 @@ def main() -> None:
   )
   if args.disturbance == "velocity":
     cfg.events["push_robot"].params["planar_speed"] = 0.4
+
   env = ManagerBasedRlEnv(cfg, device=args.device)
   term = mdp.sensors._residual_term(env, "mc_rtc_residual")
   action = torch.ones(
     env.num_envs, env.action_manager.total_action_dim, device=env.device
   )
+
   max_authority = 0.0
   inactive_peak = 0.0
   authority_sum = 0.0
   impulses = 0
   impulse_error = 0.0
   push_term = mdp.disturbances._push_term(env, "push_robot")
+
   env.reset()
   for _ in range(args.steps):
     env.step(action)

@@ -264,6 +264,7 @@ def run_checkpoint(
   cfg = scenario_cfg(scenario, seed, args)
   env = ManagerBasedRlEnv(cfg, device=args.device)
   wrapped = RslRlVecEnvWrapper(env)
+
   runner = ResidualBalanceOnPolicyRunner(
     wrapped,
     asdict(residual_balance_ppo_cfg(recurrent=args.recurrent)),
@@ -275,15 +276,18 @@ def run_checkpoint(
     strict=True,
     map_location=args.device,
   )
+
   policy = runner.get_inference_policy(device=args.device)
   residual_term = env.action_manager.get_term("mc_rtc_residual")
   if not isinstance(residual_term, McRtcResidualActionBase):
     raise TypeError(f"unexpected residual action type: {type(residual_term).__name__}")
+
   recovery_s = float(env.reward_manager.get_term_cfg("recovery_dcm").params["window_s"])
   stratified = StratifiedDiagnostics(
     env, residual_term, DISTURBANCE_WARMUP_S, recovery_s
   )
   disturbances = PairedDisturbances(env, scenario, seed, args.achievement_stage)
+
   counts = [[0, 0] for _ in range(env.num_envs)]
   current_policy = torch.tensor(
     [bool(env_id % 2) for env_id in range(env.num_envs)],
@@ -299,10 +303,12 @@ def run_checkpoint(
   strata: list[StratumRecord] = []
   term_names = env.termination_manager.active_terms
   reward_names = env.reward_manager.active_terms
+
   env.reset()
   while bool(active.any()):
     disturbances.before_step(active, pairs, env.episode_length_buf)
     action.zero_()
+
     if bool((current_policy & active).any()):
       with torch.inference_mode():
         proposed = policy(wrapped.get_observations())
@@ -311,9 +317,11 @@ def run_checkpoint(
     policy.reset(terminated | time_outs)
     disturbances.after_step()
     stratified.capture(active)
+
     done = (terminated | time_outs).nonzero(as_tuple=False).flatten()
     if done.numel() == 0:
       continue
+
     metric_values = _metric_snapshot(env, done)
     reward_values = {
       name: env.reward_manager._episode_sums[name][done].tolist()
@@ -326,6 +334,7 @@ def run_checkpoint(
       name: values[done].tolist() for name, values in termination_terms.items()
     }
     lengths = env.episode_length_buf[done].tolist()
+
     strata.extend(
       stratified.finish(
         str(checkpoint),
@@ -337,6 +346,7 @@ def run_checkpoint(
         termination_terms,
       )
     )
+
     for row, env_id in enumerate(done.tolist()):
       if not bool(active[env_id]):
         continue
@@ -357,14 +367,17 @@ def run_checkpoint(
           metrics={name: float(metric_values[name][row]) for name in metric_values},
         )
       )
+
       counts[env_id][arm_index] += 1
       if min(counts[env_id]) >= args.episodes_per_env:
         active[env_id] = False
       else:
         current_policy[env_id] = not current_policy[env_id]
         pairs[env_id] = counts[env_id][int(current_policy[env_id])]
+
     disturbances.clear(done)
     _reset_done(env, done)
+
   residual_term.close()
   env.close()
   return episodes, strata
@@ -503,6 +516,7 @@ def summarize(episodes: list[Episode]) -> dict:
     (episode.seed, episode.env_id, episode.pair, episode.arm): episode
     for episode in episodes
   }
+
   summary: dict[str, dict] = {}
   for name in names:
     arm_values = {"baseline": [], "policy": []}
@@ -521,6 +535,7 @@ def summarize(episodes: list[Episode]) -> dict:
       arm_values["baseline"].append(base_value)
       arm_values["policy"].append(policy_value)
       env_differences.setdefault((seed, env_id), []).append(policy_value - base_value)
+
     env_clusters = {
       key: sum(values) / len(values) for key, values in env_differences.items()
     }
@@ -529,6 +544,7 @@ def summarize(episodes: list[Episode]) -> dict:
     clusters = list(env_clusters.values())
     cluster_level = "seed-environment"
     paired = _cluster_stats(clusters)
+
     base_mean = (
       sum(arm_values["baseline"]) / len(arm_values["baseline"])
       if arm_values["baseline"]
@@ -539,6 +555,7 @@ def summarize(episodes: list[Episode]) -> dict:
       if arm_values["policy"]
       else float("nan")
     )
+
     summary[name] = {
       "baseline": base_mean,
       "policy": policy_mean,
@@ -547,6 +564,7 @@ def summarize(episodes: list[Episode]) -> dict:
       "clusters": len(clusters),
       "cluster_level": cluster_level,
     }
+
   _holm_adjust(summary)
   return summary
 
@@ -608,6 +626,7 @@ def summarize_strata(records: list[StratumRecord]) -> dict[str, dict]:
     grouped.setdefault((record.regime, record.axis, record.direction), []).append(
       record
     )
+
   output = {}
   for (regime, axis, direction), group in grouped.items():
     metrics = {
@@ -619,14 +638,17 @@ def summarize_strata(records: list[StratumRecord]) -> dict[str, dict]:
         for name in sorted({name for record in group for name in record.metrics})
       },
     }
+
     terminations = {
       name: _paired_stratum_value(
         group, lambda record, term=name: record.terminations.get(term, 0)
       )
       for name in sorted({name for record in group for name in record.terminations})
     }
+
     _holm_adjust(metrics)
     _holm_adjust(terminations)
+
     joints = {}
     joint_names = sorted({name for record in group for name in record.joints})
     for joint_name in joint_names:
@@ -663,6 +685,7 @@ def _holm_adjust(summary: dict[str, dict]) -> None:
       if math.isfinite(values["paired"]["p"])
     )
   )
+
   running = 0.0
   total = len(finite)
   for rank, (p_value, name) in enumerate(finite):
@@ -684,10 +707,12 @@ def promotion(checkpoint_summaries: dict[str, dict]) -> dict:
       reasons.append(f"{scenario}: projection is at least 0.1%")
     if summary["near_bound_fraction"]["policy"] >= 0.01:
       reasons.append(f"{scenario}: near-bound activity is at least 1%")
+
   nominal = checkpoint_summaries.get("nominal")
   if nominal is not None:
     if nominal["gate_duty"]["policy"] > 0.05:
       reasons.append("nominal: authority duty exceeds 5%")
+
     base = nominal["com_velocity_error"]["baseline"]
     upper = nominal["com_velocity_error"]["paired"]["ci_high"]
     if base and upper / base >= 0.05:
@@ -702,6 +727,7 @@ def promotion(checkpoint_summaries: dict[str, dict]) -> dict:
       limit = max(0.05, sampling_floor) if math.isfinite(sampling_floor) else 0.05
       if paired["ci_high"] / base >= limit:
         reasons.append(f"nominal: {name} upper-CI regression exceeds its gate")
+
   recovery = checkpoint_summaries.get("finite_impulse")
   # A gate read off an invalidated scenario is not a verdict about the policy.
   if "finite_impulse" in invalid:
@@ -720,14 +746,17 @@ def promotion(checkpoint_summaries: dict[str, dict]) -> dict:
         "finite impulse: recovery DCM improvement is unresolved by "
         f"{paired['clusters']:.0f} clusters; {needed:.0f} would resolve it"
       )
+
   robust = checkpoint_summaries.get("robust")
   if robust is not None and robust["pre_disturbance_hazard"]["baseline"] > 0.05:
     reasons.append("robust: baseline pre-disturbance hazard exceeds 5%")
+
   scored = {
     scenario: summary
     for scenario, summary in checkpoint_summaries.items()
     if scenario not in invalid
   }
+
   hazards = [summary["hazard"] for summary in scored.values()]
   total_base = sum(item["baseline"] for item in hazards)
   total_policy = sum(item["policy"] for item in hazards)
@@ -743,12 +772,14 @@ def promotion(checkpoint_summaries: dict[str, dict]) -> dict:
     ratio = policy / base if base else (1.0 if not policy else math.inf)
     if ratio > 1.10:
       reasons.append(f"{scenario}: hazard ratio exceeds 1.10")
+
   recovery_gain = (
     -recovery["recovery_dcm_error"]["relative"] if recovery is not None else -math.inf
   )
   residual = sum(
     summary["residual_rms"]["policy"] for summary in checkpoint_summaries.values()
   ) / max(1, len(checkpoint_summaries))
+
   return {
     "eligible": not reasons,
     "reasons": reasons,
@@ -896,9 +927,11 @@ def main() -> None:
   parser.add_argument("--device", default="cuda:0")
   parser.add_argument("--out-dir", type=Path, default=Path("logs/qualification"))
   args = parser.parse_args()
+
   args.authority_set = args.authority_set or (
     "ankle" if args.achievement_stage is not None else "uniform"
   )
+
   checkpoints = resolve_checkpoints(args.checkpoints)
   scenarios = args.scenario or list(SCENARIOS)
   seeds = args.seed or ([42, 43] if args.achievement_stage is not None else [42])

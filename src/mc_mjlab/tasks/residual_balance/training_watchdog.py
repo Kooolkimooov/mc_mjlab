@@ -126,6 +126,7 @@ def decide_health(
 ) -> HealthDecision:
   """Combine liveness, freshness, memory, worker, and qualification guards."""
   issues: list[tuple[str, str]] = []
+
   heartbeat = _threshold_level(
     observation.heartbeat_age_s,
     thresholds.heartbeat_warn_s,
@@ -136,6 +137,7 @@ def decide_health(
     issues.append(
       (heartbeat, f"heartbeat stale for {observation.heartbeat_age_s:.0f}s")
     )
+
   checkpoint = _threshold_level(
     observation.checkpoint_age_s,
     thresholds.checkpoint_warn_s,
@@ -146,6 +148,7 @@ def decide_health(
     issues.append(
       (checkpoint, f"latest checkpoint is {observation.checkpoint_age_s:.0f}s old")
     )
+
   if observation.gpu_free_mb is not None and observation.gpu_low_streak > 0:
     gpu = _threshold_level(
       observation.gpu_free_mb,
@@ -158,6 +161,7 @@ def decide_health(
       gpu = "preserve"
     if gpu != "ok":
       issues.append((gpu, f"GPU free memory is {observation.gpu_free_mb:.0f} MiB"))
+
   worker = _threshold_level(
     float(observation.worker_failures),
     float(thresholds.worker_warn),
@@ -166,6 +170,7 @@ def decide_health(
   )
   if worker != "ok":
     issues.append((worker, f"{observation.worker_failures} controller worker failures"))
+
   qualification = _threshold_level(
     float(observation.qualification_bad_streak),
     float(thresholds.qualification_warn),
@@ -179,6 +184,7 @@ def decide_health(
         f"{observation.qualification_bad_streak} consecutive qualification regressions",
       )
     )
+
   level = max((item[0] for item in issues), key=lambda name: LEVELS[name], default="ok")
   return HealthDecision(level, tuple(reason for _, reason in issues))
 
@@ -381,6 +387,14 @@ class RunnerWatchdogBridge:
       checkpoint=self._last_checkpoint,
     )
 
+  def as_config(self) -> dict[str, Any]:
+    """Return the bridge's persistent runtime facts for checkpoint metadata."""
+    return {
+      "enabled": self.enabled,
+      "started_unix": self.started_unix,
+      "protocol_version": 1,
+    }
+
   def _termination_delta(self, extras: list[dict[str, Any]]) -> dict[str, int]:
     """Sum exact episode termination counts emitted during one rollout."""
     output: dict[str, int] = {}
@@ -421,12 +435,15 @@ class RunnerWatchdogBridge:
         {"state": "rejected", "message": str(error), "updated_unix": time.time()},
       )
       return
+
     if request is None:
       return
+
     request_id = str(request.get("request_id", ""))
     if not request_id or request_id == self._last_request_id:
       return
     self._last_request_id = request_id
+
     action = request.get("action")
     if action not in ("preserve", "stop"):
       atomic_json(
@@ -439,6 +456,7 @@ class RunnerWatchdogBridge:
         },
       )
       return
+
     if bool(getattr(self.runner, "is_distributed", False)):
       atomic_json(
         self.root / "response.json",
@@ -450,6 +468,7 @@ class RunnerWatchdogBridge:
         },
       )
       return
+
     checkpoint = self.root / f"model_{iteration}.pt"
     self.runner.save(
       str(checkpoint),
@@ -457,6 +476,7 @@ class RunnerWatchdogBridge:
     )
     with checkpoint.open("rb") as stream:
       os.fsync(stream.fileno())
+
     response = {
       "request_id": request_id,
       "action": action,
@@ -490,11 +510,3 @@ class RunnerWatchdogBridge:
         **values,
       },
     )
-
-  def as_config(self) -> dict[str, Any]:
-    """Return the bridge's persistent runtime facts for checkpoint metadata."""
-    return {
-      "enabled": self.enabled,
-      "started_unix": self.started_unix,
-      "protocol_version": 1,
-    }

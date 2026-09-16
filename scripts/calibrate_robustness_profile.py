@@ -55,13 +55,16 @@ def run_profile(profile: str, args: argparse.Namespace) -> dict[str, float]:
   )
   if stage:
     select_components(cfg, profile)
+
   cfg.seed = args.seed
   cfg.episode_length_s = args.seconds
   cfg.events["reset_base"].params["pose_range"] = {}
+
   env = ManagerBasedRlEnv(cfg, device=args.device)
   action = env.action_manager.get_term("mc_rtc_residual")
   if not isinstance(action, McRtcResidualActionBase):
     raise TypeError(f"unexpected residual action type: {type(action).__name__}")
+
   zero = torch.zeros(
     env.num_envs, env.action_manager.total_action_dim, device=env.device
   )
@@ -71,6 +74,7 @@ def run_profile(profile: str, args: argparse.Namespace) -> dict[str, float]:
   failures = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
   worker_failures = torch.zeros_like(failures)
   alpha_medians: list[float] = []
+
   try:
     env.reset()
     while bool(active.any()):
@@ -82,6 +86,7 @@ def run_profile(profile: str, args: argparse.Namespace) -> dict[str, float]:
           alpha = alpha[:, action.residual_ids]
         alpha = alpha.abs().median()
         alpha_medians.append(float(alpha))
+
       worker = env.termination_manager.get_term("controller_worker_failed")
       done = terminated | time_outs
       failures |= active & terminated & ~worker
@@ -94,6 +99,7 @@ def run_profile(profile: str, args: argparse.Namespace) -> dict[str, float]:
     gc.collect()
     if torch.cuda.is_available():
       torch.cuda.empty_cache()
+
   return {
     "survival": 1.0 - float(failures.float().mean()),
     "worker_failure": float(worker_failures.float().mean()),

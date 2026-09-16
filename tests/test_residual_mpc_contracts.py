@@ -49,6 +49,7 @@ def test_blending() -> None:
   kp = torch.tensor([[10.0, 20.0]])
   kd = torch.tensor([[2.0, 4.0]])
   mask = torch.ones_like(action)
+
   nominal, residual, blended = paper_torque_blend(
     controller_q,
     default_q,
@@ -67,6 +68,7 @@ def test_blending() -> None:
   # the bug this replaces -- gives [[5.6, 6.4]].
   torch.testing.assert_close(residual, torch.tensor([[2.6, 4.4]]))
   torch.testing.assert_close(blended, torch.tensor([[0.26, 0.44]]))
+
   _, zero_residual, zero_blended = paper_torque_blend(
     controller_q,
     default_q,
@@ -82,10 +84,12 @@ def test_blending() -> None:
   )
   assert bool((zero_residual != 0.0).all())
   assert bool((zero_blended == 0.0).all())
+
   scale = paper_joint_action_scale(
     torch.tensor([[100.0, 1.0]]), torch.tensor([[100.0, 100.0]]), 0.1
   )
   torch.testing.assert_close(scale, torch.tensor([[0.1, 0.02]]))
+
   effort, executed, projected = project_residual(
     torch.tensor([[9.0, 0.0]]),
     torch.tensor([[3.0, 1.0]]),

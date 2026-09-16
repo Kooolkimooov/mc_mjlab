@@ -58,6 +58,7 @@ def _actuator_gain_columns(
       i = index_of.get(name)
       if i is not None:
         columns.append((i, stiffness, damping, j))
+
   return columns
 
 
@@ -73,6 +74,7 @@ def read_pd_gains(
   for i, stiffness, damping, j in _actuator_gain_columns(entity, target_names):
     kp[:, i] = stiffness[:, j]
     kd[:, i] = damping[:, j]
+
   return kp, kd
 
 
@@ -82,4 +84,5 @@ def zero_pd_gains(entity: Entity, target_names: Sequence[str]) -> int:
   for _, stiffness, damping, j in columns:
     stiffness[:, j] = 0.0
     damping[:, j] = 0.0
+
   return len(columns)

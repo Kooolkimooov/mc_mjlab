@@ -112,6 +112,7 @@ def main() -> None:
   args.log_root.mkdir(parents=True, exist_ok=True)
   state_path = args.log_root / "run_state.json"
   state = read_state(state_path)
+
   for phase in phases:
     smoke = phase == "smoke"
     iterations = args.smoke_iterations if smoke else args.diagnostic_iterations
@@ -123,6 +124,7 @@ def main() -> None:
       if not args.rerun and state.get(key, {}).get("exit_code") == 0:
         print(f"[curriculum] skip completed {key}", flush=True)
         continue
+
       command = train_command(
         arm,
         phase,
@@ -133,6 +135,7 @@ def main() -> None:
         logger,
         args.log_root,
       )
+
       log_path = args.log_root / f"{phase}-{arm.name}.log"
       print(f"[curriculum] start {key}; log {log_path}", flush=True)
       with log_path.open("w") as stream:
@@ -143,6 +146,7 @@ def main() -> None:
           text=True,
           check=False,
         )
+
       state[key] = {
         "exit_code": result.returncode,
         "task_id": arm.task_id,
@@ -153,6 +157,7 @@ def main() -> None:
         "logger": logger,
         "log": str(log_path),
       }
+
       write_state(state_path, state)
       if result.returncode:
         raise SystemExit(f"curriculum run {key} failed; see {log_path}")

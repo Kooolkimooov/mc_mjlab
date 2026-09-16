@@ -41,6 +41,7 @@ class McRtcResidualOnPolicyRunner(MjlabOnPolicyRunner):
     self._controller_provenance = collect_controller_provenance(env)
     self._effective_manifest = build_effective_training_manifest(env, train_cfg)
     self.setup_task_hooks(env, train_cfg, log_dir)
+
     if log_dir is not None and int(os.environ.get("RANK", "0")) == 0:
       materialize_provenance(self._controller_provenance, Path(log_dir))
       materialize_effective_training_manifest(self._effective_manifest, Path(log_dir))
@@ -68,6 +69,7 @@ class McRtcResidualOnPolicyRunner(MjlabOnPolicyRunner):
     """Reject a checkpoint when its recorded base controller is different."""
     infos = super().load(path, load_cfg, strict, map_location)
     checkpoint_infos = infos or {}
+
     saved_provenance = checkpoint_infos.get(self.PROVENANCE_KEY)
     if saved_provenance is None:
       print(f"[mc_mjlab] checkpoint {path} predates base-controller provenance")
@@ -79,6 +81,7 @@ class McRtcResidualOnPolicyRunner(MjlabOnPolicyRunner):
         "configuration. Restore the YAML/PD files embedded under infos/"
         f"{self.PROVENANCE_KEY} before loading {path}."
       )
+
     saved_manifest = checkpoint_infos.get(self.MANIFEST_KEY)
     if saved_manifest is None:
       print(f"[mc_mjlab] checkpoint {path} predates effective-config manifests")
@@ -88,6 +91,7 @@ class McRtcResidualOnPolicyRunner(MjlabOnPolicyRunner):
         self._effective_manifest,
         full_resume=load_cfg is None,
       )
+
     if load_cfg is None:
       synchronize_resumed_curriculum(self.env, checkpoint_infos)
       self.restore_task_state(checkpoint_infos)
@@ -98,6 +102,7 @@ class McRtcResidualOnPolicyRunner(MjlabOnPolicyRunner):
           "[mc_mjlab] curriculum targets were realigned to the restored "
           "common_step_counter"
         )
+
     return infos
 
   def setup_task_hooks(
@@ -123,6 +128,7 @@ class McRtcResidualOnPolicyRunner(MjlabOnPolicyRunner):
     configure = getattr(self.alg, "set_actor_update_mask_source", None)
     if not callable(configure):
       return
+
     action = env.unwrapped.action_manager.get_term("mc_rtc_residual")
     if not isinstance(action, McRtcResidualActionBase):
       raise TypeError("residual runner requires an mc_rtc residual action")

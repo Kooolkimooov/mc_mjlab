@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Write docs/architecture from the source; --check turns drift into a failure."""
 
+from __future__ import annotations
+
 import argparse
 import ast
 import difflib

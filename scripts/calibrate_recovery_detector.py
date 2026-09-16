@@ -118,24 +118,30 @@ def fit(
   env_ids = torch.arange(features.shape[1])
   train_env = env_ids % 2 == 0
   test_env = ~train_env
+
   train_nominal = features[:, train_env][nominal[:, train_env]]
   train_recovery = features[:, train_env][recovery[:, train_env]]
+
   centers = torch.quantile(train_nominal, 0.95, dim=0)
   recovery_q80 = torch.quantile(train_recovery, 0.80, dim=0)
   nominal_q75 = torch.quantile(train_nominal, 0.75, dim=0)
   nominal_q25 = torch.quantile(train_nominal, 0.25, dim=0)
   scales = torch.maximum(recovery_q80 - centers, nominal_q75 - nominal_q25)
   scales = scales.clamp(min=torch.tensor((0.005, 0.02, 0.01, 0.05)))
+
   normalized = ((features - centers) / scales).amax(dim=2)
   train_scores = normalized[:, train_env][nominal[:, train_env]]
   recovery_scores = normalized[:, train_env][recovery[:, train_env]]
+
   angular_rise = features[1:, :, 1] - features[:-1, :, 1]
   valid_rise = episode_ages[1:] >= episode_ages[:-1]
   nominal_rise = nominal[1:] & valid_rise
   train_nominal_rise = angular_rise[:, train_env][nominal_rise[:, train_env]]
+
   best: tuple[float, float, RecoveryCalibration] | None = None
   closest: tuple[float, float, float, RecoveryCalibration] | None = None
   best_duty: tuple[float, float, float, RecoveryCalibration] | None = None
+
   for max_active_s in (1.80, 2.00):
     for rearm_s in (0.10, 0.25, 0.50):
       for rearm_quantile in (0.90, 0.95, 0.99):
@@ -168,6 +174,7 @@ def fit(
             authority = replay(
               features[:, train_env], candidate, dt, episode_ages[:, train_env]
             )
+
             duty = float(authority[nominal[:, train_env]].mean())
             recall = float((authority[recovery[:, train_env]] > 0.05).float().mean())
             late_rate = float((authority[late[:, train_env]] > 0.05).float().mean())
@@ -175,15 +182,18 @@ def fit(
               key = (-recall, late_rate, duty)
               if best_duty is None or key < best_duty[:3]:
                 best_duty = (-recall, late_rate, duty, candidate)
+
             if duty <= 0.05 and recall >= 0.80:
               key = (late_rate, duty, -recall)
               if closest is None or key < closest[:3]:
                 closest = (late_rate, duty, -recall, candidate)
+
             if duty > 0.05 or recall < 0.80 or late_rate >= 0.01:
               continue
             key = (recall, max_active_s)
             if best is None or key > best[:2]:
               best = (recall, max_active_s, candidate)
+
   if best is None:
     detail = "no candidate met nominal-duty and recovery-recall gates"
     if closest is not None:
@@ -198,7 +208,9 @@ def fit(
         f"calibration {best_duty[3]}"
       )
     raise RuntimeError(f"no detector candidate met all three train gates: {detail}")
+
   calibration = best[2]
+
   result = {
     "train": evaluate_split(
       features[:, train_env],
@@ -265,6 +277,7 @@ def main() -> None:
   parser.add_argument("--trace-in", type=Path)
   parser.add_argument("--trace-out", type=Path)
   args = parser.parse_args()
+
   if args.trace_in is None:
     features, ages, episode_ages = collect(args)
     if args.trace_out is not None:
@@ -274,6 +287,7 @@ def main() -> None:
     features, ages, episode_ages = torch.load(
       args.trace_in, map_location="cpu", weights_only=True
     )
+
   calibration, results = fit(features, ages, episode_ages, 0.02)
   heldout = results["heldout"]
   accepted = (
@@ -281,6 +295,7 @@ def main() -> None:
     and heldout["recovery_recall"] >= 0.80
     and heldout["late_activation"] < 0.01
   )
+
   payload = {
     "feature_names": FEATURE_NAMES,
     "centers": calibration.centers,
@@ -304,6 +319,7 @@ def main() -> None:
       **results,
     },
   }
+
   args.output.parent.mkdir(parents=True, exist_ok=True)
   args.output.write_text(json.dumps(payload, indent=2) + "\n")
   print(json.dumps(payload, indent=2))

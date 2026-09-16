@@ -1,5 +1,7 @@
 """Pure tensor contracts shared by the ResidualMPC task and its checks."""
 
+from __future__ import annotations
+
 import torch
 
 #: Bumped when the blending equation changes meaning; version 1 referenced the
@@ -44,9 +46,11 @@ def paper_torque_blend(
   # posture. docs/residual-mpc.md#paper_torque_blend
   fallback = kp * (controller_q - q_biased) + kd * (controller_qd - qd)
   nominal = torch.where(controller_torque != 0.0, controller_torque, fallback)
+
   residual = kp * (joint_action + default_q - q_biased) - kd * qd
   residual = residual * residual_mask
   blended = blend_factor.unsqueeze(-1) * residual
+
   return nominal, residual, blended
 
 

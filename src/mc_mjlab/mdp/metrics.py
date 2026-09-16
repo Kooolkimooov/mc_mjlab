@@ -168,6 +168,7 @@ class max_effort_ratio:
     ids = term.residual_ids
     cols = list(range(len(term.target_names))) if ids is None else ids.tolist()
     limits = mc_rtc.get_effort_limits(term.cfg.mc_rtc_robot_name)
+
     self._cols = torch.tensor(cols, device=env.device, dtype=torch.long)
     self._limits = torch.tensor(
       [limits[term.target_names[i]] for i in cols], device=env.device
@@ -212,8 +213,10 @@ class recovery_dcm_error:
     error, normal_force = self._sensors.dcm_offset(
       env, action_name, min_normal_force, plane_height
     )
+
     age = _age_since_push(env, self._push)
     active = (age >= 1) & (age <= round(window_s / env.step_dt))
+
     return error * active * (normal_force >= min_normal_force)
 
 
@@ -238,9 +241,11 @@ class recovery_authority_coverage:
   ) -> torch.Tensor:
     del sensor_names, asset_cfg, push_term_name
     normal_force = self._sensors.normal_forces(env).sum(dim=1)
+
     age = _age_since_push(env, self._push)
     active = (age >= 1) & (age <= round(window_s / env.step_dt))
     active = active & (normal_force >= min_normal_force)
+
     return active & (_residual_term(env, action_name).last_gate > 0.0)
 
 
@@ -264,6 +269,8 @@ class recovery_active:
   ) -> torch.Tensor:
     del sensor_names, asset_cfg, push_term_name
     normal_force = self._sensors.normal_forces(env).sum(dim=1)
+
     age = _age_since_push(env, self._push)
     active = (age >= 1) & (age <= round(window_s / env.step_dt))
+
     return active * (normal_force >= min_normal_force)

@@ -143,6 +143,7 @@ class com_velocity_tracking:
     ] - term.datastore_vector_output(CONTROL_COM_VEL)
     horizontal = torch.linalg.vector_norm(error[:, :2], dim=1)
     vertical = error[:, 2].abs()
+
     return 0.5 * (
       torch.exp(-torch.square(horizontal / std))
       + torch.exp(-torch.square(vertical / std_vertical))
@@ -213,6 +214,7 @@ class foot_slip:
     velocity = env.sim.data.sensordata[:, self._adr].reshape(-1, num_feet, 3)
     loaded = self._sensors.normal_forces(env) >= min_normal_force
     tangential = torch.sum(torch.square(velocity[:, :, :2]), dim=2)
+
     return torch.sum(tangential * loaded, dim=1)
 
 
@@ -224,12 +226,14 @@ class torque_margin:
     ids = term.residual_ids
     cols = list(range(len(term.target_names))) if ids is None else ids.tolist()
     limits = mc_rtc.get_effort_limits(term.cfg.mc_rtc_robot_name)
+
     missing = [term.target_names[i] for i in cols if term.target_names[i] not in limits]
     if missing:
       raise KeyError(
         f"the mc_rtc RobotModule reports no torque limit for {missing}; "
         f"`torque_margin` cannot bound a joint it has no limit for."
       )
+
     self._cols = torch.tensor(cols, device=env.device, dtype=torch.long)
     self._limits = torch.tensor(
       [limits[term.target_names[i]] for i in cols], device=env.device
@@ -250,6 +254,7 @@ class torque_margin:
       env.scene[term.cfg.entity_name].data.qfrc_actuator[:, term.target_ids].abs(),
     )[:, self._cols]
     over = torch.relu(peak / self._limits - soft_ratio)
+
     # The reset teleport drives a substep transient of 22x the limit that no policy
     # -rate sample sees and the residual did not cause. docs/reward-shaping.md
     settled = env.episode_length_buf >= warmup_steps
@@ -282,8 +287,10 @@ class recovery_dcm:
     error, normal_force = self._sensors.dcm_offset(
       env, action_name, min_normal_force, plane_height
     )
+
     age = _age_since_push(env, self._push)
     gate = (age >= 1) & (age <= round(window_s / env.step_dt))
+
     return (
       torch.exp(-torch.square(error / std)) * gate * (normal_force >= min_normal_force)
     )

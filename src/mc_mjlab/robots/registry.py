@@ -82,8 +82,10 @@ def prepare_cfg_for_mc_rtc(
     spec = base_spec_fn()
     if not names_collision_geoms:
       enable_all_collision_geoms(spec)  # unnamed geoms: presets can't match
+
     for act in list(spec.actuators):
       spec.delete(act)
+
     return spec
 
   robot_cfg.spec_fn = spec_fn

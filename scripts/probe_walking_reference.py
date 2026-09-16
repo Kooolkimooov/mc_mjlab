@@ -99,15 +99,18 @@ def probe_walking_reference(args: argparse.Namespace) -> list[GainResult]:
   cfg.events["reset_base"].params["pose_range"] = {}
   cfg.events["encoder_bias"].params["bias_range"] = (0.0, 0.0)
   cfg.events["push_robot"].params["enabled"] = False
+
   env = ManagerBasedRlEnv(cfg, device=args.device)
   step_dt = env.step_dt
   term = env.action_manager.get_term("mc_rtc_residual")
   if not isinstance(term, McRtcResidualActionBase):
     raise TypeError(f"unexpected action term {type(term).__name__}")
+
   sensors = mdp.sensors._ZmpSensors(env, mdp.sensors.GROUND_CONTACT_SENSORS, "robot")
   gain_by_env = torch.tensor(gains, device=env.device).repeat_interleave(
     args.envs_per_gain
   )
+
   scale = torch.tensor(WALKING_REFERENCE_SCALE, device=env.device)
   action = torch.zeros(num_envs, env.action_manager.total_action_dim, device=env.device)
   active = torch.ones(num_envs, dtype=torch.bool, device=env.device)
@@ -119,15 +122,19 @@ def probe_walking_reference(args: argparse.Namespace) -> list[GainResult]:
   command_sum = torch.zeros_like(error_sum)
   command_count = torch.zeros_like(error_sum)
   nominal_command = torch.zeros(num_envs, 3, device=env.device)
+
   try:
     env.reset()
+
     impulse_step = round(args.warmup_s / step_dt)
     impulse_fired = False
+
     while bool(active.any()):
       if not impulse_fired and int(elapsed.max()) >= impulse_step:
         nominal_command.copy_(term.datastore_vector_output(WALKING_REF_VEL_GETTER))
         apply_fixed_impulse(env, args.push_speed, args.push_height, args.push_duration)
         impulse_fired = True
+
       error, grounded = dcm_error_vector(env, sensors, term)
       delta_w = error * gain_by_env.unsqueeze(-1)
       delta_b = quat_apply_inverse(

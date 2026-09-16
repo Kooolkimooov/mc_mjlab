@@ -25,6 +25,7 @@ def add_locomotion_sensors(
         objtype=mujoco.mjtObj.mjOBJ_SITE,
         objname=site,
       )
+
   if "root_angmom" not in existing:
     spec.add_sensor(
       name="root_angmom",

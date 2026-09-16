@@ -20,6 +20,7 @@ import torch
 
 SCHEMA_VERSION = 1
 _INJECTED_PARAMETERS = {"self", "env", "env_ids"}
+
 _OPERATIONAL_ENV_KEYS = {
   "console_output",
   "num_envs",
@@ -27,6 +28,7 @@ _OPERATIONAL_ENV_KEYS = {
   "print_residual_every",
   "viewer",
 }
+
 _OPERATIONAL_RUNNER_KEYS = {
   "experiment_name",
   "load_checkpoint",
@@ -41,6 +43,7 @@ _OPERATIONAL_RUNNER_KEYS = {
   "wandb_project",
   "wandb_tags",
 }
+
 _RUNTIME_MODULES = (
   "mjlab.envs.manager_based_rl_env",
   "mjlab.managers.action_manager",
@@ -54,6 +57,7 @@ _RUNTIME_MODULES = (
   "rsl_rl.runners.on_policy_runner",
 )
 _RUNTIME_PACKAGES = ("mc-mjlab", "mjlab", "mujoco", "rsl-rl-lib", "torch")
+
 # A contract names every term and model by import path, so the source-tree move
 # would have stranded every checkpoint written before it. Verified path-only:
 # the moved modules were not edited. docs/evaluation.md#_RENAMED_MODULES
@@ -80,6 +84,7 @@ _RENAMED_MODULES = {
   "utils.shared_memory": "mc_mjlab.bridge.shared_memory",
   "utils.task_naming": "mc_mjlab.tasks.naming",
 }
+
 #: Split across `mc_mjlab.mdp`, so its terms are looked up, not mapped by hand.
 _SPLIT_MDP_MODULE = "mc_mjlab.tasks.mdp"
 _MDP_SUBMODULES = (
@@ -133,6 +138,7 @@ def canonicalize(value: Any) -> Any:
     return str(value.expanduser().resolve())
   if isinstance(value, torch.Tensor):
     return canonicalize(value.detach().cpu().tolist())
+
   if dataclasses.is_dataclass(value) and not inspect.isclass(value):
     return {
       "__type__": _qualified_name(value),
@@ -141,6 +147,7 @@ def canonicalize(value: Any) -> Any:
         for field in dataclasses.fields(value)
       },
     }
+
   if isinstance(value, Mapping):
     return {
       str(key): canonicalize(item)
@@ -159,8 +166,10 @@ def canonicalize(value: Any) -> Any:
     }
   if isinstance(value, torch.dtype | torch.device):
     return str(value)
+
   if callable(value):
     return {"__callable__": _callable_record(value)}
+
   if hasattr(value, "tolist") and callable(value.tolist):
     try:
       return canonicalize(value.tolist())
@@ -171,6 +180,7 @@ def canonicalize(value: Any) -> Any:
       return canonicalize(value.item())
     except (TypeError, ValueError, RuntimeError):
       pass
+
   return {"__type__": _qualified_name(value), "value": str(value)}
 
 
@@ -376,6 +386,7 @@ def _policy_observations(
         for key, value in settings.items()
         if key not in {"enable_corruption", "nan_policy", "nan_check_per_term"}
       }
+
     terms = {}
     for name, term in group["terms"].items():
       term = dict(term)
@@ -396,7 +407,9 @@ def _policy_observations(
           }
         }
       terms[name] = term
+
     groups[group_name] = {"settings": settings, "terms": terms}
+
   return {
     "active_terms": {
       group_name: observations["active_terms"][group_name]
@@ -422,29 +435,34 @@ def build_effective_training_manifest(env: Any, train_cfg: Mapping[str, Any]) ->
   managers = _effective_managers(env)
   runtime = _runtime_contract()
   runtime["configured_class_sources"] = _configured_class_sources(train_cfg)
+
   record = {
     "environment": env_config,
     "managers": managers,
     "runner": runner_config,
     "runtime": runtime,
   }
+
   training = {
     "environment": _drop_keys(env_config, _OPERATIONAL_ENV_KEYS),
     "managers": _drop_keys(managers, _OPERATIONAL_ENV_KEYS),
     "runner": _drop_keys(runner_config, _OPERATIONAL_RUNNER_KEYS),
     "runtime": runtime,
   }
+
   policy_interface = {
     "actions": _drop_keys(managers["actions"], _OPERATIONAL_ENV_KEYS),
     "actor": runner_config.get("actor"),
     "actor_sources": _configured_class_sources({"actor": train_cfg.get("actor")}),
     "observations": _policy_observations(managers["observations"], train_cfg),
   }
+
   # Source bytes stay in `record` for audit and out of both enforced contracts:
   # an unrelated edit to a defining file must not strand a checkpoint.
   # docs/leo-mjlab-review.md, docs/evaluation.md#source_drift
   training = _strip_source_hashes(training)
   policy_interface = _strip_source_hashes(policy_interface)
+
   return {
     "schema_version": SCHEMA_VERSION,
     "record": record,
@@ -569,6 +587,7 @@ def validate_effective_training_manifest(
   """Reject incompatible actor loads and semantically changed full resumes."""
   if saved.get("schema_version") != active.get("schema_version"):
     raise RuntimeError("Checkpoint effective-training manifest schema is unsupported.")
+
   saved = rename_legacy_modules(saved)
   contract = "training" if full_resume else "policy_interface"
   payload_key = f"{contract}_contract" if full_resume else contract
@@ -576,6 +595,7 @@ def validate_effective_training_manifest(
   # audit-only still carries them. docs/evaluation.md#source_drift
   saved_payload = _strip_source_hashes(saved.get(payload_key))
   active_payload = _strip_source_hashes(active.get(payload_key))
+
   # A field added after a checkpoint was written cannot appear in its manifest,
   # so an addition alone must not strand it. Removals and changed values still
   # fail, and observation ordering and dimensions are compared separately.
@@ -584,6 +604,7 @@ def validate_effective_training_manifest(
   if added:
     saved_payload = _drop_paths(saved_payload, added)
     active_payload = _drop_paths(active_payload, added)
+
   if _digest(saved_payload) == _digest(active_payload):
     if added:
       print(
@@ -593,6 +614,7 @@ def validate_effective_training_manifest(
       )
     _warn_source_drift(saved, active)
     return
+
   paths = _differences(saved_payload, active_payload)[:12]
   detail = ", ".join(paths) if paths else "digest only"
   raise RuntimeError(
@@ -635,11 +657,13 @@ def synchronize_resumed_curriculum(env: Any, infos: Mapping[str, Any]) -> dict:
   saved_state = infos.get("env_state")
   if not saved_state or "common_step_counter" not in saved_state:
     return curriculum_runtime_snapshot(env)
+
   expected = int(saved_state["common_step_counter"])
   actual = int(env.common_step_counter)
   if actual != expected:
     raise RuntimeError(
       f"Checkpoint step restoration failed: expected {expected}, found {actual}."
     )
+
   env.curriculum_manager.compute()
   return curriculum_runtime_snapshot(env)

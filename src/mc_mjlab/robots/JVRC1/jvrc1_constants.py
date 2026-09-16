@@ -1,5 +1,7 @@
 """JVRC1 constants and helpers."""
 
+from __future__ import annotations
+
 import functools
 from pathlib import Path
 
@@ -34,6 +36,7 @@ JVRC1_PD_GAINS_PATH: Path = JVRC1_PD_GAINS_DIR / "PDgains_sim.dat"
 
 
 def ensure_assets() -> None:
+  """Link the MJCF, meshes and PD gains in from the mc_mujoco share."""
   ensure_asset_symlink(JVRC1_MESH_DIR, JVRC1_MC_RTC_ASSETS_DIR / "meshes")
   ensure_asset_symlink(JVRC1_XML, JVRC1_MC_RTC_ASSETS_DIR / "xml" / "jvrc1.xml")
   ensure_asset_symlink(JVRC1_PD_GAINS_DIR, JVRC1_MC_RTC_ASSETS_DIR / "pdgains")

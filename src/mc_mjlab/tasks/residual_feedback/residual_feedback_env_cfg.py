@@ -1,5 +1,7 @@
 """ResidualMPC's task with the residual moved onto the controller's own feedback."""
 
+from __future__ import annotations
+
 from dataclasses import fields
 from typing import Any
 

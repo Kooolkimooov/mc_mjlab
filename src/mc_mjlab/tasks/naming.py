@@ -1,3 +1,7 @@
+"""Building the registered task ids from the active mc_rtc configuration."""
+
+from __future__ import annotations
+
 from mc_mjlab import MC_RTC_YAML_PATH
 from mc_mjlab.bridge.config import get_controller_name, get_main_robot_name
 

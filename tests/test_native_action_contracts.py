@@ -1,5 +1,7 @@
 """Native action wiring and scheduling, without external controller adapters."""
 
+from __future__ import annotations
+
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace as NS
@@ -91,31 +93,39 @@ def verify_layout() -> tuple[SimControllerBridge, NS, NS]:
       ("q", "alpha", "tau"),
       "robot",
     )
+
   rows = np.zeros((2, bridge.layout.input_size))
   bridge.set_feedback_offset(torch.tensor([[0.1, 0.2], [0.3, 0.4]]))
   bridge.set_joint_velocity_offset(torch.tensor([[0.2, 0.3], [0.4, 0.5]]))
   bridge.set_wrench_offset(torch.ones(2, 6))
   bridge.fill_controller_input(rows)
+
   layout = bridge.layout.input
   np.testing.assert_allclose(rows[:, :3], [[5.2, 0.7, 4.1], [7.4, 0.7, 6.3]])
   np.testing.assert_allclose(rows[:, 3:6], [[9.3, 0, 8.2], [11.5, 0, 10.4]])
   np.testing.assert_allclose(rows[:, 6:9], [[39, 0, 38], [47, 0, 46]])
+
   ro = layout.root_offset()
   np.testing.assert_allclose(rows[:, ro : ro + 3], [[1, 2, 3]] * 2)
+
   data.qpos[:, 3:7] = torch.tensor([1.0, 0.0, 0.0, 0.0])
   bridge.fill_controller_input(rows)
   np.testing.assert_allclose(rows[:, ro + 3 : ro + 7], [[0, 0, 0, 1]] * 2)
+
   bo = layout.body_sensors_offset()
   np.testing.assert_allclose(rows[:, bo : bo + 3], data.qvel[:, 3:6])
   np.testing.assert_allclose(rows[:, bo + 3 : bo + 6], data.qacc[:, :3])
   np.testing.assert_allclose(rows[:, bo + 6 : bo + 12], data.sensordata[:, :6])
+
   fo = layout.force_sensors_offset()
   np.testing.assert_allclose(rows[:, fo : fo + 6], data.sensordata[:, 6:12] + 1)
+
   bridge.set_root_pose_offset(torch.ones(2, 3), torch.tensor([[0.0, 0.1, 0.0]] * 2))
   bridge.fill_controller_input(rows)
   np.testing.assert_allclose(rows[:, ro : ro + 3], [[2, 3, 4]] * 2)
   assert not np.allclose(rows[:, bo + 9 : bo + 12], data.sensordata[:, 3:6])
   np.testing.assert_allclose(np.linalg.norm(rows[:, ro + 3 : ro + 7], axis=1), 1)
+
   out = np.arange(2.0 * bridge.layout.output_size).reshape(2, -1)
   block = bridge.upload_controller_output(out)
   for channel, offset in (("q", 0), ("alpha", 3), ("tau", 6)):
@@ -269,8 +279,10 @@ def test_pipeline() -> None:
   action._setup_datastore_inputs(action.cfg)
   action._alloc_interpolation_buffers()
   action._alloc_failure_latches()
+
   action._in_np = np.zeros((2, bridge.layout.input_size))
   action._out_np = np.zeros((2, bridge.layout.output_size))
+
   action._manager = Manager(action)
   action._pending_dispatch = False
   action._pending_reset = np.zeros(2, dtype=bool)
@@ -292,6 +304,7 @@ def test_pipeline() -> None:
   action._previous_walking_reference_executed = torch.empty(2, 0)
   action._previous_gate = torch.ones(2)
   action._recovery_authority = None
+
   applied = []
 
   def apply(
@@ -304,6 +317,7 @@ def test_pipeline() -> None:
   for _ in range(4):
     action.apply_actions()
   np.testing.assert_allclose([v[0, 0] for v in applied], [0, 0, 2, 4])
+
   action.reset(torch.tensor([1]))
   assert action._manager.resets == [[1]]
   assert not action._pending_dispatch
@@ -313,6 +327,7 @@ def test_pipeline() -> None:
   )
   assert not action._next_control["alpha"][1].any()
   assert action._substep == 4
+
   action.apply_actions()
   action.apply_actions()
   action._manager.failure = [1]
@@ -321,17 +336,20 @@ def test_pipeline() -> None:
   assert action._pending_reset.tolist() == [False, True]
   assert action._has_staged_control.tolist() == [True, False]
   assert not action.controller_failed.any()
+
   action._manager.failure = []
   action.apply_actions()
   assert action._manager.inputs[-1][:, bridge.layout.input.reset_offset()].tolist() == [
     0,
     1,
   ]
+
   action.apply_actions()
   action._collect_controller_output()
   assert not action._pending_reset.any()
   assert action.controller_worker_failed[1]
   assert action._has_staged_control.all()
+
   action._manager.failure = [0, 1]
   action.apply_actions()
   action.apply_actions()

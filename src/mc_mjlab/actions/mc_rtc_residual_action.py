@@ -127,6 +127,7 @@ class McRtcResidualActionBase(BaseAction):
       raise
 
   def process_actions(self, actions: torch.Tensor) -> None:
+    """Scale, clip and gate one policy step's residual, keeping the last step."""
     self._previous_executed_physical.copy_(self._executed_physical)
     self._previous_residual_raw_actions.copy_(self._residual_raw_actions)
     self._previous_gate.copy_(self._last_gate)
@@ -153,6 +154,7 @@ class McRtcResidualActionBase(BaseAction):
     self._printer.request()
 
   def apply_actions(self) -> None:
+    """Advance the control period on its first substep, then write interpolated targets."""
     substep_in_period = self._substep % self.cfg.frameskip
     self._substep += 1
     if substep_in_period == 0:
@@ -197,6 +199,7 @@ class McRtcResidualActionBase(BaseAction):
     self._printer.emit(self._executed_physical)
 
   def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+    """Clear per-episode state and queue a native controller reset for these envs."""
     super().reset(env_ids=env_ids)
 
     self._collect_controller_output()
@@ -636,6 +639,7 @@ class McRtcResidualActionBase(BaseAction):
     position = mc_rtc.get_position_bounds(self._mc_rtc_robot_name)
     velocity = mc_rtc.get_velocity_bounds(self._mc_rtc_robot_name)
     effort = mc_rtc.get_effort_bounds(self._mc_rtc_robot_name)
+
     self._position_lower, self._position_upper = self._bound_tensors(*position)
     self._velocity_lower, self._velocity_upper = self._bound_tensors(*velocity)
     self._effort_lower, self._effort_upper = self._bound_tensors(*effort)
@@ -649,12 +653,14 @@ class McRtcResidualActionBase(BaseAction):
       if self._residual_ids is None
       else [self._target_names[i] for i in self._residual_ids.tolist()]
     )
+
     missing = [n for n in required if n not in lower or n not in upper]
     if missing:
       raise KeyError(
         f"the mc_rtc RobotModule reports no bounds for residual joints {missing}; "
         "feasibility cannot be enforced"
       )
+
     return (
       torch.tensor(
         [lower.get(n, -float("inf")) for n in self._target_names], device=self.device
@@ -672,6 +678,7 @@ class McRtcResidualActionBase(BaseAction):
     self._datastore_scalar_output_columns = output_columns(
       self._bridge.layout, cfg.datastore_scalar_outputs, "scalar"
     )
+
     # Whole-controller vectors: latched as collected, no ramp (see the cfg).
     self._datastore_vector_outputs = {
       getter: torch.zeros(self.num_envs, 3, device=self.device)
@@ -695,6 +702,7 @@ class McRtcResidualActionBase(BaseAction):
     self._datastore_vector_input_columns = input_columns(
       self._bridge.layout, dict.fromkeys(cfg.datastore_vectors_inputs), "vector3"
     )
+
     # Every declared setter is written each period from the first step on, so a
     # task that declares one owns its value from then on. docs/coupling.md
     self._datastore_scalar_input_feed = torch.zeros(
@@ -715,13 +723,6 @@ class McRtcResidualActionBase(BaseAction):
       self.residual_unit,
     )
 
-  def _zero_channels(self) -> dict[str, torch.Tensor]:
-    """One zeroed ``(num_envs, num_targets)`` buffer per output channel."""
-    return {
-      channel: torch.zeros(self.num_envs, self._num_targets, device=self.device)
-      for channel in self.output_channels
-    }
-
   def _alloc_interpolation_buffers(self) -> None:
     """Per-channel ramp endpoints plus the one-period-behind staging buffer."""
     self._previous_control = self._zero_channels()
@@ -735,6 +736,13 @@ class McRtcResidualActionBase(BaseAction):
     self._has_staged_control = torch.zeros(
       self.num_envs, dtype=torch.bool, device=self.device
     )
+
+  def _zero_channels(self) -> dict[str, torch.Tensor]:
+    """One zeroed ``(num_envs, num_targets)`` buffer per output channel."""
+    return {
+      channel: torch.zeros(self.num_envs, self._num_targets, device=self.device)
+      for channel in self.output_channels
+    }
 
   def _alloc_failure_latches(self) -> None:
     """Allocate the per-episode controller and worker failure flags."""

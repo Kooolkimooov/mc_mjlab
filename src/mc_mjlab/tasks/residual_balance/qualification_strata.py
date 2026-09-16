@@ -130,14 +130,6 @@ class StratifiedDiagnostics:
     )
     self._last_stratum = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
 
-  def _residual_effort_ratio(self) -> torch.Tensor:
-    """Actuator effort over the RobotModule limit, per residual joint."""
-    term = self.action
-    effort = self.env.scene[term.cfg.entity_name].data.qfrc_actuator[:, term.target_ids]
-    if term.residual_ids is not None:
-      effort = effort[:, term.residual_ids]
-    return effort.abs() / self._effort_limits
-
   def capture(self, active: torch.Tensor) -> None:
     """Accumulate the just-computed step for all still-qualified environments."""
     env_ids = active.nonzero(as_tuple=False).flatten()
@@ -150,14 +142,17 @@ class StratifiedDiagnostics:
       self.warmup_steps,
       self.recovery_steps,
     )
+
     columns = strata[env_ids]
     self._last_stratum[env_ids] = columns
     self._counts[env_ids, columns] += 1
+
     values = self.env.metrics_manager._step_values[:, self._metric_indices]
     self._scalar_sums[env_ids, columns] += values[env_ids]
     self._scalar_max[env_ids, columns] = torch.maximum(
       self._scalar_max[env_ids, columns], values[env_ids]
     )
+
     requested = self.action.requested_normalized_action
     executed_normalized = self.action.executed_normalized_action
     executed_physical = self.action.executed_physical_action
@@ -174,6 +169,7 @@ class StratifiedDiagnostics:
       ),
       dim=-1,
     )
+
     self._joint_sums[env_ids, columns] += joint_values[env_ids]
     self._joint_effort_max[env_ids, columns] = torch.maximum(
       self._joint_effort_max[env_ids, columns], effort[env_ids]
@@ -199,10 +195,13 @@ class StratifiedDiagnostics:
       joint_effort_max = self._joint_effort_max[env_id].cpu()
       last_stratum = int(self._last_stratum[env_id].item())
       scale = self.action.residual_scale[env_id].detach().cpu().tolist()
+
       for stratum, count in enumerate(counts):
         if count == 0:
           continue
+
         regime, axis, direction = STRATUM_LABELS[stratum]
+
         sums = {
           name: float(scalar_sums[stratum, index].item())
           for index, name in enumerate(SCALAR_METRICS)
@@ -222,6 +221,7 @@ class StratifiedDiagnostics:
           "detector_score": sums["detector_score"] / count,
           "max_effort_ratio": maxima["max_effort_ratio"],
         }
+
         joints = {}
         for joint_index, joint_name in enumerate(self.action.residual_names):
           values = joint_sums[stratum, joint_index]
@@ -246,6 +246,7 @@ class StratifiedDiagnostics:
             "effort_ratio_mean": fields["effort_ratio"] / count,
             "effort_ratio_max": float(joint_effort_max[stratum, joint_index].item()),
           }
+
         records.append(
           StratumRecord(
             checkpoint=checkpoint,
@@ -267,8 +268,18 @@ class StratifiedDiagnostics:
             joints=joints,
           )
         )
+
       self._clear(env_id)
+
     return records
+
+  def _residual_effort_ratio(self) -> torch.Tensor:
+    """Actuator effort over the RobotModule limit, per residual joint."""
+    term = self.action
+    effort = self.env.scene[term.cfg.entity_name].data.qfrc_actuator[:, term.target_ids]
+    if term.residual_ids is not None:
+      effort = effort[:, term.residual_ids]
+    return effort.abs() / self._effort_limits
 
   def _clear(self, env_id: int) -> None:
     """Clear every accumulator row belonging to one completed environment."""

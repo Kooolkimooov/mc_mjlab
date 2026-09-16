@@ -1,5 +1,7 @@
 """RHPS1 constants and helpers."""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 import mujoco
@@ -36,6 +38,7 @@ ROOT_BODY = "BODY"
 
 
 def ensure_assets() -> None:
+  """Link the MJCF, meshes and PD gains in from the mc_mujoco share."""
   ensure_asset_symlink(RHPS1_MESH_DIR, RHPS1_MC_RTC_ASSETS_DIR / "meshes")
   ensure_asset_symlink(RHPS1_XML, RHPS1_MC_RTC_ASSETS_DIR / "xml" / "RHPS1main.xml")
   ensure_asset_symlink(RHPS1_PD_GAINS_DIR, RHPS1_MC_RTC_ASSETS_DIR / "pdgains")

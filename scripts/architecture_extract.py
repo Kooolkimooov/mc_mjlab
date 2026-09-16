@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Static facts about this repo, read with griffe, grimp, pyreverse and ast."""
 
+from __future__ import annotations
+
 import ast
 import functools
 import re

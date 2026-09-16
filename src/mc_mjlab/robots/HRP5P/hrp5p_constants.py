@@ -1,5 +1,7 @@
 """HRP5P constants and helpers."""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 import mujoco
@@ -33,6 +35,7 @@ HRP5P_PD_GAINS_PATH: Path = HRP5P_PD_GAINS_DIR / "PDgains_sim.dat"
 
 
 def ensure_assets() -> None:
+  """Link the MJCF, meshes and PD gains in from the mc_mujoco share."""
   ensure_asset_symlink(HRP5P_MESH_DIR, HRP5P_MC_RTC_ASSETS_DIR / "meshes")
   ensure_asset_symlink(HRP5P_XML, HRP5P_MC_RTC_ASSETS_DIR / "xml" / "HRP5Pmain.xml")
   ensure_asset_symlink(HRP5P_PD_GAINS_DIR, HRP5P_MC_RTC_ASSETS_DIR / "pdgains")

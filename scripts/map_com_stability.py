@@ -52,14 +52,17 @@ def run_offset(
     disturbance="none",
     console_output="none",
   )
+
   torso_shift_mm = shift_compiled_com(cfg, axis, offset_mm)
   cfg.seed = args.seed
   cfg.episode_length_s = args.seconds
   cfg.events["reset_base"].params["pose_range"] = {}
+
   env = ManagerBasedRlEnv(cfg, device=args.device)
   action = env.action_manager.get_term("mc_rtc_residual")
   if not isinstance(action, McRtcResidualActionBase):
     raise TypeError(f"unexpected residual action type: {type(action).__name__}")
+
   zero = torch.zeros(
     env.num_envs, env.action_manager.total_action_dim, device=env.device
   )
@@ -69,6 +72,7 @@ def run_offset(
   workers = torch.zeros_like(active)
   alpha_medians: list[float] = []
   step_dt = env.step_dt
+
   try:
     env.reset()
     while bool(active.any()):
@@ -78,6 +82,7 @@ def run_offset(
       if action.residual_ids is not None:
         alpha = alpha[:, action.residual_ids]
       alpha_medians.append(float(alpha.abs().median()))
+
       worker = env.termination_manager.get_term("controller_worker_failed")
       done = terminated | time_outs
       hazards |= active & terminated & ~worker
@@ -90,6 +95,7 @@ def run_offset(
     gc.collect()
     if torch.cuda.is_available():
       torch.cuda.empty_cache()
+
   return {
     "torso_shift_mm": torso_shift_mm,
     "survival": 1.0 - float(hazards.float().mean()),

@@ -1,5 +1,7 @@
 """Configuration objects exposed at the manager's Python boundary."""
 
+from __future__ import annotations
+
 import pytest
 
 import mc_rtc_interface as native

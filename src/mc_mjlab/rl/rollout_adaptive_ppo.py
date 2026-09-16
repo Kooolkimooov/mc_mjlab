@@ -64,6 +64,7 @@ class RolloutAdaptivePPO(PPO):
       raise RuntimeError("actor mask and rollout storage cursors diverged")
     if mask.numel() != self.storage.num_envs:
       raise ValueError("actor update mask must have one value per environment")
+
     self._actor_update_masks[self._actor_mask_steps].copy_(
       mask.to(device=self.device, dtype=torch.bool).reshape(-1, 1)
     )
@@ -79,6 +80,35 @@ class RolloutAdaptivePPO(PPO):
       normalize_masked_advantages(self.storage.advantages, self._actor_update_masks)
     )
 
+  def update(self) -> dict[str, float]:
+    """Optimize at fixed LR, measure the rollout, then schedule once."""
+    actor_masked = self._actor_mask_source is not None
+    if actor_masked:
+      self._require_complete_actor_masks()
+      active = self._actor_update_masks.sum()
+      self.last_actor_update_fraction = float(active / self._actor_update_masks.numel())
+
+    adaptive = self.desired_kl is not None and self.schedule == "adaptive"
+    original_schedule = self.schedule
+    if adaptive:
+      self.schedule = "fixed"
+
+    try:
+      losses = super().update()
+    finally:
+      self.schedule = original_schedule
+
+    schedule_kl = self._full_rollout_kl()
+    self.last_schedule_kl = schedule_kl
+    losses["schedule_kl"] = schedule_kl
+
+    if adaptive:
+      self._adapt_learning_rate(schedule_kl)
+    if actor_masked:
+      self._actor_mask_steps = 0
+
+    return losses
+
   @staticmethod
   def next_learning_rate(rate: float, kl: float, desired_kl: float) -> float:
     """Apply rsl_rl's adaptive thresholds once to the following rollout."""
@@ -88,31 +118,6 @@ class RolloutAdaptivePPO(PPO):
       return min(1.0e-2, rate * 1.5)
     return rate
 
-  def update(self) -> dict[str, float]:
-    """Optimize at fixed LR, measure the rollout, then schedule once."""
-    actor_masked = self._actor_mask_source is not None
-    if actor_masked:
-      self._require_complete_actor_masks()
-      active = self._actor_update_masks.sum()
-      self.last_actor_update_fraction = float(active / self._actor_update_masks.numel())
-    adaptive = self.desired_kl is not None and self.schedule == "adaptive"
-    original_schedule = self.schedule
-    if adaptive:
-      self.schedule = "fixed"
-    try:
-      losses = super().update()
-    finally:
-      self.schedule = original_schedule
-
-    schedule_kl = self._full_rollout_kl()
-    self.last_schedule_kl = schedule_kl
-    losses["schedule_kl"] = schedule_kl
-    if adaptive:
-      self._adapt_learning_rate(schedule_kl)
-    if actor_masked:
-      self._actor_mask_steps = 0
-    return losses
-
   def _full_rollout_kl(self) -> float:
     """Measure post-update KL over every valid rollout sample."""
     generator = (
@@ -121,6 +126,7 @@ class RolloutAdaptivePPO(PPO):
       else self.storage.mini_batch_generator(1, 1)
     )
     hidden_state = self.actor.get_hidden_state()
+
     with torch.inference_mode():
       batch = next(generator)
       self.actor(
@@ -137,6 +143,7 @@ class RolloutAdaptivePPO(PPO):
       if self.is_multi_gpu:
         torch.distributed.all_reduce(kl_mean, op=torch.distributed.ReduceOp.SUM)
         kl_mean /= self.gpu_world_size
+
     self.actor.reset(hidden_state=hidden_state)
     return float(kl_mean)
 
@@ -154,9 +161,11 @@ class RolloutAdaptivePPO(PPO):
       self.learning_rate = self.next_learning_rate(
         self.learning_rate, schedule_kl, self.desired_kl
       )
+
     if self.is_multi_gpu:
       value = torch.tensor(self.learning_rate, device=self.device)
       torch.distributed.broadcast(value, src=0)
       self.learning_rate = float(value)
+
     for group in self.optimizer.param_groups:
       group["lr"] = self.learning_rate

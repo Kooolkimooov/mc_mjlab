@@ -32,6 +32,7 @@ def randomize_current_pd_gains(
     env_ids = torch.arange(env.num_envs, device=env.device)
   else:
     env_ids = env_ids.to(env.device)
+
   term = _residual_term(env, action_name)
   kp = getattr(term, "_kp", None)
   kd = getattr(term, "_kd", None)
@@ -42,6 +43,7 @@ def randomize_current_pd_gains(
     kp[env_ids] *= scale
     kd[env_ids] *= scale
     return
+
   asset = env.scene[(asset_cfg or SceneEntityCfg("robot")).name]
   for actuator in asset.actuators:
     stiffness = getattr(actuator, "stiffness", None)
@@ -90,12 +92,14 @@ class push_and_record(recorded_disturbance):
     ids = ids[self.enabled[ids]]
     if ids.numel() == 0:
       return
+
     if warmup_s > 0.0:
       # Suppress, do not reschedule: `EventManager` re-samples the countdown
       # whenever this fires. docs/difficulty.md#warmup_s
       ids = ids[env.episode_length_buf[ids] * env.step_dt >= warmup_s]
       if ids.numel() == 0:
         return
+
     asset = env.scene[(asset_cfg or SceneEntityCfg("robot")).name]
     # Mirrors `events.push_by_setting_velocity`, sampling here so the delta can be
     # recorded: `root_link_vel_w` comes from `cvel`, which MuJoCo does not
@@ -108,6 +112,7 @@ class push_and_record(recorded_disturbance):
       delta = torch.zeros_like(vel_w)
       delta[:, 0] = planar_speed * torch.cos(angle)
       delta[:, 1] = planar_speed * torch.sin(angle)
+
     asset.write_root_link_velocity_to_sim(vel_w + delta, env_ids=ids)
     self.last_push_vel[ids] = quat_apply_inverse(
       asset.data.root_link_quat_w[ids], delta[:, :3]
@@ -129,6 +134,7 @@ class finite_impulse_curriculum(recorded_disturbance):
     self._debug_scale = float(os.environ.get("MC_MJLAB_PUSH_DEBUG", "0.0") or 0.0)
     if self._debug_scale > 0.0:
       self.warmup_s = min(self.warmup_s, 1.0)
+
     self.force = torch.zeros(env.num_envs, 1, 3, device=env.device)
     self.torque = torch.zeros_like(self.force)
     self.remaining = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
@@ -141,6 +147,7 @@ class finite_impulse_curriculum(recorded_disturbance):
     self._write_zeros(ids)
     self.last_push_step[ids] = self.NEVER
     self.last_push_vel[ids] = 0.0
+
     warmup = round(self.warmup_s / env.step_dt)
     span = max(
       1, round((self.interval_range_s[1] - self.interval_range_s[0]) / env.step_dt)
@@ -176,18 +183,23 @@ class finite_impulse_curriculum(recorded_disturbance):
       bands,
       band_weights,
     )
+
     active = self.remaining > 0
     self.remaining[active] -= 1
     expired = active & (self.remaining == 0)
     if bool(expired.any()):
       self._write_zeros(expired.nonzero(as_tuple=False).flatten())
+
     if not enabled:
       return
+
     due = self._due(env)
     ids = due.nonzero(as_tuple=False).flatten()
     if ids.numel() == 0:
       return
+
     self._trigger(env, ids, duration_range_s, height_range_m, stages)
+
     low, high = self.interval_range_s
     low_steps = round(low / env.step_dt)
     high_steps = round(high / env.step_dt)
@@ -212,6 +224,7 @@ class finite_impulse_curriculum(recorded_disturbance):
     for step, candidate in stages:
       if env.common_step_counter >= step:
         velocity_range = candidate
+
     count = len(env_ids)
     angle = 2.0 * torch.pi * torch.rand(count, device=env.device)
     speed = velocity_range[0] + (velocity_range[1] - velocity_range[0]) * torch.rand(
@@ -225,17 +238,20 @@ class finite_impulse_curriculum(recorded_disturbance):
           f"{math.degrees(float(angle[row])):.0f} deg",
           flush=True,
         )
+
     delta_b = torch.zeros(count, 3, device=env.device)
     delta_b[:, 0] = speed * torch.cos(angle)
     delta_b[:, 1] = speed * torch.sin(angle)
     quat = self.asset.data.root_link_quat_w[env_ids]
     delta_w = quat_apply(quat, delta_b)
+
     min_steps = math.ceil(duration_range_s[0] / env.step_dt)
     max_steps = math.floor(duration_range_s[1] / env.step_dt)
     duration_steps = torch.randint(
       min_steps, max_steps + 1, (count,), device=env.device
     )
     duration = duration_steps * env.step_dt
+
     body_ids = self.asset.indexing.body_ids
     mass = env.sim.model.body_mass[env_ids][:, body_ids].sum(dim=1)
     force = mass.unsqueeze(-1) * delta_w / duration.unsqueeze(-1)
@@ -245,6 +261,7 @@ class finite_impulse_curriculum(recorded_disturbance):
     offset_b = torch.zeros_like(force)
     offset_b[:, 2] = height
     torque = torch.cross(quat_apply(quat, offset_b), force, dim=1)
+
     self.force[env_ids, 0] = force
     self.torque[env_ids, 0] = torque
     self.remaining[env_ids] = duration_steps
@@ -258,6 +275,7 @@ class finite_impulse_curriculum(recorded_disturbance):
     """Remove external wrenches for selected environments."""
     if env_ids.numel() == 0:
       return
+
     zeros = torch.zeros(len(env_ids), 1, 3, device=env_ids.device)
     self.asset.write_external_wrench_to_sim(zeros, zeros, env_ids=env_ids, body_ids=[0])
     self.force[env_ids] = 0.0
@@ -319,9 +337,11 @@ class stratified_finite_impulse_curriculum(finite_impulse_curriculum):
     weights = self.validated_weights(cfg.params["band_weights"])
     union = (min(low for low, _ in self.bands), max(high for _, high in self.bands))
     stages = cfg.params["stages"]
+
     # `stages` is inert here but reaches the manifest, so keep it honest.
     if len(stages) != 1 or tuple(stages[0][1]) != union:
       raise ValueError(f"stages must record the single band union {union}")
+
     self.band_weights = weights
     self._band_weights = torch.tensor(weights, device=env.device)
     self.sampled_band = torch.full(
@@ -335,6 +355,7 @@ class stratified_finite_impulse_curriculum(finite_impulse_curriculum):
       raise ValueError("band weights need standing plus every impulse band")
     if abs(sum(values) - 1.0) > 1e-9 or any(value < 0.0 for value in values):
       raise ValueError("band weights must be nonnegative and sum to one")
+
     return values
 
   def set_band_weights(self, weights: Iterable[float]) -> None:
@@ -353,6 +374,7 @@ class stratified_finite_impulse_curriculum(finite_impulse_curriculum):
     )
     if ids.numel() == 0:
       return
+
     self.sampled_band[ids] = (
       torch.multinomial(self._band_weights, len(ids), replacement=True) - 1
     )
@@ -402,6 +424,7 @@ class achievement_finite_impulse_curriculum(finite_impulse_curriculum):
       raise ValueError("rehearsal weights must be nonnegative and sum to one")
     if any(weights[stage + 2 :]):
       raise ValueError("rehearsal mixture cannot sample a future stage")
+
     self.current_stage = stage
 
   def reset(self, env_ids: torch.Tensor | None = None) -> None:
@@ -414,10 +437,21 @@ class achievement_finite_impulse_curriculum(finite_impulse_curriculum):
     )
     if ids.numel() == 0:
       return
+
     weights = torch.tensor(
       self.rehearsal_weights[self.current_stage], device=self._env.device
     )
     self.sampled_stage[ids] = torch.multinomial(weights, len(ids), replacement=True) - 1
+
+  def curriculum_state(self) -> dict[str, float | int]:
+    """Expose current target, standing share, and earlier-stage rehearsal."""
+    weights = self.rehearsal_weights[self.current_stage]
+    return {
+      "stage": self.current_stage,
+      "standing_share": weights[0],
+      "earlier_stage_share": sum(weights[1 : self.current_stage + 1]),
+      "target_stage_share": weights[self.current_stage + 1],
+    }
 
   def _due(self, env: ManagerBasedRlEnv) -> torch.Tensor:
     """Exclude the standing cohort from scheduled disturbances."""
@@ -443,19 +477,21 @@ class achievement_finite_impulse_curriculum(finite_impulse_curriculum):
           ((0, stages[stage][1]),),
         )
 
-  def curriculum_state(self) -> dict[str, float | int]:
-    """Expose current target, standing share, and earlier-stage rehearsal."""
-    weights = self.rehearsal_weights[self.current_stage]
-    return {
-      "stage": self.current_stage,
-      "standing_share": weights[0],
-      "earlier_stage_share": sum(weights[1 : self.current_stage + 1]),
-      "target_stage_share": weights[self.current_stage + 1],
-    }
-
 
 #: Age reported for an env that has not been pushed inside its current episode.
 NEVER_AGE = 1 << 30
+
+
+def record_disturbance(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor,
+  equivalent_velocity_b: torch.Tensor,
+  term_name: str = "push_robot",
+) -> None:
+  """Record a deterministic external disturbance for recovery terms."""
+  term = _push_term(env, term_name)
+  term.last_push_vel[env_ids] = equivalent_velocity_b
+  term.last_push_step[env_ids] = env.common_step_counter
 
 
 def _push_term(env: ManagerBasedRlEnv, term_name: str) -> recorded_disturbance:
@@ -474,15 +510,3 @@ def _age_since_push(env: ManagerBasedRlEnv, term: recorded_disturbance) -> torch
   # Python int on the left: `torch.as_tensor` here would be an H2D copy per step.
   age = env.common_step_counter - term.last_push_step
   return age.masked_fill(age >= env.episode_length_buf, NEVER_AGE)
-
-
-def record_disturbance(
-  env: ManagerBasedRlEnv,
-  env_ids: torch.Tensor,
-  equivalent_velocity_b: torch.Tensor,
-  term_name: str = "push_robot",
-) -> None:
-  """Record a deterministic external disturbance for recovery terms."""
-  term = _push_term(env, term_name)
-  term.last_push_vel[env_ids] = equivalent_velocity_b
-  term.last_push_step[env_ids] = env.common_step_counter

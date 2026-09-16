@@ -1,5 +1,7 @@
 """Measure zero-residual walking through both native action modes."""
 
+from __future__ import annotations
+
 import argparse
 import json
 
@@ -23,14 +25,17 @@ def measure(mode: str, seconds: float, device: str) -> None:
   cfg.scene.num_envs = 1
   cfg.actions["robot_joints"].num_workers = 1
   cfg.actions["robot_joints"].print_residual_every = 0
+
   env = ManagerBasedRlEnv(cfg, device=device)
   action = env.action_manager.get_term("robot_joints")
   try:
     env.reset()
     asset = env.scene["robot"]
     start = asset.data.root_link_pos_w[0, :2].clone()
+
     height, speed = [], []
     failures = 0
+
     with torch.inference_mode():
       for step in range(round(seconds / env.step_dt)):
         env.step(torch.zeros(1, action.action_dim, device=device))
@@ -40,9 +45,11 @@ def measure(mode: str, seconds: float, device: str) -> None:
         if step * env.step_dt > 2:
           height.append(float(asset.data.root_link_pos_w[0, 2]))
           speed.append(float(action.controller_reference("alpha")[0].abs().median()))
+
     displacement = float(
       torch.linalg.vector_norm(asset.data.root_link_pos_w[0, :2] - start)
     )
+
     result = dict(
       mode=mode,
       samples=len(height),
@@ -67,6 +74,7 @@ def main() -> None:
   parser.add_argument("--seconds", type=float, default=12)
   parser.add_argument("--device", default="cuda:0")
   args = parser.parse_args()
+
   measure(args.mode, args.seconds, args.device)
 
 

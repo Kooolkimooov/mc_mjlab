@@ -14,6 +14,7 @@ def is_collision_geom(geom: mujoco.MjsGeom) -> bool:
 
 
 def _geom_name_stem(geom: mujoco.MjsGeom) -> str:
+  """The mesh name a collision geom is named after, else its parent body."""
   meshname = getattr(geom, "meshname", "")
   if meshname:
     return meshname[:-5] if meshname.endswith("_mesh") else meshname
@@ -64,6 +65,7 @@ def name_remaining_collision_geoms(spec: mujoco.MjSpec, prefix: str) -> tuple[st
     geom.name = name
     taken.add(name)
     assigned.append(name)
+
   return tuple(assigned)
 
 
@@ -79,6 +81,7 @@ def group_and_disable_collision_geoms(spec: mujoco.MjSpec) -> None:
     geom.group = 2 if (geom.contype == 0 and geom.conaffinity == 0) else COLLISION_GROUP
   for site in spec.sites:
     site.group = 4
+
   for geom in spec.geoms:
     geom.contype = 0
     geom.conaffinity = 0
@@ -109,6 +112,7 @@ def get_collision_presets(
     priority=1,
     disable_other_geoms=False,
   )
+
   full = CollisionCfg(
     geom_names_expr=(all_expr,),
     contype=1,
@@ -117,6 +121,7 @@ def get_collision_presets(
     priority={foot_expr: 1, ".*": 0},
     disable_other_geoms=False,
   )
+
   full_without_self = CollisionCfg(
     geom_names_expr=(all_expr,),
     contype=0,
@@ -125,4 +130,5 @@ def get_collision_presets(
     priority={foot_expr: 1, ".*": 0},
     disable_other_geoms=False,
   )
+
   return feet_only, full, full_without_self

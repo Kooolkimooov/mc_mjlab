@@ -1,5 +1,7 @@
 """Run native manager commands against Python-owned shared-memory rows."""
 
+from __future__ import annotations
+
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -57,9 +59,11 @@ def shared_io() -> Iterator[SharedIo]:
   layout.output.datastore_scalar = ["get_scalar"]
   inputs = create_shm((3, layout.input_size))
   outputs = create_shm((3, layout.output_size))
+
   root = layout.input.root_offset()
   inputs.arr[:, root + 2] = 0.8
   inputs.arr[:, root + 6] = 1.0
+
   configuration = native.WorkerStartMessage(
     layout,
     native.SharedMemoryDescription(*row_window(inputs, 0, 3)),
@@ -77,6 +81,7 @@ def test_manager_steps_python_owned_rows(tmp_path: Path, shared_io: SharedIo) ->
   layout = configuration.layout
   inputs.arr[:, :DIRECT_JOINTS] = np.arange(3)[:, None] * 0.05
   inputs.arr[:, layout.input.datastore_scalar_offset()] = [1.0, 2.0, 3.0]
+
   with native.ControllersManager(
     make_configuration(tmp_path),
     3,
@@ -86,6 +91,7 @@ def test_manager_steps_python_owned_rows(tmp_path: Path, shared_io: SharedIo) ->
   ) as manager:
     manager.dispatch(native.Command.Initialize)
     assert manager.collect() == []
+
     manager.dispatch(native.Command.Step)
     assert manager.collect() == []
     np.testing.assert_allclose(
@@ -94,13 +100,16 @@ def test_manager_steps_python_owned_rows(tmp_path: Path, shared_io: SharedIo) ->
     np.testing.assert_array_equal(
       outputs.arr[:, layout.output.datastore_scalar_offset()], [1.0, 2.0, 3.0]
     )
+
     inputs.arr[1, layout.input.reset_offset()] = 1.0
     manager.dispatch(native.Command.Step)
     assert manager.collect() == []
     assert (outputs.arr[:, layout.output.status_offset()] == 0).all()
+
     inputs.arr[:, layout.input.reset_offset()] = 0.0
     manager.dispatch(native.Command.Reset)
     assert manager.collect() == []
+
   manager.close()
   with pytest.raises(RuntimeError, match="closed"):
     manager.collect()

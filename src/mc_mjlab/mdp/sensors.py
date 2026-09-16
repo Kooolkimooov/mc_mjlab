@@ -22,7 +22,18 @@ if TYPE_CHECKING:
   from mjlab.managers.manager_base import ManagerTermBaseCfg
 
 
+# mc_mujoco's "<name>_fsensor"/"_tsensor" pair; what the stabilizer sees too.
+GROUND_CONTACT_SENSORS = ("LeftFootForceSensor", "RightFootForceSensor")
+
+#: mc_rtc's own gravity constant, matching the host's ZMP formulas.
+GRAVITY = 9.81
+
+#: Floor under the CoM height, so a collapsed robot cannot divide omega by ~0.
+MIN_COM_HEIGHT = 0.1
+
+
 def _residual_term(env: ManagerBasedRlEnv, action_name: str) -> McRtcResidualActionBase:
+  """The mc_rtc residual action term behind ``action_name``, or a ``TypeError``."""
   term = env.action_manager.get_term(action_name)
   if not isinstance(term, McRtcResidualActionBase):
     raise TypeError(
@@ -33,6 +44,7 @@ def _residual_term(env: ManagerBasedRlEnv, action_name: str) -> McRtcResidualAct
 
 
 def _walking_term(env: ManagerBasedRlEnv, action_name: str) -> WalkingReferenceMixin:
+  """The walking-reference side of ``action_name``, or a ``TypeError``."""
   term = env.action_manager.get_term(action_name)
   if not isinstance(term, WalkingReferenceMixin):
     raise TypeError(
@@ -46,16 +58,6 @@ def _restrict(term: McRtcResidualActionBase, values: torch.Tensor) -> torch.Tens
   """Keep only the columns carrying the residual (see ``residual_ids``)."""
   ids = term.residual_ids
   return values if ids is None else values[:, ids]
-
-
-# mc_mujoco's "<name>_fsensor"/"_tsensor" pair; what the stabilizer sees too.
-GROUND_CONTACT_SENSORS = ("LeftFootForceSensor", "RightFootForceSensor")
-
-#: mc_rtc's own gravity constant, matching the host's ZMP formulas.
-GRAVITY = 9.81
-
-#: Floor under the CoM height, so a collapsed robot cannot divide omega by ~0.
-MIN_COM_HEIGHT = 0.1
 
 
 def _wrench_sensor(
@@ -137,6 +139,7 @@ class _ZmpSensors:
     key = (env.common_step_counter, min_normal_force, plane_height)
     if self._cache_key == key and self._cache is not None:
       return self._cache
+
     num_envs, k = env.num_envs, self.num_sensors
     data = env.sim.data
 
@@ -165,6 +168,7 @@ class _ZmpSensors:
       ),
       dim=-1,
     )
+
     self._cache_key, self._cache = key, (measured, normal_force)
     return measured, normal_force
 
@@ -177,6 +181,7 @@ class _ZmpSensors:
   ) -> tuple[torch.Tensor, torch.Tensor]:
     """``(distance from the planned ZMP in metres, vertical contact force)``."""
     measured, normal_force = self.measured_offset(env, min_normal_force, plane_height)
+
     error = torch.linalg.vector_norm(
       measured - planned_zmp_offset(env, action_name), dim=1
     )
@@ -193,12 +198,14 @@ class _ZmpSensors:
     # LIPM: d(xi)/dt = omega * (xi - CoP), and walking at v needs xi - CoP = v/omega,
     # so the offset is scored against the commanded one, never against zero.
     measured, normal_force = self.measured_offset(env, min_normal_force, plane_height)
+
     data = env.sim.data
     com = data.subtree_com[:, self.root_body_id]
     com_vel = data.subtree_linvel[:, self.root_body_id]
     commanded = _residual_term(env, action_name).datastore_vector_output(
       CONTROL_COM_VEL
     )
+
     omega = torch.sqrt(GRAVITY / com[:, 2].clamp(min=MIN_COM_HEIGHT)).unsqueeze(-1)
     offset = (com_vel[:, :2] - commanded[:, :2]) / omega - measured
     return torch.linalg.vector_norm(offset, dim=1), normal_force
@@ -216,6 +223,7 @@ def _zmp_sensors(
   """The one :class:`_ZmpSensors` for this env and sensor set."""
   cache = _ZMP_SENSOR_CACHE.setdefault(env, {})
   key = (tuple(sensor_names), asset_name)
+
   sensors = cache.get(key)
   if sensors is None:
     sensors = cache[key] = _ZmpSensors(env, sensor_names, asset_name)
@@ -273,6 +281,7 @@ class gait_phase:
     forces = self._sensors.normal_forces(env).clamp(min=0.0)
     total = forces.sum(dim=1).clamp(min=min_normal_force)
     load = (forces[:, 0] - forces[:, 1]) / total
+
     # One read per step, however many terms ask: a second call in the same step
     # would difference against itself and report a zero rate.
     fresh = self._step != env.common_step_counter
@@ -281,6 +290,7 @@ class gait_phase:
     self._prev = torch.where(fresh, load, self._prev)
     self._step = torch.where(fresh, env.common_step_counter, self._step)
     self._initialized |= fresh
+
     plane = torch.stack((load, rate / rate_ref), dim=-1)
     return plane / torch.linalg.vector_norm(plane, dim=-1, keepdim=True).clamp(min=1e-6)
 

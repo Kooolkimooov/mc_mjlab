@@ -59,6 +59,7 @@ class RecoveryFeatureExtractor:
       force_cols.extend((address, address + 1, address + 2))
       torque_cols.extend((torque_address, torque_address + 1, torque_address + 2))
       site_ids.append(site_id)
+
     self.force_cols = torch.tensor(force_cols, device=env.device, dtype=torch.long)
     self.torque_cols = torch.tensor(torque_cols, device=env.device, dtype=torch.long)
     self.site_ids = torch.tensor(site_ids, device=env.device, dtype=torch.long)
@@ -74,10 +75,12 @@ class RecoveryFeatureExtractor:
     force_w = -(rotation @ force_s).squeeze(-1)
     torque_w = -(rotation @ torque_s).squeeze(-1)
     total_force = force_w.sum(dim=1)
+
     com = data.subtree_com[:, self.root_body_id]
     com_vel = data.subtree_linvel[:, self.root_body_id]
     commanded = self.term.datastore_vector_output(CONTROL_COM_VEL)
     normal_force = total_force[:, 2].clamp(min=20.0)
+
     site_pos = data.site_xpos[:, self.site_ids]
     lever = site_pos - com.unsqueeze(1)
     moment = (torque_w + torch.cross(lever, force_w, dim=-1)).sum(dim=1)
@@ -89,15 +92,18 @@ class RecoveryFeatureExtractor:
       ),
       dim=-1,
     )
+
     omega = torch.sqrt(9.81 / com[:, 2].clamp(min=0.1)).unsqueeze(-1)
     dcm_error = (com_vel[:, :2] - commanded[:, :2]) / omega - measured
     dcm = torch.linalg.vector_norm(dcm_error, dim=1)
+
     angular_speed = torch.linalg.vector_norm(self.asset.data.root_link_ang_vel_b, dim=1)
     gravity = self.asset.data.projected_gravity_b
     tilt = torch.acos((-gravity[:, 2]).clamp(-1.0, 1.0))
     body_ids = self.asset.indexing.body_ids
     mass = self.env.sim.model.body_mass[:, body_ids].sum(dim=1)
     load_deviation = (total_force[:, 2] / (mass * 9.81) - 1.0).abs()
+
     features = torch.stack((dcm, angular_speed, tilt, load_deviation), dim=1)
     return features, dcm_error
 
@@ -153,6 +159,7 @@ def detector_target(
   """Return monotonic max-normalized score and smooth activation target."""
   centers = features.new_tensor(calibration.centers)
   scales = features.new_tensor(calibration.scales)
+
   score = ((features - centers) / scales).amax(dim=1)
   level = ((score - calibration.threshold) / calibration.activation_span).clamp(
     0.0, 1.0
@@ -169,9 +176,11 @@ def filter_authority(
   """Apply smooth attack, exponential decay, and an exact-zero cutoff."""
   attack = 1.0 - math.exp(-dt / calibration.attack_s)
   decay = math.exp(-dt / calibration.decay_tau_s)
+
   rising = previous + attack * (target - previous)
   falling = torch.maximum(target, previous * decay)
   authority = torch.where(target > previous, rising, falling)
+
   return torch.where(
     authority >= calibration.cutoff, authority, torch.zeros_like(authority)
   )
@@ -254,11 +263,6 @@ class RecoveryAuthority:
     self.score = torch.zeros(env.num_envs, device=env.device)
     self.dcm_error = torch.zeros(env.num_envs, 2, device=env.device)
 
-  @property
-  def authority(self) -> torch.Tensor:
-    """Current residual authority in ``[0, 1]``."""
-    return self.filter.authority
-
   def update(self) -> torch.Tensor:
     """Measure the current state and advance the temporal authority filter."""
     features, self.dcm_error = self.extractor.measure()
@@ -273,3 +277,8 @@ class RecoveryAuthority:
     self.filter.reset(ids)
     self.score[ids] = 0.0
     self.dcm_error[ids] = 0.0
+
+  @property
+  def authority(self) -> torch.Tensor:
+    """Current residual authority in ``[0, 1]``."""
+    return self.filter.authority

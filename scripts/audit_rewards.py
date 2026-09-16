@@ -219,12 +219,14 @@ def main() -> None:
   args = _parse_args()
   output = _output_path(args)
   output.parent.mkdir(parents=True, exist_ok=True)
+
   torch.manual_seed(args.seed)
   cfg = _make_cfg(args)
   train_cfg = asdict(residual_balance_ppo_cfg(recurrent=args.recurrent))
   env = ManagerBasedRlEnv(cfg, device=args.device)
   audit: RewardAuditRecorder | None = None
   failure: str | None = None
+
   try:
     wrapped = RslRlVecEnvWrapper(env)
     policy = None
@@ -237,12 +239,14 @@ def main() -> None:
         map_location=args.device,
       )
       policy = runner.get_inference_policy(device=args.device)
+
     manifest = build_effective_training_manifest(env, train_cfg)
     arms = _arms(args, str(env.device))
     policy_ids = arms.get("checkpoint")
     action = torch.zeros(
       env.num_envs, env.action_manager.total_action_dim, device=env.device
     )
+
     env.reset()
     print(
       f"[reward-audit] warmup={args.warmup_steps}, sample={args.steps}, "
@@ -251,6 +255,7 @@ def main() -> None:
     )
     for _ in range(args.warmup_steps):
       _step(env, wrapped, policy, policy_ids, action)
+
     start_step = int(env.common_step_counter)
     audit = RewardAuditRecorder(env.reward_manager, arms, env.step_dt)
     try:
@@ -262,10 +267,12 @@ def main() -> None:
             print(f"[reward-audit] sampled {step + 1}/{args.steps}", flush=True)
     except RewardAuditShapeError as error:
       failure = str(error)
+
     audit_report = audit.report()
     issues = audit.issues()
     if failure is not None:
       issues.insert(0, failure)
+
     report = {
       "status": "failed" if issues else "passed",
       "issues": issues,
@@ -299,6 +306,7 @@ def main() -> None:
     if audit is not None:
       audit.restore()
     env.close()
+
   output.write_text(json.dumps(_json_safe(report), indent=2, allow_nan=False) + "\n")
   _print_report(report)
   print(f"\n[reward-audit] {report['status']} -> {output}")

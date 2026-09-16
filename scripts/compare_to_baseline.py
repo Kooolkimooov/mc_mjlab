@@ -191,6 +191,7 @@ def _run_both(
   dropped = 0
 
   env.reset()
+
   deadline = time.monotonic() + minutes * 60.0
   while time.monotonic() < deadline:
     action.zero_()
@@ -201,6 +202,7 @@ def _run_both(
     policy.reset(terminated | time_outs)
     base.steps += 1
     pol.steps += 1
+
     if skip_steps:
       # `episode_length_buf` increments by one per step, so each env crosses the
       # threshold exactly once per episode.
@@ -208,12 +210,15 @@ def _run_both(
       if at.numel():
         for n in reward_terms:
           skip_sums[n][at] = env.reward_manager._episode_sums[n][at]
+
     done = (terminated | time_outs).nonzero(as_tuple=False).flatten()
     if done.numel() == 0:
       continue
+
     sums = {n: env.reward_manager._episode_sums[n][done] for n in reward_terms}
     lengths = env.episode_length_buf[done].tolist()
     flags = {n: env.termination_manager.get_term(n)[done].tolist() for n in term_names}
+
     for i, env_id in enumerate(done.tolist()):
       length = int(lengths[i]) - skip_steps
       counter[env_id] += 1
@@ -234,7 +239,9 @@ def _run_both(
       )
     for n in reward_terms:
       skip_sums[n][done] = 0.0
+
     _reset_done(env, done)
+
   if skip_steps and dropped:
     print(
       f"[compare] dropped {dropped} episodes shorter than the {skip_steps}-step skip"
@@ -518,10 +525,12 @@ def main() -> None:
     )
     agent_cfg = asdict(residual_balance_ppo_cfg(recurrent=args.recurrent))
     runner_cls = ResidualBalanceOnPolicyRunner
+
   if args.recovery_dcm_std is not None:
     if "recovery_dcm" not in cfg.rewards:
       p.error("--recovery-dcm-std needs a task with a recovery_dcm reward")
     cfg.rewards["recovery_dcm"].params["std"] = args.recovery_dcm_std
+
   # A checkpoint is only loadable against the observation space it was trained
   # on: the actor's first layer and its `obs_normalizer` are both sized by the
   # concatenated width, so adding an observation term retires every checkpoint

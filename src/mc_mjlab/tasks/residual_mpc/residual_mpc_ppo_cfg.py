@@ -1,5 +1,7 @@
 """PPO configuration for the ResidualMPC reproduction."""
 
+from __future__ import annotations
+
 from mjlab.rl import RslRlModelCfg, RslRlOnPolicyRunnerCfg, RslRlPpoAlgorithmCfg
 
 

@@ -58,6 +58,7 @@ class ResidualFeedbackJointTorqueActionCfg(ResidualMpcJointTorqueActionCfg):
       raise ValueError("feedback_scale must be positive")
     if not self.feedback_modalities:
       raise ValueError("at least one feedback modality is required")
+
     unknown = set(self.feedback_modalities) - set(SUPPORTED_MODALITIES)
     if unknown:
       raise ValueError(f"unsupported feedback modalities: {sorted(unknown)}")
@@ -88,11 +89,13 @@ class ResidualFeedbackJointTorqueAction(ResidualMpcJointTorqueAction):
     }
     if "wrench" in cfg.feedback_modalities and wrench_dim == 0:
       raise ValueError("wrench feedback needs force sensors, the model has none")
+
     self._modalities = tuple(cfg.feedback_modalities)
     self._feedback_dim = sum(self._modality_dims[m] for m in self._modalities)
     # Only the env-facing width grows: `_raw_actions` keeps the base class's
     # size because `process_actions` hands it the block ahead of the feedback.
     self._action_dim += self._feedback_dim
+
     self._feedback_offset = torch.zeros(
       self.num_envs, self._num_targets, device=self.device
     )
@@ -100,6 +103,7 @@ class ResidualFeedbackJointTorqueAction(ResidualMpcJointTorqueAction):
     self._root_translation = torch.zeros(self.num_envs, 3, device=self.device)
     self._root_rotation = torch.zeros(self.num_envs, 3, device=self.device)
     self._wrench_offset = torch.zeros(self.num_envs, wrench_dim, device=self.device)
+
     # Force and moment share a block but not a unit, so the scale alternates in
     # sixes. docs/residual-feedback.md#feedback_modalities
     self._wrench_scale = torch.tensor(
@@ -107,6 +111,7 @@ class ResidualFeedbackJointTorqueAction(ResidualMpcJointTorqueAction):
       * len(self._bridge.layout.input.force_sensors),
       device=self.device,
     )
+
     print(
       f"[mc_rtc] ResidualFeedback: {self._feedback_dim} channel(s) across "
       f"{list(self._modalities)}"
@@ -117,6 +122,7 @@ class ResidualFeedbackJointTorqueAction(ResidualMpcJointTorqueAction):
     actions = actions.clamp(-1.0, 1.0)
     head = actions[:, : -self._feedback_dim]
     blocks = self._modality_slices(actions[:, -self._feedback_dim :])
+
     # Gated with the torque residual so a suppressed residual cannot keep lying
     # to the controller about where the robot is.
     gate = self._last_gate.unsqueeze(-1)
@@ -152,12 +158,14 @@ class ResidualFeedbackJointTorqueAction(ResidualMpcJointTorqueAction):
     if not self.cfg.torque_channel:
       head = head.clone()
       head[:, : self._residual_action_dim] = 0.0
+
     super().process_actions(head)
 
   def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
     super().reset(env_ids)
     if env_ids is None:
       env_ids = slice(None)
+
     self._feedback_offset[env_ids] = 0.0
     self._joint_velocity_offset[env_ids] = 0.0
     self._root_translation[env_ids] = 0.0
@@ -168,6 +176,7 @@ class ResidualFeedbackJointTorqueAction(ResidualMpcJointTorqueAction):
     """Split the trailing feedback block into its modalities, in cfg order."""
     out: dict[str, torch.Tensor] = {}
     start = 0
+
     for name in self._modalities:
       width = self._modality_dims[name]
       out[name] = feedback[:, start : start + width]

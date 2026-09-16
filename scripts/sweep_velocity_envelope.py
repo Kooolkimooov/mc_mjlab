@@ -77,12 +77,14 @@ def evaluate(
     settle = round(args.settle_s / env.step_dt)
     steps = round(args.episode_length_s / env.step_dt)
     asset = env.scene["robot"]
+
     zeros = torch.zeros(
       env.num_envs, env.action_manager.total_action_dim, device=env.device
     )
     linear, angular = [], []
     alive = torch.ones(env.num_envs, dtype=torch.bool, device=env.device)
     terminated = torch.zeros_like(alive)
+
     for step in range(steps):
       with torch.inference_mode():
         action = zeros if policy is None else policy(wrapped.get_observations())
@@ -91,6 +93,7 @@ def evaluate(
       alive &= ~step_terminated.bool()
       if step < settle:
         continue
+
       command = env.command_manager.get_command("twist")
       assert command is not None
       planar = asset.data.root_link_lin_vel_b[:, :2]

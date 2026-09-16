@@ -44,52 +44,28 @@ class SquashedGaussianDistribution(Distribution):
     Normal.set_default_validate_args(False)
 
   def update(self, mlp_output: torch.Tensor) -> None:
+    """Rebuild the latent Normal from this step's means and the learned std."""
     std = self.std_param.clamp(*self.std_range).expand_as(mlp_output)
     self._distribution = Normal(mlp_output, std)
     self._latent_sample = None
 
   def sample(self) -> torch.Tensor:
+    """Draw one reparameterized latent sample and squash it into bounds."""
     if self._distribution is None:
       raise RuntimeError("update() must be called before sample()")
     self._latent_sample = self._distribution.rsample()
     return torch.tanh(self._latent_sample)
 
   def deterministic_output(self, mlp_output: torch.Tensor) -> torch.Tensor:
+    """Squash latent means without sampling, for evaluation and export."""
     return torch.tanh(mlp_output)
 
   def as_deterministic_output_module(self) -> nn.Module:
+    """The same squash as an exportable module."""
     return _TanhDeterministicOutput()
 
-  @property
-  def input_dim(self) -> int:
-    return self.output_dim
-
-  @property
-  def mean(self) -> torch.Tensor:
-    if self._distribution is None:
-      raise RuntimeError("update() must be called before reading mean")
-    return torch.tanh(self._distribution.mean)
-
-  @property
-  def std(self) -> torch.Tensor:
-    if self._distribution is None:
-      raise RuntimeError("update() must be called before reading std")
-    return self._distribution.stddev
-
-  @property
-  def entropy(self) -> torch.Tensor:
-    if self._distribution is None or self._latent_sample is None:
-      raise RuntimeError("sample() must be called before reading entropy")
-    base = self._distribution.entropy()
-    return (base + self._log_tanh_jacobian(self._latent_sample)).sum(dim=-1)
-
-  @property
-  def params(self) -> tuple[torch.Tensor, ...]:
-    if self._distribution is None:
-      raise RuntimeError("update() must be called before reading params")
-    return (self._distribution.mean, self._distribution.stddev)
-
   def log_prob(self, outputs: torch.Tensor) -> torch.Tensor:
+    """Log density of squashed actions, floored so the PPO ratio cannot overflow."""
     if self._distribution is None:
       raise RuntimeError("update() must be called before log_prob()")
     eps = torch.finfo(outputs.dtype).eps
@@ -109,6 +85,7 @@ class SquashedGaussianDistribution(Distribution):
     old_params: tuple[torch.Tensor, ...],
     new_params: tuple[torch.Tensor, ...],
   ) -> torch.Tensor:
+    """KL between the latent Gaussians; the squash is shared and cancels."""
     old_mean, old_std = old_params
     new_mean, new_std = new_params
     old = Normal(old_mean, old_std)
@@ -117,4 +94,39 @@ class SquashedGaussianDistribution(Distribution):
 
   @staticmethod
   def _log_tanh_jacobian(latent: torch.Tensor) -> torch.Tensor:
+    """Log |d tanh / d latent|, in the numerically stable softplus form."""
     return 2.0 * (math.log(2.0) - latent - torch.nn.functional.softplus(-2.0 * latent))
+
+  @property
+  def input_dim(self) -> int:
+    """Latent width the actor MLP must emit."""
+    return self.output_dim
+
+  @property
+  def mean(self) -> torch.Tensor:
+    """Squashed mean action; ``update`` must have run."""
+    if self._distribution is None:
+      raise RuntimeError("update() must be called before reading mean")
+    return torch.tanh(self._distribution.mean)
+
+  @property
+  def std(self) -> torch.Tensor:
+    """Latent standard deviation; ``update`` must have run."""
+    if self._distribution is None:
+      raise RuntimeError("update() must be called before reading std")
+    return self._distribution.stddev
+
+  @property
+  def entropy(self) -> torch.Tensor:
+    """Entropy of the squashed distribution; ``sample`` must have run."""
+    if self._distribution is None or self._latent_sample is None:
+      raise RuntimeError("sample() must be called before reading entropy")
+    base = self._distribution.entropy()
+    return (base + self._log_tanh_jacobian(self._latent_sample)).sum(dim=-1)
+
+  @property
+  def params(self) -> tuple[torch.Tensor, ...]:
+    """Latent ``(mean, stddev)`` pair rsl_rl stores for its KL schedule."""
+    if self._distribution is None:
+      raise RuntimeError("update() must be called before reading params")
+    return (self._distribution.mean, self._distribution.stddev)

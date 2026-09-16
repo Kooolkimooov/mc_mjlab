@@ -164,9 +164,10 @@ write it to be read top to bottom.
   `reset`, `close`), then the public accessors, then the `_`-prefixed helpers,
   and the `@property` definitions last, as one block at the bottom.
   `McRtcResidualActionBase` is the worked example.
-- **A private helper sits below the public method that calls it, in call
-  order**, so a class reads what-before-how. One called from several places
-  goes below the first of them.
+- **Privates go below the publics, in call order.** The public block reads
+  what-before-how; the `_`-prefixed block underneath follows the order those
+  publics call into it, so the file still reads as one pass. A helper called
+  from several places sits below the first of them.
 - **One job per module.** When a module grows a second job, split it rather
   than sectioning it with comments — that is why `mdp/` is seven submodules and
   why the PPO config sits beside the env cfg rather than inside it. The 10%

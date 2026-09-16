@@ -1,5 +1,7 @@
 """Runner that refuses checkpoints written under different action semantics."""
 
+from __future__ import annotations
+
 from mc_mjlab.residuals.mpc_math import ACTION_SEMANTICS_VERSION
 from mc_mjlab.rl.runner import McRtcResidualOnPolicyRunner
 

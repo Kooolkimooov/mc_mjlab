@@ -76,8 +76,6 @@ class SimControllerBridge:
     self._clear_state_feedback_offsets()
     self._alloc_device_buffers(env.num_envs)
 
-  # Simulation to controller.
-
   def fill_controller_input(self, rows: np.ndarray) -> None:
     """Write biased encoders, measured effort, local root pose and raw sensors."""
     block = self._input_block
@@ -92,6 +90,55 @@ class SimControllerBridge:
 
     self._host_view(rows, "input")[:, : self._input_width].copy_(block)
 
+  def upload_controller_output(self, rows: np.ndarray) -> torch.Tensor:
+    """Copy the whole output block to the device; every gather then runs there."""
+    if self._output_block is None or self._output_block.shape != rows.shape:
+      self._output_block = torch.empty(
+        rows.shape, dtype=torch.float64, device=self._device
+      )
+    self._output_block.copy_(self._host_view(rows, "output"))
+    return self._output_block
+
+  def read_controller_output(self, block: torch.Tensor) -> dict[str, torch.Tensor]:
+    """Gather action joints and expose native qd as the public alpha channel."""
+    layout = self.layout.output
+    offsets = {
+      "q": layout.q_offset(),
+      "alpha": layout.qd_offset(),
+      "tau": layout.tau_offset(),
+    }
+    dtype = torch.get_default_dtype()
+    return {
+      c: block[:, offsets[c] + self._target_cols_t].to(dtype)
+      for c in self._output_channels
+    }
+
+  # The offsets below bias what the controller is told, not what the simulation
+  # measured; `_apply_state_feedback_offsets` is where they land.
+
+  def set_feedback_offset(self, offset: torch.Tensor | None) -> None:
+    """Bias the joint positions the controller sees, in target order."""
+    self._feedback_offset = offset
+
+  def set_joint_velocity_offset(self, offset: torch.Tensor | None) -> None:
+    """Bias the joint velocities the controller sees, in target order."""
+    self._joint_velocity_offset = offset
+
+  def set_wrench_offset(self, offset: torch.Tensor | None) -> None:
+    """Bias every force-sensor wrench the controller sees."""
+    self._wrench_offset = offset
+
+  def set_root_pose_offset(
+    self, translation: torch.Tensor | None, rotation: torch.Tensor | None
+  ) -> None:
+    """Bias the root pose the controller sees, rotation as a body-frame rotvec."""
+    self._root_translation_offset = translation
+    self._root_rotation_offset = rotation
+
+  def release_views(self) -> None:
+    """Drop the shared-block views so the blocks can be unlinked."""
+    self._views = {}
+
   def _fill_joint_columns(self, block: torch.Tensor) -> None:
     """Scatter encoders, velocities and measured effort into reference order."""
     layout = self.layout.input
@@ -102,6 +149,7 @@ class SimControllerBridge:
     block[:, layout.q_offset() + self._ref_cols_t] = _f64(
       entity.joint_pos_biased[:, self._sim_cols_t]
     )
+
     for offset, data in (
       (layout.qd_offset(), entity.joint_vel[:, self._sim_cols_t]),
       (layout.tau_offset(), self._env.sim.data.qfrc_actuator[:, self._dof_cols_t]),
@@ -175,59 +223,10 @@ class SimControllerBridge:
         block[:, off : off + _TRIPLE] = _rotate_by_rotvec(
           block[:, off : off + _TRIPLE], -self._root_rotation_offset
         )
+
     block[:, ro + 3 : ro + 7] = _compose_small_rotation(
       block[:, ro + 3 : ro + 7], self._root_rotation_offset
     )
-
-  # Controller to simulation.
-
-  def upload_controller_output(self, rows: np.ndarray) -> torch.Tensor:
-    """Copy the whole output block to the device; every gather then runs there."""
-    if self._output_block is None or self._output_block.shape != rows.shape:
-      self._output_block = torch.empty(
-        rows.shape, dtype=torch.float64, device=self._device
-      )
-    self._output_block.copy_(self._host_view(rows, "output"))
-    return self._output_block
-
-  def read_controller_output(self, block: torch.Tensor) -> dict[str, torch.Tensor]:
-    """Gather action joints and expose native qd as the public alpha channel."""
-    layout = self.layout.output
-    offsets = {
-      "q": layout.q_offset(),
-      "alpha": layout.qd_offset(),
-      "tau": layout.tau_offset(),
-    }
-    dtype = torch.get_default_dtype()
-    return {
-      c: block[:, offsets[c] + self._target_cols_t].to(dtype)
-      for c in self._output_channels
-    }
-
-  # State feedback: what the controller is told, not what the simulation measured.
-
-  def set_feedback_offset(self, offset: torch.Tensor | None) -> None:
-    """Bias the joint positions the controller sees, in target order."""
-    self._feedback_offset = offset
-
-  def set_joint_velocity_offset(self, offset: torch.Tensor | None) -> None:
-    """Bias the joint velocities the controller sees, in target order."""
-    self._joint_velocity_offset = offset
-
-  def set_wrench_offset(self, offset: torch.Tensor | None) -> None:
-    """Bias every force-sensor wrench the controller sees."""
-    self._wrench_offset = offset
-
-  def set_root_pose_offset(
-    self, translation: torch.Tensor | None, rotation: torch.Tensor | None
-  ) -> None:
-    """Bias the root pose the controller sees, rotation as a body-frame rotvec."""
-    self._root_translation_offset = translation
-    self._root_rotation_offset = rotation
-
-  def release_views(self) -> None:
-    """Drop the shared-block views so the blocks can be unlinked."""
-    self._views = {}
 
   # Setup: resolve every index once, so a control period is pure gather/scatter.
 
@@ -345,8 +344,6 @@ class SimControllerBridge:
     # this constructor, so the output width is only final at the first upload.
     self._output_block = None
     self._views: dict[str, tuple[torch.Tensor, np.ndarray]] = {}
-
-  # Shared memory: the host owns the numpy rows, this class owns the device copy.
 
   def _host_view(self, rows: np.ndarray, key: str) -> torch.Tensor:
     """Cache the torch view of a shared block; from_numpy must not run per period."""

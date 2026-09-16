@@ -92,6 +92,7 @@ class WalkingReferenceMixin(McRtcResidualActionBase):
       )
     )
     self._walking_reference_fed.copy_(self._walking_reference_executed)
+
     self.set_datastore_vector_input(
       WALKING_REF_VEL_SETTER,
       self._walking_reference_nominal + self._walking_reference_executed,
@@ -168,6 +169,7 @@ class GatedWalkingReferenceDeltaAction(
       ).unsqueeze(0)
       * self._env.step_dt
     )
+
     self._action_dim += 3
     self._raw_actions = torch.zeros(self.num_envs, self._action_dim, device=self.device)
 
@@ -176,6 +178,7 @@ class GatedWalkingReferenceDeltaAction(
     self._previous_walking_reference_executed.copy_(self._walking_reference_executed)
     normalized = actions[:, self._residual_action_dim :].clamp(-1.0, 1.0)
     self._walking_reference_requested.copy_(normalized * self._walking_reference_scale)
+
     target = self._walking_reference_requested * self._last_gate.unsqueeze(-1)
     delta = (target - self._walking_reference_executed).clamp(
       -self._walking_reference_slew, self._walking_reference_slew
@@ -183,6 +186,7 @@ class GatedWalkingReferenceDeltaAction(
     self._walking_reference_executed.add_(delta)
     # Zero authority must restore the nominal exactly, not ramp towards it.
     self._walking_reference_executed[self._last_gate == 0.0] = 0.0
+
     self._walking_reference_active.copy_(
       self._walking_reference_executed.abs().amax(dim=1) > 1.0e-6
     )
