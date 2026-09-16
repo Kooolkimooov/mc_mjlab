@@ -10,7 +10,7 @@ are *deciding* something, not when you are reading the line that implements it.
 | Where | Holds |
 | --- | --- |
 | `README.md` | how to use the repo |
-| `CLAUDE.md` | how to work in it; hazards you need before touching anything |
+| `AGENTS.md` | how to work in it; hazards you need before touching anything |
 | `docs/` (here) | why a specific number or design is what it is |
 
 ## Index

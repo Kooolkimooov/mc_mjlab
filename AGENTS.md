@@ -1,6 +1,7 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+This file provides guidance to coding agents working in this repository.
+`CLAUDE.md` is a symlink to it, so both names read the same bytes; edit this file.
 
 # What this is
 
@@ -72,9 +73,10 @@ uv run ruff format && uv run ruff check --fix    # format + lint
 uv run ty check                                  # type check (110 pre-existing
                                                  # diagnostics: unresolvable
                                                  # mc_rtc bindings + mujoco stubs)
-uv run pytest                                    # binding tests (testpaths is set)
-cd build && ctest                                # native tests, incl. worker recovery
-python3 scripts/check_prose.py src scripts       # prose budget + docs/ links
+uv run pytest                                    # tests/: bindings + action contracts
+cd build && ctest                                # C++ tests, worker recovery, and pytest
+                                                 # (--target check-native skips pytest)
+python3 scripts/check_prose.py src scripts tests # prose budget + docs/ links
 ```
 
 The deterministic improvement-contract suite does not replace a live controller
@@ -151,17 +153,12 @@ Keep them concise: a subject line plus a 2-4 line body carrying the one number
 or reason the diff does not show. Everything longer belongs in `docs/` under a
 grep-able `##` heading.
 
-**Never** put a `Codex-Session:` line, a session id, a `Codex.ai` URL, or a
-"Generated with Codex" line in a commit message — they outlive the session
-and stay in `git log` forever. Co-author trailers are wanted and stay. For Codex,
-use `Co-Authored-By: Codex MODEL <noreply@openai.com>`, replacing `MODEL` with
-the most precise current model identity available in the session, including its
-variant or exact model ID when known. Never copy a model identity from an earlier
-commit or assume a fixed model from these instructions. If the exact identity is
-unavailable, use only what is known; do not invent a version or variant.
-This holds for messages carried through a history rewrite too: strip session
-lines and correct inaccurate attribution for the work being amended, while
-preserving other contributors' trailers.
+**Never** put a session line, a session id, an agent URL, or a "Generated with
+<agent>" line in a commit message — they outlive the session and stay in
+`git log` forever. Your own agent's `Co-Authored-By:` trailer is wanted and
+stays; use the model identity of the session you are in rather than one copied
+from an earlier commit. This holds for messages carried through a history
+rewrite too: strip the session line rather than preserve it.
 
 # Architecture
 
@@ -363,6 +360,11 @@ Cross-cutting invariants:
 - `fell_over` and `collapsed` are mutually exclusive labels (tilt wins), so their
   shares add up; their *union* is unchanged, and hazard is still computed from the
   union rather than by summing the two.
+- Every run is seed 42 unless told otherwise; `--agent.seed -1` is the lever that
+  draws one instead, and is how a promising checkpoint gets re-screened off its
+  training seed. The drawn seed enters the training contract, so such a run
+  cannot be resumed without passing the seed its log printed.
+  docs/evaluation.md#agentseed
 - Neither logged family of curves means what it looks like. Every
   `Episode_Reward/*` is an episode *sum*, and those correlate with episode
   length at r = +0.98 — they move when the robot survives longer, not when it
