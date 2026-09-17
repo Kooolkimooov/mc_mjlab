@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")/../.."
-task_id="$(uv run python -c '
-from mc_mjlab import MC_RTC_YAML_PATH
-from mc_mjlab.tasks.naming import get_task_name
-print(get_task_name("locomanip", "position", MC_RTC_YAML_PATH.with_name("mc_rtc_locomanip.yaml")))
-')"
+# The registered id, from the task package itself: it is built from whichever
+# mc_rtc profile this branch carries. docs/locomanip.md#per-robot-branches
+task_id="$(uv run python -c 'from mc_mjlab.tasks.locomanip import DEMO_TASK_ID; print(DEMO_TASK_ID)')"
 exec uv run play "$task_id" --agent zero --viewer native "$@"

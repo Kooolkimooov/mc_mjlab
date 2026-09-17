@@ -1,5 +1,25 @@
 # Locomanip cart demo
 
+## Per-robot branches
+
+**Current:** one branch per robot, because the task registers exactly one
+Locomanip id and that id is built from `MC_RTC_YAML`'s `MainRobot`:
+`hrp5_config` carries `etc/mc_rtc_hrp5_locomanip_patched.yaml`, `jvrc1_config`
+carries `etc/mc_rtc_jvrc1_locomanip_patched.yaml`. Shared work lands on
+`training_config` and both rebase onto it.
+
+What differs between them is small and all of it is listed here: the profile
+`MC_RTC_YAML` points at, `cart.CART_INIT_X`, and the hand links
+`cart.hand_cart_contact_sensors` matches. Everything else -- the residual
+authority, the joint partition, the terminations' fall height -- already reads
+the active robot's mc_rtc module.
+
+The two profiles are not symmetric. HRP5P has to restate `HandTaskList`,
+`ManipManager.objToHandTranss` and `preReachTranss`, because Locomanip's
+installed defaults are JVRC1's; the JVRC1 profile inherits them.
+
+**Re-measure if:** the task learns to register more than one robot's id at once.
+
 ## controller_objects
 
 **Current:** `controller_objects: {obj: cart}` maps the passive MuJoCo cart to
