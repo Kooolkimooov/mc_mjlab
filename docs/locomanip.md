@@ -222,12 +222,26 @@ changes.
 
 ## cart_mass_range_kg
 
-**Current:** `(1.0, 1000.0)` kg on the 10 kg cart asset -- the range the mc_mujoco
-sweep characterised -- drawn per episode by a `reset`-mode `dr.pseudo_inertia`
-event on the cart body. Its `alpha` is a *log* scale (mass and inertia both scale
-by `e^(2a)`), so `mdp.events.mass_alpha_range` converts kilograms to it and a
-uniform draw in `alpha` is log-uniform in mass, the spacing the sweep used.
-`dr.body_mass` is the wrong term: it leaves inertia behind.
+**Current:** `(1.0, 1000.0)` kg -- the range the mc_mujoco sweep characterised --
+drawn per episode by a `reset`-mode `dr.pseudo_inertia` event on the cart body.
+Its `alpha` is a *log* scale (mass and inertia both scale by `e^(2a)`), so
+`mdp.events.mass_alpha_range` converts kilograms to it and a uniform draw in
+`alpha` is log-uniform in mass, the spacing the sweep used. `dr.body_mass` is the
+wrong term: it leaves inertia behind.
+
+**The range is absolute kilograms, not multiples of the asset.** `alpha` scales
+whatever mass the compiled model has, so the conversion needs that mass and
+`cart.cart_nominal_mass_kg()` reads it from the asset rather than assuming the
+nominal 10 kg. That asset is `Cart.xml` in the LocomanipController *source tree*,
+which the mc_mujoco sweep harness (`testing_harness.py`) rewrites in place to
+sweep mass -- so it is not reliably 10 kg between runs, and a hardcoded nominal
+silently multiplies every draw by the leftover.
+
+What this does **not** fix is the controller's own belief: mc_rtc reads
+`Cart.urdf` beside it, and the harness rewrites that too. A leftover there means
+the base controller knows the payload, which is the opposite of the nominal
+feedforward this task measures against. Check both are at 10 kg
+(`git -C <LocomanipController> status`) before a run.
 
 **It needs mujoco-warp >= 3.11.** On 3.10.0.2 -- the version the PyPI mjlab 1.6.0
 resolved -- any event declaring `RecomputeLevel.set_const_0` or above empties
@@ -253,6 +267,9 @@ change nothing), CUDA graph capture, the event's mode, or the `cart_floor` pair.
 changes what `alpha` scales.
 
 **History:**
+- 2026-09-17 -- read the nominal from the asset instead of a `10.0` constant,
+  after a sweep run left `Cart.xml` and `Cart.urdf` at 350 kg: every draw would
+  have been 35x its intended mass.
 - 2026-09-16 -- added and defaulted to the swept range; turned off when a smoke
   run showed `zmp_grounded` pinned at 0 and episodes ending at 3.7 s; carried a
   `set_const_fixed` term that rescaled the cart's own reference weights by hand

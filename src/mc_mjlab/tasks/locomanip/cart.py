@@ -11,6 +11,7 @@ from mjlab.entity import EntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 
 from mc_mjlab.robots.robot_module import get_robot_module
+from mc_mjlab.tasks.locomanip.mdp.accessors import OBJECT_BODY
 
 
 def cart_xml_path() -> Path:
@@ -29,7 +30,7 @@ def cart_xml_path() -> Path:
 
 
 def cart_spec() -> mujoco.MjSpec:  # ty: ignore[unresolved-attribute]
-  """Load the original 10 kg cart without its embedded ground plane."""
+  """Load the cart asset without the ground plane it embeds."""
   root = ET.parse(cart_xml_path()).getroot()
   world = root.find("worldbody")
   if world is not None:
@@ -49,6 +50,13 @@ def cart_spec() -> mujoco.MjSpec:  # ty: ignore[unresolved-attribute]
 #: The grasped handle sits 0.35 m BEHIND this origin, so the robot's hands reach
 #: to `CART_INIT_X - 0.35`, not to `CART_INIT_X`. docs/locomanip.md#cart_init_x
 CART_INIT_X = 0.90
+
+
+def cart_nominal_mass_kg() -> float:
+  """Read the asset's own mass, which a drawn payload is absolute against."""
+  # Never assume 10 kg: the mc_mujoco sweep harness rewrites this file in place.
+  # docs/locomanip.md#cart_mass_range_kg
+  return cart_spec().body(OBJECT_BODY).mass
 
 
 def cart_cfg() -> EntityCfg:

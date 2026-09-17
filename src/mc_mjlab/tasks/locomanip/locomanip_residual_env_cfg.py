@@ -39,6 +39,7 @@ from mc_mjlab.tasks.locomanip import mdp as locomanip_mdp
 from mc_mjlab.tasks.locomanip.cart import (
   cart_cfg,
   cart_floor_contact,
+  cart_nominal_mass_kg,
   hand_cart_contact_sensors,
 )
 from mc_mjlab.tasks.locomanip.locomanip_env_cfg import MC_RTC_YAML
@@ -81,9 +82,6 @@ ZMP_PARAMS = {
   "sensor_names": mdp.sensors.GROUND_CONTACT_SENSORS,
   "asset_cfg": SceneEntityCfg("robot"),
 }
-
-#: The cart asset's own mass, which is what mc_rtc's model keeps believing.
-CART_NOMINAL_MASS_KG = 10.0
 
 #: The masses the mc_mujoco sweep characterised. docs/locomanip.md#cart_mass_range_kg
 CART_MASS_RANGE_KG = (1.0, 1000.0)
@@ -389,8 +387,10 @@ def _events(
       params={
         # Uniform in this log scale is log-uniform in mass, the sweep's spacing.
         # Needs mujoco-warp >= 3.11. docs/locomanip.md#cart_mass_range_kg
+        # Against the asset's own mass, read now: the draw is absolute
+        # kilograms whatever the XML says. docs/locomanip.md#cart_mass_range_kg
         "alpha_range": locomanip_mdp.events.mass_alpha_range(
-          cart_mass_range_kg, CART_NOMINAL_MASS_KG
+          cart_mass_range_kg, cart_nominal_mass_kg()
         ),
         "asset_cfg": SceneEntityCfg(
           locomanip_mdp.accessors.OBJECT_ENTITY,
