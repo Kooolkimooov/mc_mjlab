@@ -14,6 +14,12 @@ from mjlab.envs import ManagerBasedRlEnv
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
 from mc_mjlab.bridge.config import get_main_robot_name
 from mc_mjlab.tasks.locomanip.locomanip_env_cfg import locomanip_env_cfg
+from mc_mjlab.tasks.locomanip.locomanip_feedback_env_cfg import (
+  make_locomanip_feedback_env_cfg,
+)
+from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
+  make_locomanip_residual_env_cfg,
+)
 from mc_mjlab.tasks.locomanip.profiles import PROFILES
 
 #: MainRobot to the profile whose cycle this gate accepts.
@@ -133,6 +139,23 @@ def result(
 def run(args: argparse.Namespace) -> bool:
   """Run explicit reset cycles and optionally reset one of two shared-worker rows."""
   cfg = locomanip_env_cfg(ROBOTS[args.robot], play=args.console)
+  action_name = "robot_joints"
+  if args.task != "demo":
+    builder = (
+      make_locomanip_feedback_env_cfg
+      if args.task == "feedback"
+      else make_locomanip_residual_env_cfg
+    )
+    cfg = builder(
+      profile=ROBOTS[args.robot],
+      num_envs=1,
+      num_workers=1,
+      cart_mass_range_kg=(10.0, 10.0),
+      console_output="single" if args.console else "none",
+    )
+    cfg.events.pop("encoder_bias")
+    action_name = "mc_rtc_residual"
+  cfg.seed = 42
   cfg.auto_reset = False
   cfg.scene.num_envs = 2 if args.isolation else 1
   if args.isolation:
@@ -141,7 +164,7 @@ def run(args: argparse.Namespace) -> bool:
   results = []
   args.output.parent.mkdir(parents=True, exist_ok=True)
   try:
-    term = env.action_manager.get_term("robot_joints")
+    term = env.action_manager.get_term(action_name)
     if not isinstance(term, McRtcResidualActionBase):
       raise TypeError(f"unexpected residual action type: {type(term).__name__}")
     actions = torch.zeros(
@@ -221,9 +244,22 @@ def run(args: argparse.Namespace) -> bool:
               json.dumps({"cycle": cycle + 1, "reset_env": 0, "time": 10.0}) + "\n"
             )
         args.output.write_text(
-          json.dumps({"isolation": args.isolation, "results": results}, indent=2) + "\n"
+          json.dumps(
+            {
+              "robot": args.robot,
+              "task": args.task,
+              "isolation": args.isolation,
+              "results": results,
+            },
+            indent=2,
+          )
+          + "\n"
         )
   finally:
+    for name in env.action_manager.active_terms:
+      action = env.action_manager.get_term(name)
+      if isinstance(action, McRtcResidualActionBase):
+        action.close()
     env.close()
   expected = args.cycles * (2 if args.isolation else 1)
   return len(results) == expected and all(r["passed"] for r in results)
@@ -238,6 +274,9 @@ def main() -> None:
   parser.add_argument("--device", default="cuda:0")
   parser.add_argument("--console", action="store_true")
   parser.add_argument("--robot", default="HRP5P", choices=sorted(ROBOTS))
+  parser.add_argument(
+    "--task", choices=("demo", "position", "feedback"), default="demo"
+  )
   parser.add_argument(
     "--output", type=Path, default=Path("logs/locomanip/verification.json")
   )
