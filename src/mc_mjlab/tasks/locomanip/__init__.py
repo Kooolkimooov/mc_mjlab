@@ -13,6 +13,9 @@ from mc_mjlab.rl.runner import McRtcResidualOnPolicyRunner
 from mc_mjlab.tasks.evaluation import register_evaluation
 from mc_mjlab.tasks.locomanip.evaluation import LOCOMANIP_EVALUATION
 from mc_mjlab.tasks.locomanip.locomanip_env_cfg import locomanip_env_cfg
+from mc_mjlab.tasks.locomanip.locomanip_feedback_env_cfg import (
+  locomanip_feedback_env_cfg,
+)
 from mc_mjlab.tasks.locomanip.locomanip_ppo_cfg import locomanip_ppo_cfg
 from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
   locomanip_residual_env_cfg,
@@ -37,6 +40,13 @@ DEMO_TASK_IDS: dict[str, str] = {
 RESIDUAL_TASK_IDS: dict[str, str] = {
   get_main_robot_name(p.mc_rtc_yaml): get_task_name(
     TASK_DIR, p.mc_rtc_yaml, "position-residual"
+  )
+  for p in PROFILES
+}
+
+FEEDBACK_TASK_IDS: dict[str, str] = {
+  get_main_robot_name(p.mc_rtc_yaml): get_task_name(
+    TASK_DIR, p.mc_rtc_yaml, "position-feedback"
   )
   for p in PROFILES
 }
@@ -94,3 +104,13 @@ for profile in _registrable_profiles():
   )
 
   register_evaluation(residual_id, LOCOMANIP_EVALUATION)
+
+  feedback_id = FEEDBACK_TASK_IDS[robot]
+  register_mjlab_task(
+    task_id=feedback_id,
+    env_cfg=locomanip_feedback_env_cfg(profile),
+    play_env_cfg=locomanip_feedback_env_cfg(profile, play=True),
+    rl_cfg=locomanip_ppo_cfg(experiment_name=feedback_id),
+    runner_cls=McRtcResidualOnPolicyRunner,
+  )
+  register_evaluation(feedback_id, LOCOMANIP_EVALUATION)
