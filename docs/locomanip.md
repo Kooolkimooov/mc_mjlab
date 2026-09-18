@@ -660,3 +660,161 @@ took the shipped setting from 275 kg to 350. An earlier revision of this section
 blamed the vertical feedback for destabilising HRP5P and reported a fall at
 100 kg; those runs carried a stale +-30 N `preHandWrenches` and a broken grasp,
 and none of their numbers survive.
+
+## ResidualFeedbackJointPositionAction
+
+**Current:** the action is the shared residual-feedback one, in its
+feedback-only, position-controlled form -- see
+[docs/residual-feedback.md](residual-feedback.md#feedback_modalities) for the
+modality itself. Locomanip configures it with `feedback_modalities=("wrench",)`,
+`wrench_force_only`, its two hands in `wrench_sensor_names`, and a gate of
+`Locomanip::leftPhase`/`Locomanip::rightPhase` at `Hold`. The action knows none
+of those words; the measurements below are locomanip's, which is why they
+live here.
+
+The `position-feedback` registrations for HRP5P and JVRC1 therefore expose
+exactly six policy outputs: left `Fx, Fy, Fz`, then right `Fx, Fy, Fz`.
+`force_sensor_names` resolves those hands by name, independently of their native
+layout order. Each action is clamped to `[-1, 1]` and multiplied by
+`force_scale` (initially 50 N). The coordinates and sign are those of MuJoCo's
+sensor input: the existing native conversion negates both force and moment to
+produce mc_rtc's reaction wrench. These are virtual measurements, not forces
+applied to the cart. The original sensor readings remain available to the actor,
+critic, rewards and physical metrics.
+
+The action composes `ResidualFeedbackActionBase` over the position action with an
+empty joint residual, so the feedback block is its whole action. Its bridge correction affects only
+the hands' force triples; measured moments, feet, IMU, encoders, cart state, real
+PD gains and joint-target interpolation retain their existing path. No walking
+reference or MPC torque blend is introduced. The controller's existing
+hand-force adaptation remains enabled.
+
+After each collection, the next dispatch enables the correction only when the
+phase outputs are fresh, both hands report `Hold`, and neither controller nor
+worker failure has latched. Resets clear that row's correction and action
+histories; fresh phase outputs are required to enable it again. Dispatch and
+collection retain the one-control-period delay. The action observation is the
+six **normalized dispatched corrections**, while the magnitude and rate costs
+use all six bounded requests and the phase gate. Rate cost excludes onset from
+an unauthorized preceding step. `feedback_active`, `feedback_force_rms` (N), and
+`feedback_saturation` report the last dispatch; play prints the six corrections
+in N using the usual residual-print interval.
+
+The environment reuses the position-residual task's objective, noise/history,
+payload distribution, terminations and PPO configuration. Experiment names are
+the distinct full task IDs. The action configuration records sensor order and
+force scale in the checkpoint interface, so changing either rejects a load.
+Existing position-residual and walking-feedback checkpoints keep their original
+interfaces.
+
+What was checked on 2026-09-18, all under
+`logs/locomanip/feedback-validation/`. `scripts/smoke_locomanip_feedback.py`
+took each robot to Hold at zero feedback, ran two PPO updates and reloaded the
+checkpoint into a fresh runner: six action dimensions, 507/628 observations on
+HRP5P and 489/610 on JVRC1, finite gradients and losses, bit-exact reload.
+`scripts/verify_locomanip.py --task position` and `--task feedback` ran the same
+cycle at a fixed 10 kg cart with no encoder bias: HRP5P's two runs differ by
+0.6 mm of cart travel and 4 mm laterally, and both miss the demo's 0.15 m
+position gate by the same hair (0.1506 m against 0.1518 m). JVRC1 never finishes
+the cycle in either task: it drops to 0.577 m and terminates at 19.04 s under the
+position residual and 20.08 s under feedback, failing the same three checks. The
+demo separates the two causes -- `--task demo` on the same day held JVRC1 upright
+at 0.694 m through a complete cycle, so the early fall belongs to the
+position-residual environment rather than to JVRC1 or to the feedback path, and
+wants its own investigation before either task is trained on that robot. That
+demo run misses the position gate too, by 0.779 m: the 0.15 m tolerance was
+calibrated on HRP5P, which passed the same run at 0.1432 m.
+Authority is in [AuthorityTrace](#authoritytrace).
+
+**Re-measure if:** the hand sensors, controller impedance gains, adaptation,
+phase transitions, force scale, robot assets or dispatch timing change.
+
+**History:** 2026-09-18 -- added feedback-only force policies for both robot
+profiles. The initial 50 N bound is experimental, not a demonstrated optimal
+training scale; full policy training is separate from the implementation checks.
+At 50 N every channel clears the zero-control floor in every measured regime,
+and the vertical one both rescues a payload the controller loses and, at the
+other sign, drops the robot -- so a policy has room to help and to fall. 5 N does
+not clear the floor; see [AuthorityTrace](#authoritytrace) for the numbers.
+
+## AuthorityTrace
+
+**Current:** `scripts/probe_locomanip_authority.py --task feedback` excites each
+selected hand-force component in both directions at normalized amplitudes 0.1,
+0.5 and 1.0 (5, 25 and 50 N).
+`--channel` selects one component; its default covers all six. Three zero rows
+measure the numerical floor. All rows use the same fixed payload and no encoder
+bias; actor noise never feeds these constant actions. Controller-target RMS
+differences are measured only while both the comparison row and the first zero
+row hold the cart in their first episode. A response above the largest zero-row
+RMS plus 1e-6 rad is labelled measurable authority, which is not a claim of
+better control.
+
+The JSON retains each row's first episode, including termination, physical cart
+error/travel, minimum height, contact forces, holding duration and dispatched
+residual RMS. Failed rows are recorded before reset and then recycled with zero
+actions so their controllers cannot wedge while other conditions finish.
+`--task position` retains the all-joint constant-action screen, whose single
+zero arm is also the response reference, so its floor is zero by construction
+and `measurable_authority` only carries information under `--task feedback`.
+Use `--robot` and `--mass` for the two profiles and the 10/300 kg comparison
+regimes.
+
+Measured 2026-09-18 at `force_scale` 50 N, 16 s per condition, seed 42, encoder
+bias off, three zero controls per set and **three repeats of every set**, under
+`logs/locomanip/feedback-validation/repeats/`. The cart is fixed at the named
+mass: `--mass` collapses `alpha_range` to a point and every other
+`pseudo_inertia` range is zero, so payload and inertia are identical in every row
+of every repeat.
+
+**The simulation does not reproduce bitwise.** Two runs of identical code, seed
+and configuration diverge: the zero controls of one set span 0.004 m of cart
+travel at HRP5P/10 kg, and the floor itself moves by up to a factor of two
+between repeats. So the figures below are medians over three repeats with their
+range, and "above floor" counts only the rows that cleared it in *all three*.
+
+| robot | cart | zero floor | above floor | excited rows that fell | zero rows that fell |
+| --- | --- | ---: | ---: | ---: | ---: |
+| HRP5P | 10 kg | 0.0053-0.0078 rad | 29/36 | 3/36 | 0/9 |
+| HRP5P | 300 kg | 0.0335-0.0611 rad | 26/36 | 2/36 | 0/9 |
+| JVRC1 | 10 kg | 0.0055-0.0065 rad | 34/36 | 20/36 | 0/9 |
+| JVRC1 | 300 kg | 0.0045-0.0267 rad | 32/36 | 31/36 | 9/9 |
+
+**Amplitude decides, not channel.** All 24 channel-direction pairs clear the
+floor at 50 N in all three repeats of all four regimes, and all but one
+(`left_fy` at -25 N, HRP5P/300 kg) at 25 N. What is not resolvable is 5 N: 22 of
+the 48 rows at that amplitude sit inside the floor in at least one repeat. No
+channel is inert -- 5 N is simply below the controller's own spread.
+
+**Vertical is the channel that moves the cart**, and its sign decides which way.
+Left hand, median over three repeats with the range, and how many of the three
+fell:
+
+| regime | +50 N | -50 N |
+| --- | --- | --- |
+| HRP5P 10 kg | -0.851 m [-0.863, -0.844], 3/3 fell | +0.517 m [+0.464, +0.544], 0/3 |
+| HRP5P 300 kg | -0.325 m [-0.326, -0.308], 3/3 fell | +0.258 m [+0.242, +0.296], 2/3 fell |
+| JVRC1 10 kg | -0.466 m [-0.468, -0.466], 3/3 fell | +1.040 m [+1.033, +1.059], 3/3 fell |
+| JVRC1 300 kg | -0.208 m [-0.208, -0.207], 3/3 fell | +0.596 m [+0.595, +0.604], 0/3 |
+
+The right hand tracks it to within the repeat spread. `Fx` and `Fy` move the
+controller's targets as much and the cart far less. Travel does not compare
+across robots: the hands hold for 5.4 s of the 16 s window on HRP5P against
+10.7 s on JVRC1.
+
+JVRC1 at 300 kg is the regime that matters. **All nine zero controls fall inside
+the window**, across all three repeats -- the unbiased controller loses that
+payload -- while every -25 N and -50 N vertical row survives all three, at
+0.70-0.72 m base height against 0.574 m for zero, with up to +0.617 m of cart
+travel. That is a constant bias rather than a policy, but it is the strongest
+evidence so far that these six channels reach the failure the task is about.
+
+**Re-measure if:** the compared action, payload, zero-control variability or
+observation/control conventions change.
+
+**History:** 2026-09-18 -- added channel-isolated force conditions, repeated-zero
+controls and terminal-safe records to the existing position authority probe. The
+first write-up of these numbers quoted one run per regime and claimed 36/36
+channels above the floor; three repeats put it at 26-34/36 and showed the
+simulation is not reproducible run to run, so single-run counts overstated what
+the probe can resolve.

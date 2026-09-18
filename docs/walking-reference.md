@@ -45,7 +45,7 @@ or disturbance profile changes.
 ## Retired: GatedWalkingReferenceDeltaActionCfg
 
 **Retired:** 2026-09-16 — the gated delta mode is gone;
-`AbsoluteWalkingReferenceMixin`, the mode `residual_mpc` and `residual_feedback`
+`AbsoluteWalkingReferenceActionBase`, the mode `residual_mpc` and `residual_feedback`
 use, is what survives.
 
 **Was:** the recovery-gated delta channel is its own action term in
@@ -53,7 +53,7 @@ use, is what survives.
 shared mc_rtc residual action. Its `__post_init__` reads `Enabled` out of the
 configured mc_rtc yaml and refuses to build unless the walking controller named
 by `walking_controller` is the one enabled, because
-`ismpc_walking::set_ref_vel` exists only there. `AbsoluteWalkingReferenceMixin`
+`ismpc_walking::set_ref_vel` exists only there. `AbsoluteWalkingReferenceActionBase`
 is the second drive mode (`residual_mpc`): a command-manager term sent as an
 absolute target, adding no action dimensions.
 

@@ -69,7 +69,7 @@ uv run python scripts/validate_dcm_objective.py
 # Regenerate docs/architecture/ from the source; --check fails on drift.
 uv run python scripts/generate_architecture_docs.py
 uv run ruff format && uv run ruff check --fix    # format + lint
-uv run ty check                                  # type check (117 pre-existing
+uv run ty check                                  # type check (149 pre-existing
                                                  # diagnostics: unresolvable
                                                  # mc_rtc bindings + mujoco stubs)
 uv run pytest                                    # tests/: bindings + action contracts
@@ -220,12 +220,19 @@ From mjlab down to mc_rtc:
   `McRtcResidualJointTorqueAction(Cfg)` (adds channel `tau` → effort targets,
   residual on torque). Three more modules extend that base rather than widening
   it: `walking_reference_action.py` feeds `ismpc_walking::set_ref_vel` through
-  the generic extension hooks (`AbsoluteWalkingReferenceMixin` is the surviving
+  the generic extension hooks (`AbsoluteWalkingReferenceActionBase` is the surviving
   drive mode, a command-manager target adding no action dimensions; the
   recovery-gated delta variant is retired, docs/walking-reference.md);
-  `residual_feedback_action.py` puts the residual on the controller's own
-  feedback rather than its output; and `residual_mpc_joint_torque_action.py`
-  combines the torque action with the absolute walking reference.
+  `residual_mpc_joint_torque_action.py` combines the torque action with the
+  absolute walking reference; and `residual_feedback_action.py` puts the residual
+  on the controller's own feedback rather than its output. That last one keeps
+  its machinery in `ResidualFeedbackActionBase`, which either lineage composes
+  with: `ResidualFeedbackJointTorqueAction` is the paper's variant beside the MPC
+  torque residual, `ResidualFeedbackJointPositionAction` the feedback-only one
+  over position targets. Its `wrench` modality takes `wrench_sensor_names` and
+  `wrench_force_only` to offset a subset, and `gate_scalar_outputs`/`gate_value`
+  gate on collected datastore scalars instead of recovery authority. It names no
+  task: locomanip passes it the two hands and the Hold phase.
 - `residuals/` — the residual machinery the action terms compose, one concern
   per module: `safety` (feasibility projection against the `RobotModule`'s
   bounds), `recovery_authority` (the calibrated detector and its gate),
@@ -269,13 +276,17 @@ From mjlab down to mc_rtc:
   sub-*packages* are walked, so a task added as a bare module never registers;
   and `register_mjlab_task` takes built cfgs, so `import mjlab` now builds this
   repo's env cfgs — without a sourced mc_rtc workspace mjlab's loader reports
-  that as a `[WARN]` plus traceback rather than failing. Twelve ids register, and
-  they are all of them (six residual-balance, two zero-residual, two locomanip --
-  the play-only cart demo and its trainable residual -- one each for
-  residual_mpc and residual_feedback): the ten archived ablations and their
+  that as a `[WARN]` plus traceback rather than failing. Sixteen ids register, and
+  they are all of them (six residual-balance, two zero-residual, six locomanip --
+  a demo, position residual and hand-force feedback for each of HRP5P/JVRC1 --
+  one each for residual_mpc and residual_feedback): the ten archived ablations and their
   `MC_MJLAB_REGISTER_ARCHIVED_TASKS` switch are gone. Reproducing an archived
   experiment means checking out the revision before that cleanup; every
   *supported* checkpoint still loads.
+  Locomanip's feedback task configures `ResidualFeedbackJointPositionAction`
+  with the `wrench` modality over its two hands, leaving every actuator tracking
+  mc_rtc. Its gate refreshes between collect and dispatch, and the public action
+  readouts report the feedback rather than the empty joint block.
 - `utils/` — what belongs to no one layer. `controller_install.py` answers whether
   the sourced workspace ships a named controller, by its module *or* its
   configuration (a variant like `LogisticController_ismpc` has no `.so` of its

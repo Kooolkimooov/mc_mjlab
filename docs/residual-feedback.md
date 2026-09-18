@@ -320,6 +320,37 @@ obvious next step, and `feedback_scale` for the joint channel remains unswept, s
 **History:**
 - 2026-09-02 — first measured win for a residual in this repository.
 
+## ResidualFeedbackActionBase
+
+**Current:** the modality machinery sits in `ResidualFeedbackActionBase`, over
+`McRtcResidualActionBase` and never instantiated on its own, so a lineage picks
+it up by composition the way `WalkingReferenceActionBase` is picked up:
+`ResidualFeedbackJointTorqueAction` composes it with the MPC torque action, and
+`ResidualFeedbackJointPositionAction` with the position action and no joint
+residual, which is what a position-controlled task needs. The second one reports the feedback block through the residual
+accounting properties -- `requested_normalized_action`, `residual_names`,
+`residual_scale` -- because with an empty joint residual the feedback *is* the
+action, and that is what the magnitude and rate penalties should cost.
+
+The offsets are written in `_advance_action_extensions`, between the collect and
+the dispatch that reads them, rather than in `process_actions`. For a recovery
+gate that is the same value either way, since `_last_gate` is set in
+`process_actions` and unchanged in between; a datastore gate needs it, because
+the scalars it reads are only fresh after the collect.
+
+**The gate is cfg, not code.** `gate_scalar_outputs` names datastore scalars
+that must all read `gate_value` for feedback to go out, alongside output
+freshness and neither failure latch; it is refused together with
+`recovery_detector_path`, since both drive `_last_gate`. With it set, a reset
+closes the gate and fresh outputs have to re-open it.
+
+**Re-measure if:** the dispatch ordering, the gate's source or a modality's
+width changes.
+
+**History:** 2026-09-18 -- extracted from `ResidualFeedbackJointTorqueAction`,
+which had welded the feedback to the torque plus walking-reference lineage, so
+locomanip's position-controlled task could use the same `wrench` modality.
+
 ## feedback_modalities
 
 **Current:** `("joint_position",)` by default. Each entry adds a block to the end
@@ -335,7 +366,10 @@ of the action vector, in the order listed, so the layout is
 
 `wrench` resolves its width from the live layout — on HRP5P that is `24`, from
 `RightFootForceSensor`, `LeftFootForceSensor` and both hands — and refuses to
-build on a model with no force sensors. It is the analogue of the paper's
+build on a model with no force sensors. `wrench_sensor_names` narrows it to a
+named subset (empty, the default, keeps every sensor) and `wrench_force_only`
+drops each selected sensor's moment triple, leaving those measured; locomanip
+uses both to get six hand-force channels out of the same modality. It is the analogue of the paper's
 end-effector wrench channel, and for a walking stabilizer it is the loop the
 controller actually closes on. `joint_velocity` is the modality Ranjbar names as
 optional beside joint position.

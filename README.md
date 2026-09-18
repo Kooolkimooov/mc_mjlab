@@ -252,7 +252,7 @@ uv run play  Mc-Mjlab-Residual-Balance-Logisticcontroller-Ismpc-Hrp5P-Position \
   --checkpoint-file <path/to/model_*.pt>
 ```
 
-The mc_mjlab surface is twelve tasks, and `uv run list-envs` shows all of them.
+The mc_mjlab surface is sixteen tasks, and `uv run list-envs` shows all of them.
 One, the achievement-gated ankle curriculum, advances only from held-out
 qualification reports — see
 [docs/difficulty.md](docs/difficulty.md#achievement_finite_impulse_curriculum)
@@ -262,6 +262,27 @@ barebones cart-pushing residual: it trains, but it carries one task reward and n
 curriculum, and every episode pushes the same waypoint until you randomize one —
 see [docs/locomanip.md](docs/locomanip.md#locomanip_residual_env_cfg) for what is
 wired and what is deliberately missing.
+
+Locomanip also registers a hand-force feedback policy for HRP5P and JVRC1.
+It learns six sensor-frame force corrections, enabled while both hands hold
+the cart, with an initial bound of 50 N per component. Use the task ID printed
+by `uv run list-envs` for the chosen robot:
+
+```sh
+uv run train Mc-Mjlab-Locomanip-Locomanipcontroller-Hrp5P-Position-Feedback
+uv run play Mc-Mjlab-Locomanip-Locomanipcontroller-Hrp5P-Position-Feedback \
+  --checkpoint-file <path/to/model_*.pt>
+uv run python scripts/probe_locomanip_authority.py --task feedback --robot HRP5P --mass 10
+uv run python scripts/verify_locomanip.py --task feedback --robot JVRC1 --cycles 1
+uv run python scripts/smoke_locomanip_feedback.py --robot HRP5P
+```
+
+Run training in tmux. The smoke check performs two PPO updates after reaching
+Hold and checks a fresh runner's checkpoint reload. Evaluate trained policies
+with `compare_to_baseline.py --task <feedback-task-id> --checkpoint <model.pt>`;
+the report uses physical cart success and separates payload strata.
+See [the feedback contract](docs/locomanip.md#residualfeedbackjointpositionaction) for
+units, gating, and validation results.
 
 Ten completed ablations used to register behind an environment variable, for
 replaying their checkpoints under their original ids. They are gone, along with
