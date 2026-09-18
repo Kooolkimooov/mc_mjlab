@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 
 import torch
+from conftest import requires_controller
 from rsl_rl.models.mlp_model import MLPModel
 from rsl_rl.storage import RolloutStorage
 from tensordict import TensorDict
@@ -27,11 +28,14 @@ from mc_mjlab.rl.zero_init_actor import (
   mean_head_magnitude,
 )
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
+  MC_RTC_YAML,
   make_residual_balance_env_cfg,
 )
 from mc_mjlab.tasks.residual_balance.residual_balance_ppo_cfg import (
   residual_balance_ppo_cfg,
 )
+
+pytestmark = requires_controller(MC_RTC_YAML)
 
 
 def test_distribution() -> None:

@@ -27,6 +27,10 @@ from mc_mjlab.actions.walking_reference_action import (
 )
 from mc_mjlab.bridge.sim_controller_bridge import SimControllerBridge
 from mc_mjlab.residuals.printer import ResidualPrinter
+from mc_mjlab.utils.controller_install import (
+  controller_config_paths,
+  controller_is_installed,
+)
 
 
 def verify_layout() -> tuple[SimControllerBridge, NS, NS]:
@@ -322,3 +326,13 @@ def test_pipeline() -> None:
   action.apply_actions()
   action._collect_controller_output()
   assert not action._has_staged_control.any()
+
+
+def test_controller_is_installed_finds_the_workspace_controller() -> None:
+  """Verify the guard that skips a controller's tests can tell the two apart."""
+  assert not controller_is_installed("NoSuchController")
+  # A variant is configuration over another controller's module, so it has no
+  # .so of its own -- finding it is the whole reason the config half exists.
+  assert controller_is_installed("LogisticController_ismpc")
+  assert controller_config_paths("LocomanipController")
+  assert not controller_config_paths("NoSuchController")

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import shutil
 from pathlib import Path
 from typing import cast
@@ -13,6 +12,7 @@ from mjlab.rl import RslRlVecEnvWrapper
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionCfg
 from mc_mjlab.bridge.config import get_controller_name
+from mc_mjlab.utils.controller_install import controller_config_paths
 
 
 def _file_record(role: str, path: Path) -> dict[str, str | bool]:
@@ -30,22 +30,6 @@ def _file_record(role: str, path: Path) -> dict[str, str | bool]:
   }
 
 
-def _controller_config_paths(controller_name: str) -> list[Path]:
-  """Find installed mc_rtc files that configure the selected controller."""
-  paths: set[Path] = set()
-  for value in os.environ.get("LD_LIBRARY_PATH", "").split(os.pathsep):
-    if not value:
-      continue
-    library_dir = Path(value).expanduser()
-    for suffix in ("conf", "yaml", "yml"):
-      paths.update(library_dir.glob(f"*/etc/{controller_name}.{suffix}"))
-      # Per-robot overrides, which a robot description package ships and
-      # BaselineWalkingController merges at the configuration root -- they change
-      # the controller as much as its own file does.
-      paths.update(library_dir.glob(f"*/{controller_name}/*.{suffix}"))
-  return sorted(path.resolve() for path in paths if path.is_file())
-
-
 def collect_controller_provenance(env: RslRlVecEnvWrapper) -> dict:
   """Collect all non-checkpoint inputs that define the base controller."""
   action_cfg = cast(
@@ -61,7 +45,7 @@ def collect_controller_provenance(env: RslRlVecEnvWrapper) -> dict:
     records.append(_file_record("pd_gains", Path(action_cfg.pd_gains_path)))
   records.extend(
     _file_record(f"controller_config_{index}", path)
-    for index, path in enumerate(_controller_config_paths(controller_name))
+    for index, path in enumerate(controller_config_paths(controller_name))
   )
   return {"controller_name": controller_name, "files": records}
 

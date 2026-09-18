@@ -10,6 +10,7 @@ from typing import Any, get_args, get_type_hints
 
 import pytest
 import torch
+from conftest import requires_controller
 from mjlab.managers.reward_manager import RewardTermCfg
 
 from mc_mjlab.mdp.curricula import episode_length_impulse_curriculum
@@ -38,6 +39,7 @@ from mc_mjlab.tasks.residual_balance.curriculum_stages import (
 )
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   AUTHORITY_SETS,
+  MC_RTC_YAML,
   QUALIFICATION_MATCHED_BANDS,
   QUALIFICATION_MATCHED_MIXTURES,
   QUALIFICATION_MATCHED_WEIGHTS,
@@ -50,6 +52,8 @@ from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
 from mc_mjlab.tasks.residual_balance.residual_balance_ppo_cfg import (
   POLICY_STEPS_PER_ENV,
 )
+
+pytestmark = requires_controller(MC_RTC_YAML)
 
 
 class _TermManager:

@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import sys
+import warnings
 from pathlib import Path
 
 from mjlab.tasks.registry import register_mjlab_task
 
-from mc_mjlab.bridge.config import get_main_robot_name
+from mc_mjlab.bridge.config import get_controller_name, get_main_robot_name
 from mc_mjlab.rl.runner import McRtcResidualOnPolicyRunner
 from mc_mjlab.tasks.evaluation import register_evaluation
 from mc_mjlab.tasks.locomanip.evaluation import LOCOMANIP_EVALUATION
@@ -16,11 +17,15 @@ from mc_mjlab.tasks.locomanip.locomanip_ppo_cfg import locomanip_ppo_cfg
 from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
   locomanip_residual_env_cfg,
 )
-from mc_mjlab.tasks.locomanip.profiles import PROFILES
+from mc_mjlab.tasks.locomanip.profiles import PROFILES, LocomanipProfile
 from mc_mjlab.tasks.naming import get_task_name
 from mc_mjlab.tasks.zero_residual.zero_residual_env_cfg import zero_residual_rl_cfg
+from mc_mjlab.utils.controller_install import controller_is_installed
 
 TASK_DIR = Path(__file__).resolve().parent.name
+
+#: Every profile names it, since the cart is one controller's object.
+CONTROLLER_NAME = get_controller_name(PROFILES[0].mc_rtc_yaml)
 
 #: MainRobot to its play-only demo id, one entry per registered profile.
 DEMO_TASK_IDS: dict[str, str] = {
@@ -53,9 +58,22 @@ def _refuse_to_train_the_demo() -> None:
     )
 
 
+def _registrable_profiles() -> tuple[LocomanipProfile, ...]:
+  """Every profile, or none at all when the controller shipping the cart is absent."""
+  if controller_is_installed(CONTROLLER_NAME):
+    return PROFILES
+  # Its cart asset is read while the cfgs are built, so raising here would take
+  # every other task's registration down with it. docs/coupling.md#controller_is_installed
+  warnings.warn(
+    f"{CONTROLLER_NAME} is not installed: no locomanip task is registered",
+    stacklevel=2,
+  )
+  return ()
+
+
 _refuse_to_train_the_demo()
 
-for profile in PROFILES:
+for profile in _registrable_profiles():
   robot = get_main_robot_name(profile.mc_rtc_yaml)
   residual_id = RESIDUAL_TASK_IDS[robot]
 

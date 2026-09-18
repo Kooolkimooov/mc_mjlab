@@ -6,6 +6,7 @@ from collections.abc import Sequence
 
 import numpy as np
 import torch
+from conftest import requires_controller
 
 import mc_mjlab.tasks  # noqa: F401
 from mc_mjlab.actions.residual_feedback_action import (
@@ -18,7 +19,12 @@ from mc_mjlab.tasks.residual_feedback.residual_feedback_env_cfg import (
   residual_feedback_env_cfg,
 )
 from mc_mjlab.tasks.residual_mpc import mdp
-from mc_mjlab.tasks.residual_mpc.residual_mpc_env_cfg import residual_mpc_env_cfg
+from mc_mjlab.tasks.residual_mpc.residual_mpc_env_cfg import (
+  MC_RTC_YAML,
+  residual_mpc_env_cfg,
+)
+
+pytestmark = requires_controller(MC_RTC_YAML)
 
 
 def test_rotation_composition() -> None:

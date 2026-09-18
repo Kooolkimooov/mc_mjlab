@@ -7,6 +7,7 @@ from typing import cast
 
 import pytest
 from compare_to_baseline import _report_task, _resolve_evaluation
+from conftest import requires_controller
 from evaluation.comparison import ComparisonEpisode, by_stratum
 from mjlab.envs import ManagerBasedRlEnv
 
@@ -20,6 +21,9 @@ from mc_mjlab.tasks.evaluation import (
 )
 from mc_mjlab.tasks.locomanip import RESIDUAL_TASK_IDS
 from mc_mjlab.tasks.locomanip.evaluation import LOCOMANIP_EVALUATION
+from mc_mjlab.tasks.locomanip.profiles import HRP5P
+
+pytestmark = requires_controller(HRP5P.mc_rtc_yaml)
 
 
 def episode(nth: int, **metrics: float) -> ComparisonEpisode:

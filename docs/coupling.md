@@ -143,6 +143,46 @@ the walking reference moves to a differently named controller.
   rather than a wrong controller. `_validate_cfg` sees the final cfg, after any
   `--env.*` override, and stops the run itself.
 
+## controller_is_installed
+
+**Current:** `utils/controller_install.py` answers whether the sourced
+workspace ships a named controller, and `tests/conftest.py`'s
+`require_controller` skips a whole test module when it does not. A controller
+counts as installed if the workspace holds **either** its module
+(`<lib>/mc_controller/<name>.so`) **or** a configuration for it
+(`<lib>/mc_controller/etc/<name>.{conf,yaml,yml}`, or a per-robot file under
+`<lib>/mc_controller/<name>/`). Both halves are needed: a variant like
+`LogisticController_ismpc` is configuration over `LogisticController`'s module
+and has no `.so` of its own, while a plain controller may ship only the module
+and take its whole configuration from the caller.
+
+The guard is a `pytestmark` skipif, never `pytest.skip(allow_module_level=True)`:
+a sourced ROS workspace puts `launch_testing`'s pytest plugin on the path, and
+its `pytest_pycollect_makemodule` imports *every* `test_*.py` in the directory
+looking for a launch entrypoint. A `Skipped` raised while that hook imports a
+module escapes it and ends the whole session -- `1 skipped` and
+`found no collectors for tests/test_policy.py`, with the other 96 tests never
+run. A mark is evaluated after the import and cannot do that.
+
+The mark only works because `tasks/locomanip/__init__.py` registers nothing when
+`CONTROLLER_NAME` is absent, warning instead. Its cfgs read the cart asset while
+they are built (`cart_nominal_mass_kg`), so registering unconditionally made
+`import mc_mjlab.tasks` raise `FileNotFoundError` -- and every test module starts
+with that import, so a missing Locomanip took the residual_balance,
+residual_mpc and residual_feedback tests down with it.
+
+`rl/controller_provenance.py` reads the same `controller_config_paths`, so what
+a checkpoint records as its base controller and what the tests check for being
+installed cannot drift apart.
+
+**Re-measure if:** mc_rtc changes where controllers or their configurations
+install, or a task starts loading an asset from a controller package the guard
+does not name.
+
+**History:** 2026-09-18 -- added after locomanip registered on a second robot;
+until then every controller the tests touch happened to be installed on the one
+machine that ran them.
+
 ## Datastore callbacks
 
 **Current:** there is no alias layer. A task names native callbacks directly in

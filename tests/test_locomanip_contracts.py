@@ -6,6 +6,7 @@ import math
 from typing import cast
 
 import pytest
+from conftest import requires_controller
 from mjlab.envs import ManagerBasedRlEnvCfg
 
 import mc_mjlab.tasks  # noqa: F401
@@ -30,7 +31,9 @@ from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
 )
 from mc_mjlab.tasks.locomanip.mdp import accessors
 from mc_mjlab.tasks.locomanip.mdp.events import mass_alpha_range
-from mc_mjlab.tasks.locomanip.profiles import PROFILES
+from mc_mjlab.tasks.locomanip.profiles import HRP5P, PROFILES
+
+pytestmark = requires_controller(HRP5P.mc_rtc_yaml)
 
 
 def _scales(cfg: ManagerBasedRlEnvCfg) -> dict[str, float]:

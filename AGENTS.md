@@ -276,6 +276,12 @@ From mjlab down to mc_rtc:
   `MC_MJLAB_REGISTER_ARCHIVED_TASKS` switch are gone. Reproducing an archived
   experiment means checking out the revision before that cleanup; every
   *supported* checkpoint still loads.
+- `utils/` — what belongs to no one layer. `controller_install.py` answers whether
+  the sourced workspace ships a named controller, by its module *or* its
+  configuration (a variant like `LogisticController_ismpc` has no `.so` of its
+  own). `rl/controller_provenance.py` snapshots what it finds; `tests/conftest.py`
+  skips a controller's test modules when it finds nothing.
+  docs/coupling.md#controller_is_installed
 - `rl/` — what every task shares: the zero-init actor, the squashed Gaussian,
   `RolloutAdaptivePPO`, and `runner.py`'s `McRtcResidualOnPolicyRunner`, which
   snapshots external base controller inputs into the run directory
@@ -379,6 +385,14 @@ Cross-cutting invariants:
   half-built `mc_mjlab.actions` and mjlab swallows it as a `[WARN]`, leaving the
   ids unregistered until something imports `mc_mjlab.tasks` again. Any script
   that imports mjlab first — isort puts it first — is unaffected.
+- A sourced ROS workspace puts `launch_testing`'s pytest plugin on the path, and
+  its `pytest_pycollect_makemodule` imports every `test_*.py` in the directory
+  during collection -- even the ones the command line did not name. So
+  `pytest.skip(allow_module_level=True)` is unusable here: the `Skipped` escapes
+  that hook and ends the session with `found no collectors for <the file you
+  asked for>`, reporting one skip and running nothing. Skip a whole file with
+  `pytestmark = pytest.mark.skipif(...)`, which is evaluated after the import.
+  docs/coupling.md#controller_is_installed
 - `Robot.jointIndexByName` on a missing joint throws a C++ `std::out_of_range`
   that terminates the process uncatchably — always probe `hasJoint` first
   (the host's `joint_index` helper does).
