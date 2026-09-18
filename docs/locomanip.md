@@ -15,8 +15,22 @@ precedence is: base YAML, then the per-robot file, then this repo's
 
 | Robot | Where its Locomanip configuration lives |
 | --- | --- |
-| HRP5P | `mc_hrp5_p/etc/controllers/LocomanipController/hrp5_p.yaml`, shipped by the robot description package |
+| HRP5P | `LocomanipController/etc/robots/hrp5_p.yaml`, installed by `install_controller_robot_configuration` |
 | JVRC1 | the `robots: jvrc1:` section inside `LocomanipController.yaml` itself |
+
+The controller owns both, which is how `mc_logistic_controller` does it -- its
+`src/controller/etc/robots/{hrp5_p,rhps1}.yaml` install into each
+`LogisticController_<variant>/` the same way.
+
+**`mc_hrp5_p` installs to the same path and only one file is ever read.** Its
+`etc/controllers/LocomanipController/hrp5_p.yaml` lands on exactly
+`lib/mc_controller/LocomanipController/hrp5_p.yaml`, so whichever package
+installs last wins. LocomanipController's copy is therefore the *complete*
+configuration rather than a supplement -- it carries `mc_hrp5_p`'s posture
+weights, CoM active joints, base frame, foot timings and `refComZ: 0.95`
+verbatim, so either install leaves HRP5P configured the same. Reinstalling
+`mc_hrp5_p` drops only the three Locomanip keys; re-run the targeted install
+below to put them back.
 
 **The filename is the robot MODULE name, not `MainRobot`.** `hrp5_p` and
 `jvrc1`, never `HRP5P`/`JVRC1` -- and a file under the wrong name is simply not
@@ -41,10 +55,12 @@ robot package starts shipping a Locomanip section that conflicts with
 `MjlabCartDemo`.
 
 **History:** 2026-09-18 -- moved HRP5P's `HandTaskList`, `objToHandTranss` and
-`preReachTranss` out of this repo's profile into the robot package. Both were
-briefly going to be per-robot *branches* of this repo, and a patch adding
-`ControllerParameters::overwrite_config` to LocomanipController was written and
-reverted, before BWC's existing promotion was found.
+`preReachTranss` out of this repo's profile and into the controller. Three
+wrong turns on the way, each worth not repeating: per-robot *branches* of this
+repo; a patch adding `ControllerParameters::overwrite_config` to
+LocomanipController, written and reverted once BWC's existing promotion was
+found; and parking the keys in `mc_hrp5_p`, which works but puts a controller's
+configuration in a robot package.
 
 ## controller_objects
 
@@ -84,6 +100,8 @@ install -m 755 /tmp/locomanip-build/src/LocomanipController.so \
   "$HOME/workspace/install/lib/mc_controller/LocomanipController.so"
 install -m 755 /tmp/locomanip-build/src/states/*State.so \
   "$HOME/workspace/install/lib/mc_controller/locomanip_controller/states/"
+install -D -m 644 etc/robots/hrp5_p.yaml \
+  "$HOME/workspace/install/lib/mc_controller/LocomanipController/hrp5_p.yaml"
 ```
 
 These targeted installs leave the machine-wide `LocomanipController.yaml`
