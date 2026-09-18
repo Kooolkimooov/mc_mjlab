@@ -199,7 +199,7 @@ class McRtcResidualActionBase(BaseAction):
       self._executed_physical.copy_(executed[:, self._residual_ids])
       self._projection_mask.copy_(projected[:, self._residual_ids])
 
-    self._printer.emit(self._executed_physical)
+    self._printer.emit(self.executed_physical_action)
 
   def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
     """Clear per-episode state and queue a native controller reset for these envs."""
