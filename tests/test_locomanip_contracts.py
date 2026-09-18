@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import math
-from pathlib import Path
 from typing import cast
 
 import pytest
 from mjlab.envs import ManagerBasedRlEnvCfg
-from probe_hand_wrench_adaptation import ARMS
 
 import mc_mjlab.tasks  # noqa: F401
 from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
@@ -45,18 +43,6 @@ def _scales(cfg: ManagerBasedRlEnvCfg) -> dict[str, float]:
 def _action(cfg: ManagerBasedRlEnvCfg) -> McRtcResidualJointPositionActionCfg:
   """Return the residual action cfg under its own type."""
   return cast(McRtcResidualJointPositionActionCfg, cfg.actions[accessors.ACTION_NAME])
-
-
-def test_the_patch_exposes_HandWrenchAdaptation() -> None:
-  """Verify the probe's arms are knobs the installed controller patch provides."""
-  patch = Path(__file__).resolve().parents[1] / "patches/locomanip-unattended.patch"
-  text = patch.read_text()
-  assert "HandWrenchAdaptation" in text
-  for arm in ARMS.values():
-    for key in arm:
-      assert key in text, key
-  # The projection is the part that matters on HRP5P. docs/locomanip.md
-  assert ARMS["push-axis"]["forceProjection"] == [1.0, 0.0, 0.0]
 
 
 def test_ids_are_distinct() -> None:

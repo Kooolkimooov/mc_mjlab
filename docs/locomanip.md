@@ -76,18 +76,19 @@ transport, or Locomanip initialization changes.
 **History:** Added for the zero-residual HRP5P cart milestone. Empty mappings
 leave the earlier native input offsets unchanged.
 
-## LocomanipController dependency patch
+## LocomanipController dependency
 
-**Current:** Apply `patches/locomanip-unattended.patch` to the LocomanipController
-source, rebuild it, and install the rebuilt libraries into the sourced workspace.
-The patch adds `ManipManager.enableRos`, numeric object/phase/completion datastore
-callbacks, an opt-in `DemoFSM` reload, the `HandWrenchAdaptation` block, and the
-initial-gripper retry that HRP5P needs to grasp at all. The repository profile
+**Current:** the demo needs features upstream Locomanip does not have:
+`ManipManager.enableRos`, numeric object/phase/completion datastore callbacks,
+an opt-in `DemoFSM` reload, the `HandWrenchAdaptation` block, and the
+initial-gripper retry that HRP5P needs to grasp at all. They live on the `ros2`
+branch of the LocomanipController checkout, which also installs
+`etc/robots/hrp5_p.yaml` (#per-robot-controller-config). Build that checkout and
+install the rebuilt libraries into the sourced workspace. The repository profile
 uses these features without changing the installed controller YAML.
 
 ```sh
 cd ~/workspace/src/catkin_locomanip_ws/src/LocomanipController
-git apply /home/martin/git/mc_mjlab/patches/locomanip-unattended.patch
 cmake -S . -B /tmp/locomanip-build \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX="$HOME/workspace/install" \
@@ -110,8 +111,10 @@ untouched. A broad `cmake --install` would regenerate and overwrite it.
 **Re-measure if:** Locomanip gains native non-ROS object input, its FSM is built
 after overwrite processing, or equivalent datastore callbacks land upstream.
 
-**History:** The patch retains ROS behavior by default. The demo sets
-`enableRos: false`, preventing node creation, subscription setup, and spinning.
+**History:** carried as `patches/locomanip-unattended.patch` until 2026-09-18,
+when the same changes were committed to the checkout and the patch deleted. ROS
+behavior is retained by default: the demo sets `enableRos: false`, preventing
+node creation, subscription setup, and spinning.
 
 ## cart_init_x
 
@@ -484,8 +487,8 @@ confirmed it fits.
 
 ## HandWrenchAdaptation
 
-**Current:** a config block on the push state, added by
-`patches/locomanip-unattended.patch`, over what used to be hardcoded in
+**Current:** a config block on the push state, added by the LocomanipController
+checkout, over what used to be hardcoded in
 `ConfigManipState`'s push phase. On HRP5P, in mc_mujoco:
 
 ```yaml
