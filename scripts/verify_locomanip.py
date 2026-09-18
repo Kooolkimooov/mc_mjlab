@@ -12,7 +12,12 @@ import torch
 from mjlab.envs import ManagerBasedRlEnv
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
+from mc_mjlab.bridge.config import get_main_robot_name
 from mc_mjlab.tasks.locomanip.locomanip_env_cfg import locomanip_env_cfg
+from mc_mjlab.tasks.locomanip.profiles import PROFILES
+
+#: MainRobot to the profile whose cycle this gate accepts.
+ROBOTS = {get_main_robot_name(p.mc_rtc_yaml): p for p in PROFILES}
 
 
 def sample(
@@ -127,7 +132,7 @@ def result(
 
 def run(args: argparse.Namespace) -> bool:
   """Run explicit reset cycles and optionally reset one of two shared-worker rows."""
-  cfg = locomanip_env_cfg(play=args.console)
+  cfg = locomanip_env_cfg(ROBOTS[args.robot], play=args.console)
   cfg.auto_reset = False
   cfg.scene.num_envs = 2 if args.isolation else 1
   if args.isolation:
@@ -232,6 +237,7 @@ def main() -> None:
   parser.add_argument("--max-seconds", type=float, default=60.0)
   parser.add_argument("--device", default="cuda:0")
   parser.add_argument("--console", action="store_true")
+  parser.add_argument("--robot", default="HRP5P", choices=sorted(ROBOTS))
   parser.add_argument(
     "--output", type=Path, default=Path("logs/locomanip/verification.json")
   )

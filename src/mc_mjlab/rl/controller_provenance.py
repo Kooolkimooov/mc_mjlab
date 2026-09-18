@@ -31,14 +31,18 @@ def _file_record(role: str, path: Path) -> dict[str, str | bool]:
 
 
 def _controller_config_paths(controller_name: str) -> list[Path]:
-  """Find installed mc_rtc YAML files that configure the selected controller."""
+  """Find installed mc_rtc files that configure the selected controller."""
   paths: set[Path] = set()
   for value in os.environ.get("LD_LIBRARY_PATH", "").split(os.pathsep):
     if not value:
       continue
     library_dir = Path(value).expanduser()
-    for suffix in ("yaml", "yml"):
+    for suffix in ("conf", "yaml", "yml"):
       paths.update(library_dir.glob(f"*/etc/{controller_name}.{suffix}"))
+      # Per-robot overrides, which a robot description package ships and
+      # BaselineWalkingController merges at the configuration root -- they change
+      # the controller as much as its own file does.
+      paths.update(library_dir.glob(f"*/{controller_name}/*.{suffix}"))
   return sorted(path.resolve() for path in paths if path.is_file())
 
 

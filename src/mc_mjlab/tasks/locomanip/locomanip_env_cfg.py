@@ -1,4 +1,4 @@
-"""Play-only HRP5P reach, grasp, push and release scene."""
+"""Play-only reach, grasp, push and release scene, one robot per profile."""
 
 from __future__ import annotations
 
@@ -9,30 +9,31 @@ from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as env_mdp
 from mjlab.managers.termination_manager import TerminationTermCfg
 
-from mc_mjlab import MC_RTC_CONFIG_PATH, mdp
+from mc_mjlab import mdp
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionCfg
 from mc_mjlab.tasks.locomanip.cart import (
   cart_cfg,
   cart_floor_contact,
   hand_cart_contact_sensors,
 )
+from mc_mjlab.tasks.locomanip.profiles import LocomanipProfile
 from mc_mjlab.tasks.zero_residual.zero_residual_env_cfg import _make_env_cfg
 
-MC_RTC_YAML = MC_RTC_CONFIG_PATH / "mc_rtc_hrp5_locomanip_patched.yaml"
 
-
-def locomanip_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+def locomanip_env_cfg(
+  profile: LocomanipProfile, play: bool = False
+) -> ManagerBasedRlEnvCfg:
   """Build one zero-residual position-controlled cart-pushing environment."""
   cfg = _make_env_cfg(
     "position",
     num_envs=1,
     num_workers=1,
-    mc_rtc_yaml=MC_RTC_YAML,
+    mc_rtc_yaml=profile.mc_rtc_yaml,
     console_output="single" if play else "none",
   )
-  cfg.scene.entities["cart"] = cart_cfg()
+  cfg.scene.entities["cart"] = cart_cfg(profile.cart_init_x)
   cfg.scene.spec_fn = cart_floor_contact
-  cfg.scene.sensors = hand_cart_contact_sensors()
+  cfg.scene.sensors = hand_cart_contact_sensors(profile.hand_bodies)
   cfg.scene.env_spacing = 5.0
   cfg.episode_length_s = 60.0
   cfg.sim.mujoco.jacobian = "sparse"

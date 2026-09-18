@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -11,11 +12,11 @@ import torch
 import yaml
 from evaluation.rollout import managed_env
 
-from mc_mjlab.tasks.locomanip.locomanip_env_cfg import MC_RTC_YAML
 from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
   make_locomanip_residual_env_cfg,
 )
 from mc_mjlab.tasks.locomanip.mdp import accessors, metrics, observations
+from mc_mjlab.tasks.locomanip.profiles import HRP5P
 
 #: The push state's blend settings, as `HandWrenchAdaptation` understands them.
 #: The shipped projection drops HRP5P at 100 kg. docs/locomanip.md
@@ -35,7 +36,7 @@ PUSH_STATE = "LMC::DemoPush"
 
 def configure(arm: str, log_dir: Path | None, scratch: Path) -> Path:
   """Write an mc_rtc config for this arm, with controller logging when asked."""
-  config = yaml.safe_load(MC_RTC_YAML.read_text())
+  config = yaml.safe_load(HRP5P.mc_rtc_yaml.read_text())
   state = config["OverwriteConfigList"]["MjlabCartDemo"]["DemoFSM"]["states"][
     PUSH_STATE
   ]
@@ -56,7 +57,7 @@ def run(arm: str, args: argparse.Namespace) -> dict:
     num_envs=1,
     num_workers=1,
     cart_mass_range_kg=(args.mass, args.mass),
-    mc_rtc_yaml=configure(arm, args.log_dir, args.scratch),
+    profile=replace(HRP5P, mc_rtc_yaml=configure(arm, args.log_dir, args.scratch)),
   )
   cfg.auto_reset = False
   cfg.episode_length_s = args.seconds + 4.0

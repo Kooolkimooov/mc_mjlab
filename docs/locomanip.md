@@ -1,24 +1,50 @@
 # Locomanip cart demo
 
-## Per-robot branches
+## per-robot-controller-config
 
-**Current:** one branch per robot, because the task registers exactly one
-Locomanip id and that id is built from `MC_RTC_YAML`'s `MainRobot`:
-`hrp5_config` carries `etc/mc_rtc_hrp5_locomanip_patched.yaml`, `jvrc1_config`
-carries `etc/mc_rtc_jvrc1_locomanip_patched.yaml`. Shared work lands on
-`training_config` and both rebase onto it.
+**Current:** the robot-specific half of Locomanip's configuration is the
+*controller's* to hold, not this repo's. mc_rtc loads it for free:
+`MCController::robot_config()` reads
+`<the directory the controller library loads from>/<controller name>/<robot
+MODULE name>.yaml` and `~/.config/mc_rtc/controllers/<controller
+name>/<module>.yaml` into `config("robots")(<module>)`, and
+`BaselineWalkingController`'s constructor then does `config().load(rconfig)`,
+promoting it to the root before `OverwriteConfigList` is applied. So the
+precedence is: base YAML, then the per-robot file, then this repo's
+`MjlabCartDemo` overwrite.
 
-What differs between them is small and all of it is listed here: the profile
-`MC_RTC_YAML` points at, `cart.CART_INIT_X`, and the hand links
-`cart.hand_cart_contact_sensors` matches. Everything else -- the residual
-authority, the joint partition, the terminations' fall height -- already reads
-the active robot's mc_rtc module.
+| Robot | Where its Locomanip configuration lives |
+| --- | --- |
+| HRP5P | `mc_hrp5_p/etc/controllers/LocomanipController/hrp5_p.yaml`, shipped by the robot description package |
+| JVRC1 | the `robots: jvrc1:` section inside `LocomanipController.yaml` itself |
 
-The two profiles are not symmetric. HRP5P has to restate `HandTaskList`,
-`ManipManager.objToHandTranss` and `preReachTranss`, because Locomanip's
-installed defaults are JVRC1's; the JVRC1 profile inherits them.
+**The filename is the robot MODULE name, not `MainRobot`.** `hrp5_p` and
+`jvrc1`, never `HRP5P`/`JVRC1` -- and a file under the wrong name is simply not
+read, with nothing logged. BWC's own check is the only tripwire: it
+`error_and_throw`s when `robots/<module>` is empty, so a robot with neither a
+per-robot file nor a section in the base YAML fails at construction rather than
+running mis-configured.
 
-**Re-measure if:** the task learns to register more than one robot's id at once.
+**Both files are provenance inputs**, and
+`rl/controller_provenance.py` globs `<lib>/<controller>/*.yaml` beside
+`<lib>/etc/<controller>.yaml` to catch them. A checkpoint from before
+2026-09-18 did not record the per-robot file, so its signature cannot see a
+change to it.
+
+What stays in this repo is only what mc_rtc cannot know: which profile to run
+(`etc/mc_rtc_{hrp5,jvrc1}_locomanip_patched.yaml`, differing in `MainRobot`
+alone), and `tasks/locomanip/profiles.py`'s two scene values -- where the cart
+stands and which MuJoCo bodies are the hands.
+
+**Re-measure if:** BWC stops promoting `robots/<module>` to the root, or a
+robot package starts shipping a Locomanip section that conflicts with
+`MjlabCartDemo`.
+
+**History:** 2026-09-18 -- moved HRP5P's `HandTaskList`, `objToHandTranss` and
+`preReachTranss` out of this repo's profile into the robot package. Both were
+briefly going to be per-robot *branches* of this repo, and a patch adding
+`ControllerParameters::overwrite_config` to LocomanipController was written and
+reverted, before BWC's existing promotion was found.
 
 ## controller_objects
 
@@ -69,20 +95,24 @@ after overwrite processing, or equivalent datastore callbacks land upstream.
 **History:** The patch retains ROS behavior by default. The demo sets
 `enableRos: false`, preventing node creation, subscription setup, and spinning.
 
-## CART_INIT_X
+## cart_init_x
 
-**Current:** `0.90` m, the cart body's initial x in front of the robot's stance.
+**Current:** per robot, on `profiles.LocomanipProfile` -- `0.90` m for HRP5P and
+`0.75` m for JVRC1, the cart body's initial x in front of the robot's stance.
+`0.75` is Locomanip's own `robots.obj.init_pos`, which JVRC1's arms were sized
+against; HRP5P has the longer reach.
 
 **The number that matters is not this one.** `Cart.xml` puts the grasped handle
 bar at cart-local `x = -0.35, z = 1.0`, matching the controller's
 `ManipManager.objToHandTranss` of `[-0.35, +/-0.3, 1.0]`. So the hands reach to
-`CART_INIT_X - 0.35`, while the cart box's rear face — the part that looks like
-"the cart" — starts at `CART_INIT_X` itself and runs 0.85 m forward from there
+`cart_init_x - 0.35`, while the cart box's rear face — the part that looks like
+"the cart" — starts at `cart_init_x` itself and runs 0.85 m forward from there
 (box half-size 0.425 centred at local `x = 0.425`).
 
-At the original `0.75` the handle sat **0.40 m** in front of the robot, which
-read as the cart crowding it. `0.90` puts the handle at **0.55 m** and the box
-rear face at 0.90 m.
+At `0.75` the handle sits **0.40 m** in front of the robot and the box rear face
+at 0.75 m. On HRP5P that read as the cart crowding it, so `0.90` puts the handle
+at **0.55 m** instead. JVRC1 is the smaller robot and keeps the original
+spacing, unmeasured until its acceptance run.
 
 **This is a free choice, not a value the controller pins.** The environment
 feeds the measured cart pose to mc_rtc through `controller_objects = {obj:
@@ -94,6 +124,8 @@ assume an initial pose. Only reachability bounds it — the hands must still mak
 robot's initial stance moves.
 
 **History:**
+- 2026-09-18 — became per-robot rather than one constant, when JVRC1 registered
+  alongside HRP5P.
 - 2026-09-16 — raised `0.75` -> `0.90` on the report that the cart was too close
   to the robot. Geometry above read from `Cart.xml` and
   `LocomanipController.yaml`; the handle offset is what set the spacing.

@@ -16,7 +16,7 @@ from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
 )
 from mc_mjlab.bridge.controller_datastore import CONTROL_COM, PLANNED_ZMP
 from mc_mjlab.residuals.authority import TORQUE_FRACTION
-from mc_mjlab.tasks.locomanip import DEMO_TASK_ID, RESIDUAL_TASK_ID
+from mc_mjlab.tasks.locomanip import DEMO_TASK_IDS, RESIDUAL_TASK_IDS
 from mc_mjlab.tasks.locomanip.cart import cart_nominal_mass_kg
 from mc_mjlab.tasks.locomanip.evaluation import LOCOMANIP_EVALUATION
 from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
@@ -32,6 +32,7 @@ from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
 )
 from mc_mjlab.tasks.locomanip.mdp import accessors
 from mc_mjlab.tasks.locomanip.mdp.events import mass_alpha_range
+from mc_mjlab.tasks.locomanip.profiles import PROFILES
 
 
 def _scales(cfg: ManagerBasedRlEnvCfg) -> dict[str, float]:
@@ -60,8 +61,20 @@ def test_the_patch_exposes_HandWrenchAdaptation() -> None:
 
 def test_ids_are_distinct() -> None:
   """Verify the demo id is a prefix of the trainable one, so matching must be exact."""
-  assert RESIDUAL_TASK_ID != DEMO_TASK_ID
-  assert RESIDUAL_TASK_ID.startswith(DEMO_TASK_ID)
+  assert set(DEMO_TASK_IDS) == set(RESIDUAL_TASK_IDS) == {"HRP5P", "JVRC1"}
+  for robot, demo_id in DEMO_TASK_IDS.items():
+    assert RESIDUAL_TASK_IDS[robot] != demo_id
+    assert RESIDUAL_TASK_IDS[robot].startswith(demo_id)
+  # Every id distinct, so a resume can cross neither control mode nor robot.
+  assert len(set(DEMO_TASK_IDS.values()) | set(RESIDUAL_TASK_IDS.values())) == 4
+
+
+def test_every_profile_builds() -> None:
+  """Verify each robot's scene resolves, since only registration exercises them."""
+  for profile in PROFILES:
+    cfg = make_locomanip_residual_env_cfg(profile=profile)
+    assert cfg.scene.entities["cart"].init_state.pos[0] == profile.cart_init_x
+    assert {s.name for s in cfg.scene.sensors} == {"left_hand_cart", "right_hand_cart"}
 
 
 def test_action_name_matches_the_provenance_key() -> None:

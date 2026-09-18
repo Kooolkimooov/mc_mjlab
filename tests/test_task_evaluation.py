@@ -18,7 +18,7 @@ from mc_mjlab.tasks.evaluation import (
   stratum_labels,
   stratum_of,
 )
-from mc_mjlab.tasks.locomanip import RESIDUAL_TASK_ID
+from mc_mjlab.tasks.locomanip import RESIDUAL_TASK_IDS
 from mc_mjlab.tasks.locomanip.evaluation import LOCOMANIP_EVALUATION
 
 
@@ -41,7 +41,7 @@ def test_a_task_cannot_declare_a_verdict_it_does_not_measure() -> None:
 
 def test_locomanip_declares_physical_success_and_cart_mass() -> None:
   """Verify the registered task resolves to its own declaration."""
-  assert evaluation_for(RESIDUAL_TASK_ID) is LOCOMANIP_EVALUATION
+  assert evaluation_for(RESIDUAL_TASK_IDS["HRP5P"]) is LOCOMANIP_EVALUATION
   assert LOCOMANIP_EVALUATION.success == "task_success"
   assert LOCOMANIP_EVALUATION.stratify == "cart_mass"
   assert evaluation_for("Mjlab-Cartpole-Balance") is EMPTY
@@ -74,7 +74,7 @@ def test_a_missing_metric_narrows_the_declaration() -> None:
       metrics_manager=SimpleNamespace(active_terms=["zmp_error", "cart_mass"])
     ),
   )
-  narrowed, names = _resolve_evaluation(RESIDUAL_TASK_ID, env)
+  narrowed, names = _resolve_evaluation(RESIDUAL_TASK_IDS["HRP5P"], env)
   assert names == ["zmp_error", "cart_mass"]
   assert narrowed.success is None
   assert narrowed.stratify == "cart_mass"

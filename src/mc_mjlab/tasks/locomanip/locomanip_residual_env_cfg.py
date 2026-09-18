@@ -42,7 +42,7 @@ from mc_mjlab.tasks.locomanip.cart import (
   cart_nominal_mass_kg,
   hand_cart_contact_sensors,
 )
-from mc_mjlab.tasks.locomanip.locomanip_env_cfg import MC_RTC_YAML
+from mc_mjlab.tasks.locomanip.profiles import HRP5P, LocomanipProfile
 
 #: 1 kHz physics, 500 Hz controller, 50 Hz policy; must divide by `FRAMESKIP`.
 DECIMATION = 20
@@ -97,9 +97,12 @@ SUCCESS_POSITION_TOLERANCE_M = 0.15
 SUCCESS_YAW_TOLERANCE_RAD = math.radians(10.0)
 
 
-def locomanip_residual_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+def locomanip_residual_env_cfg(
+  profile: LocomanipProfile, play: bool = False
+) -> ManagerBasedRlEnvCfg:
   """Build the trainable locomanip residual task, or its viewer variant."""
   cfg = make_locomanip_residual_env_cfg(
+    profile=profile,
     console_output="single" if play else "none",
     print_residual_every=PLAY_PRINT_RESIDUAL_EVERY if play else 0,
   )
@@ -111,6 +114,7 @@ def locomanip_residual_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
 def make_locomanip_residual_env_cfg(
   *,
+  profile: LocomanipProfile = HRP5P,
   num_envs: int = NUM_ENVS,
   num_workers: int = NUM_WORKERS,
   episode_length_s: float = EPISODE_LENGTH_S,
@@ -119,16 +123,16 @@ def make_locomanip_residual_env_cfg(
   cart_mass_range_kg: tuple[float, float] | None = CART_MASS_RANGE_KG,
   console_output: Literal["none", "single", "all"] = "none",
   print_residual_every: int = 0,
-  mc_rtc_yaml: Path = MC_RTC_YAML,
 ) -> ManagerBasedRlEnvCfg:
   """Assemble the managers from the builders below, one builder per manager."""
+  mc_rtc_yaml = profile.mc_rtc_yaml
   robot_name, robot = get_main_robot_spec(mc_rtc_yaml)
   robot_cfg = prepare_cfg_for_mc_rtc(
     robot.cfg_fn(), names_collision_geoms=robot.names_collision_geoms
   )
 
   return ManagerBasedRlEnvCfg(
-    scene=_scene(robot_cfg, num_envs),
+    scene=_scene(robot_cfg, num_envs, profile),
     actions=_actions(
       robot_name,
       robot,
@@ -149,15 +153,18 @@ def make_locomanip_residual_env_cfg(
   )
 
 
-def _scene(robot_cfg: EntityCfg, num_envs: int) -> SceneCfg:
+def _scene(robot_cfg: EntityCfg, num_envs: int, profile: LocomanipProfile) -> SceneCfg:
   """The robot, the cart it pushes, and the ground they share."""
   return SceneCfg(
     num_envs=num_envs,
     terrain=TerrainEntityCfg(terrain_type="plane"),
-    entities={"robot": robot_cfg, locomanip_mdp.accessors.OBJECT_ENTITY: cart_cfg()},
+    entities={
+      "robot": robot_cfg,
+      locomanip_mdp.accessors.OBJECT_ENTITY: cart_cfg(profile.cart_init_x),
+    },
     # The cart's own directional friction pair needs the scene's ground plane.
     spec_fn=cart_floor_contact,
-    sensors=hand_cart_contact_sensors(),
+    sensors=hand_cart_contact_sensors(profile.hand_bodies),
     env_spacing=5.0,
   )
 

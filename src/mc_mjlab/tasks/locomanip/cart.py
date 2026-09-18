@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping
 from pathlib import Path
 
 import mujoco
@@ -47,11 +48,6 @@ def cart_spec() -> mujoco.MjSpec:  # ty: ignore[unresolved-attribute]
   return spec
 
 
-#: The grasped handle sits 0.35 m BEHIND this origin, so the robot's hands reach
-#: to `CART_INIT_X - 0.35`, not to `CART_INIT_X`. docs/locomanip.md#cart_init_x
-CART_INIT_X = 0.90
-
-
 def cart_nominal_mass_kg() -> float:
   """Read the asset's own mass, which a drawn payload is absolute against."""
   # Never assume 10 kg: the mc_mujoco sweep harness rewrites this file in place.
@@ -59,10 +55,12 @@ def cart_nominal_mass_kg() -> float:
   return cart_spec().body(OBJECT_BODY).mass
 
 
-def cart_cfg() -> EntityCfg:
+def cart_cfg(init_x: float) -> EntityCfg:
   """Create a passive free body in front of the robot's initial stance."""
+  # The handle sits 0.35 m BEHIND the cart's origin, so the hands reach to
+  # `init_x - 0.35`. docs/locomanip.md#cart_init_x
   return EntityCfg(
-    spec_fn=cart_spec, init_state=EntityCfg.InitialStateCfg(pos=(CART_INIT_X, 0, 0))
+    spec_fn=cart_spec, init_state=EntityCfg.InitialStateCfg(pos=(init_x, 0, 0))
   )
 
 
@@ -84,19 +82,18 @@ def cart_floor_contact(spec: mujoco.MjSpec) -> None:  # ty: ignore[unresolved-at
   )
 
 
-def hand_cart_contact_sensors() -> tuple[ContactSensorCfg, ...]:
+def hand_cart_contact_sensors(
+  hand_bodies: Mapping[str, str],
+) -> tuple[ContactSensorCfg, ...]:
   """Report each hand's contact against the cart, for terms that read the grasp."""
-  # HRP5P's own hand links; another robot's Locomanip frames are named differently.
   return tuple(
     ContactSensorCfg(
       name=f"{side}_hand_cart",
-      primary=ContactMatch(
-        mode="subtree", pattern=f"{prefix}hand_Link0_Plan2", entity="robot"
-      ),
+      primary=ContactMatch(mode="subtree", pattern=body, entity="robot"),
       secondary=ContactMatch(mode="subtree", pattern="Body", entity="cart"),
       fields=("found", "force"),
       reduce="netforce",
       history_length=2,
     )
-    for side, prefix in (("left", "L"), ("right", "R"))
+    for side, body in hand_bodies.items()
   )

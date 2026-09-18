@@ -1,12 +1,12 @@
-MainRobot: HRP5P
+MainRobot: JVRC1
 Enabled: LocomanipController
 Timestep: 0.002
 GUIServer:
   Enable: false
 Log: false
 
-# HRP5P's hand frames and transforms are the controller's own, in its
-# etc/robots/hrp5_p.yaml. docs/locomanip.md#per-robot-controller-config
+# JVRC1 has no etc/robots file in the controller: LocomanipController.yaml's own
+# defaults are already its. docs/locomanip.md#per-robot-controller-config
 OverwriteConfigKeys: [MjlabCartDemo]
 OverwriteConfigList:
   MjlabCartDemo:

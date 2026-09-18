@@ -397,12 +397,22 @@ def rate_stack() -> str:
   return table(("Rate", "Set by", "Runs at", "Sim steps per period"), rows)
 
 
-def config_of(path: Path, name: str) -> Path:
-  """The mc_rtc yaml a get_task_name call names, read from that call's own module."""
+def configs_of(path: Path, name: str) -> list[Path]:
+  """Every mc_rtc yaml a get_task_name call names, read from that call's own module."""
   parts = path.relative_to(ex.SRC).with_suffix("").parts
   if parts[-1] == "__init__":
     parts = parts[:-1]
-  return getattr(importlib.import_module(".".join(parts)), name)
+  module = importlib.import_module(".".join(parts))
+  if hasattr(module, name):
+    return [getattr(module, name)]
+
+  # A per-robot registration loop names `<variable>.<attribute>`; the sequence it
+  # walks is in the same namespace, so the module still answers for every id.
+  attribute = name.rsplit(".", 1)[-1]
+  for value in vars(module).values():
+    if isinstance(value, tuple) and value and all(hasattr(x, attribute) for x in value):
+      return [getattr(item, attribute) for item in value]
+  raise AttributeError(f"{module.__name__} cannot resolve {name}")
 
 
 def task_ids(package: Path) -> str:
@@ -414,16 +424,17 @@ def task_ids(package: Path) -> str:
   for path in sorted(package.rglob("*.py")):
     for config, suffix, literal in ex.task_name_calls(path):
       resolved = (
-        get_task_name(package.name, config_of(path, config), suffix)
+        [get_task_name(package.name, yaml, suffix) for yaml in configs_of(path, config)]
         if literal
-        else suffix
+        else [suffix]
       )
-      rows.append(
+      rows.extend(
         (
-          f"`{resolved}`",
+          f"`{task_id}`",
           f"`{path.name}`",
           f"`{gates.get(path.stem, '')}`" if gates.get(path.stem) else "always",
         )
+        for task_id in resolved
       )
   return table(("Task id", "Built in", "Registered when"), rows) if rows else ""
 
