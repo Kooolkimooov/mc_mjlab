@@ -109,6 +109,15 @@ def get_non_actuated_joints(
 # Joint tables.
 
 
+def get_actuated_joints(
+  coupled_fingers: bool = JVRC1_COUPLED_FINGERS,
+) -> tuple[str, ...]:
+  """The joints the MJCF gives an actuator: refJointOrder minus the coupled ones."""
+  return mc_rtc.get_actuated_joints(
+    JVRC1_MC_RTC_MODULE_NAME, non_actuated=get_non_actuated_joints(coupled_fingers)
+  )
+
+
 def get_residual_joints(
   coupled_fingers: bool = JVRC1_COUPLED_FINGERS,
 ) -> tuple[str, ...]:
@@ -138,9 +147,7 @@ def get_robot_cfg(coupled_fingers: bool = JVRC1_COUPLED_FINGERS) -> EntityCfg:
 
   spec = get_spec(coupled_fingers)
 
-  joints = mc_rtc.get_actuated_joints(
-    JVRC1_MC_RTC_MODULE_NAME, non_actuated=get_non_actuated_joints(coupled_fingers)
-  )
+  joints = get_actuated_joints(coupled_fingers)
 
   simulated = {j.name for j in spec.joints}
 

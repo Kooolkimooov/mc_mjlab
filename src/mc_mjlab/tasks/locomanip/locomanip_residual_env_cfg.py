@@ -186,6 +186,7 @@ def _actions(
     "position",
     robot.get_residual_joints(),
     robot.pd_gains_path,
+    robot.get_actuated_joints(),
     fallback=RESIDUAL_FALLBACK_SCALE,
   )
   if torque_fraction != TORQUE_FRACTION:

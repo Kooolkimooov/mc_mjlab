@@ -141,6 +141,7 @@ def make_residual_balance_env_cfg(
       control,
       residual_joints,
       robot.pd_gains_path,
+      robot.get_actuated_joints(),
       fallback=default_scale,
       cap=default_scale,
     )

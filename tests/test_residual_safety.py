@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Any
 
 import torch
@@ -11,12 +12,14 @@ from mc_mjlab.mdp.rewards import (
   requested_action_l2,
   requested_action_rate_l2,
 )
+from mc_mjlab.residuals.authority import hardware_residual_scales
 from mc_mjlab.residuals.recovery_authority import (
   RecoveryCalibration,
   RecoveryFilter,
   detector_target,
 )
 from mc_mjlab.residuals.safety import project_residual
+from mc_mjlab.robots.registry import ROBOTS
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   RECOVERY_DETECTOR_PATH,
 )
@@ -120,3 +123,23 @@ def test_recovery_detector() -> None:
   for _ in range(math.ceil(calibration.max_active_s / dt)):
     authority = recovery_filter.update(onset, onset, torch.ones(1), dt)
   assert float(authority) == 0.0
+
+
+def test_residual_scales_partition_every_robots_actuators() -> None:
+  """Verify the scale dict matches the entity's actuators, not refJointOrder."""
+  for robot_name, robot in ROBOTS.items():
+    actuated = robot.get_actuated_joints()
+    residual = robot.get_residual_joints()
+    # A coupled joint is in refJointOrder but has no actuator, and an unresolvable
+    # pattern stops the action term from building at all.
+    assert set(residual) <= set(actuated), robot_name
+
+    scales = hardware_residual_scales(
+      robot_name,
+      "position",
+      residual,
+      robot.pd_gains_path,
+      actuated,
+      fallback=0.01,
+    )
+    assert {re.sub(r"\\(.)", r"\1", key) for key in scales} == set(actuated), robot_name

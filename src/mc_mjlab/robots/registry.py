@@ -21,6 +21,12 @@ class RobotSpec:
   """Per-robot wiring for the mc_rtc coupling."""
 
   cfg_fn: Callable[[], EntityCfg]
+  get_actuated_joints: Callable[[], tuple[str, ...]]
+  """The joints ``cfg_fn`` gives an actuator, which mc_rtc's own set overstates:
+
+  a robot may couple joints in its MJCF (JVRC1's fingers), leaving refJointOrder
+  entries the entity never actuates. Resolved on call, as below."""
+
   get_residual_joints: Callable[[], tuple[str, ...]]
   """The joints that receive the RL residual, resolved on call.
 
@@ -42,18 +48,21 @@ class RobotSpec:
 ROBOTS: dict[str, RobotSpec] = {
   "HRP5P": RobotSpec(
     cfg_fn=hrp5p_constants.get_robot_cfg,
+    get_actuated_joints=hrp5p_constants.get_actuated_joints,
     get_residual_joints=hrp5p_constants.get_residual_joints,
     pd_gains_path=hrp5p_constants.HRP5P_PD_GAINS_PATH,
     names_collision_geoms=True,
   ),
   "JVRC1": RobotSpec(
     cfg_fn=jvrc1_constants.get_robot_cfg,
+    get_actuated_joints=jvrc1_constants.get_actuated_joints,
     get_residual_joints=jvrc1_constants.get_residual_joints,
     pd_gains_path=jvrc1_constants.JVRC1_PD_GAINS_PATH,
     names_collision_geoms=True,
   ),
   "RHPS1_MuJoCo": RobotSpec(
     cfg_fn=rhps1_constants.get_robot_cfg,
+    get_actuated_joints=rhps1_constants.get_actuated_joints,
     get_residual_joints=rhps1_constants.get_residual_joints,
     pd_gains_path=rhps1_constants.RHPS1_PD_GAINS_PATH,
     names_collision_geoms=True,

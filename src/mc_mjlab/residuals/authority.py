@@ -29,6 +29,7 @@ def hardware_residual_scales(
   control: str,
   residual_joints: tuple[str, ...],
   pd_gains_path: Path,
+  actuated_joints: tuple[str, ...],
   fallback: float,
   cap: float | None = None,
 ) -> dict[str, float]:
@@ -48,9 +49,7 @@ def hardware_residual_scales(
       scale = TORQUE_FRACTION * limits[joint]
     authority[joint] = scale if cap is None else min(cap, scale)
 
-  # Must partition *every* actuator: an unmatched joint silently gets scale 1.0
-  # and no clip. docs/residual-authority.md#residual_scales
-  return {
-    re.escape(joint): authority.get(joint, fallback)
-    for joint in mc_rtc.get_actuated_joints(robot_name)
-  }
+  # Must partition the entity's actuators exactly: a missing one silently gets
+  # scale 1.0 and no clip, an extra one fails to resolve at all.
+  # docs/residual-authority.md#residual_scales
+  return {re.escape(joint): authority.get(joint, fallback) for joint in actuated_joints}

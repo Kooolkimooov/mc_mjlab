@@ -91,7 +91,7 @@ def residual_mpc_env_cfg(
   for actuator in robot_cfg.articulation.actuators:
     actuator.delay_max_lag = 2 if randomization else 0
 
-  actuated = mc_rtc.get_actuated_joints(robot_name)
+  actuated = robot.get_actuated_joints()
   leg_joints = mc_rtc.get_leg_joints(robot_name)
   if len(leg_joints) != 12:
     raise ValueError(f"expected HRP5P's 12 leg joints, got {len(leg_joints)}")

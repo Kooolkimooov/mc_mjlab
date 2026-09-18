@@ -73,6 +73,11 @@ def get_spec() -> mujoco.MjSpec:
 # `non_actuated` is how to make one passive. docs/robots.md#actuated-joint-sets
 
 
+def get_actuated_joints() -> tuple[str, ...]:
+  """The joints the MJCF gives an actuator, which here is all of refJointOrder."""
+  return mc_rtc.get_actuated_joints(RHPS1_MC_RTC_MODULE_NAME)
+
+
 def get_residual_joints() -> tuple[str, ...]:
   """The joints a residual may act on: refJointOrder minus the carve-outs."""
   return mc_rtc.get_residual_joints(
@@ -101,7 +106,7 @@ def get_robot_cfg() -> EntityCfg:
 
   spec = get_spec()
 
-  joints = mc_rtc.get_actuated_joints(RHPS1_MC_RTC_MODULE_NAME)
+  joints = get_actuated_joints()
 
   simulated = {j.name for j in spec.joints}
 
