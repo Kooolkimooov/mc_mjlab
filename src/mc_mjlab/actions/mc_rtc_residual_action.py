@@ -528,10 +528,13 @@ class McRtcResidualActionBase(BaseAction):
       ),
     )
 
-    workers = (
+    # Clamped: the native manager requires [1, num_controllers], and a cfg
+    # written for a full-size run is reused whenever `--num-envs` lowers it.
+    workers = min(
+      self.num_envs,
       cfg.num_workers
       if cfg.num_workers is not None
-      else min(self.num_envs, max(1, (os.cpu_count() or 1) - 2))
+      else max(1, (os.cpu_count() or 1) - 2),
     )
 
     self._manager = native.ControllersManager(

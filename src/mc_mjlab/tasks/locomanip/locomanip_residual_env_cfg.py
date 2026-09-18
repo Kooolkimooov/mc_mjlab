@@ -108,6 +108,9 @@ def locomanip_residual_env_cfg(
   )
   if play:
     cfg.scene.num_envs = 1
+    # None, not 1: `--num-envs` is applied after this, so the pool has to size
+    # itself from the env count it actually gets.
+    cfg.actions[locomanip_mdp.accessors.ACTION_NAME].num_workers = None
     cfg.observations["actor"].enable_corruption = False
   return cfg
 
