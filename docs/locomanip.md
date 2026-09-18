@@ -19,8 +19,9 @@ leave the earlier native input offsets unchanged.
 **Current:** Apply `patches/locomanip-unattended.patch` to the LocomanipController
 source, rebuild it, and install the rebuilt libraries into the sourced workspace.
 The patch adds `ManipManager.enableRos`, numeric object/phase/completion datastore
-callbacks, and an opt-in `DemoFSM` reload. The repository profile uses these
-features without changing the installed controller YAML.
+callbacks, an opt-in `DemoFSM` reload, the `HandWrenchAdaptation` block, and the
+initial-gripper retry that HRP5P needs to grasp at all. The repository profile
+uses these features without changing the installed controller YAML.
 
 ```sh
 cd ~/workspace/src/catkin_locomanip_ws/src/LocomanipController
@@ -393,3 +394,179 @@ controller build changes.
 
 **History:** raised from 32 to 256 before the first capacity run; the run
 confirmed it fits.
+
+## HandWrenchAdaptation
+
+**Current:** a config block on the push state, added by
+`patches/locomanip-unattended.patch`, over what used to be hardcoded in
+`ConfigManipState`'s push phase. On HRP5P, in mc_mujoco:
+
+```yaml
+HandWrenchAdaptation:
+  enable: true
+  alpha: 0.06                 # tau = dt / alpha = 33 ms at HRP5P's 2 ms period
+  forceProjection: [1, 1, 1]  # the whole measured force, couple dropped
+  momentProjection: [0, 0, 0]
+```
+
+The blend is `target <- alpha * measured + (1 - alpha) * target`, so its fixed
+point is the measured wrench and `alpha` is a low-pass coefficient. The projection
+sets the ceiling and `alpha` tunes within it: on a projection that already caps at
+350 kg, every `alpha` from 0.003 to 0.05 caps there too, which is why an earlier
+revision of this section claimed `alpha` moves no envelope. On `[1,1,1]` it moves
+100 kg, and it is a band rather than a slope -- too slow lags the load, too fast
+passes the measurement noise into the reference:
+
+| alpha | tau | 600 kg | 700 kg |
+| --- | --- | --- | --- |
+| 0.001 | 2.0 s | fails | -- |
+| 0.003 | 0.67 s | fails | -- |
+| 0.005 to 0.04 | 0.4 to 0.05 s | 0.01 and 0.03 complete | fails |
+| 0.05 | 40 ms | completes | completes |
+| **0.06** | **33 ms** | -- | **completes, and 725 kg** |
+| 0.07 | 29 ms | -- | completes |
+| 0.085 | 24 ms | -- | fails |
+| 0.1 | 20 ms | fails | fails |
+
+The passing values form one plateau, 0.05 to 0.07, with 0.04 and 0.085 outside
+it; 0.06 sits in the middle and is the only value that also takes 725 kg. Values
+an order of magnitude slower complete 600 kg but nothing above it. A cell repeats
+its verdict, so these are the boundaries and not sampling noise.
+
+Both bound the result and neither substitutes for the other: at 500 kg with
+`alpha` 0.01 or 0.03, push-only and the shipped projection still fail.
+
+`alpha` against the reference's slew rate, one 350 kg run each, 2026-09-17:
+
+| alpha | tau | slew rms | travel | final lag |
+| --- | --- | --- | --- | --- |
+| 0.003 | 0.67 s | 33.5 N/s | 0.992 m | 0.008 m |
+| 0.008 | 0.25 s | 86.2 N/s | 0.994 m | 0.006 m |
+| 0.02 | 0.10 s | 207 N/s | -- | -- |
+| 0.05 | 0.04 s | 486 N/s | -- | -- |
+
+JVRC1 at 281 kg runs 36.9 N/s, which 0.003 matches at no cost in travel or
+tracking. Note `alpha` is per control period, and HRP5P's is 2 ms against JVRC1's
+5 ms, so the shipped 0.02 filters 2.5x less on HRP5P than on the robot it was
+tuned on.
+
+**The projection is in the hand surface frame, which is robot-specific.** The two
+robots' right-hand frames are rolled 180 degrees apart, measured at the push:
+
+| local axis | JVRC1 | HRP5P |
+| --- | --- | --- |
+| x | +y world (lateral) | +y world (lateral) |
+| y | +z world (up) | -z world (down) |
+| z | +x world (forward) | -x world (backward) |
+
+So `z` is the push axis on both and `y` the vertical on both, which is why the
+shipped `(1,0,1)` keeps the push and drops the vertical on either robot. Keeping
+*only* the vertical (`[0,1,0]`) completes 400, 500 and 600 kg where every
+push-keeping setting fails at 400 -- but that reference points straight down in
+the viewer: it commands a pull on the handle rather than estimating the push, so
+it buys the envelope by leaning on the cart. It is recorded here as a measurement,
+not a recommendation.
+
+**Envelope, mc_mujoco, HRP5P, zero `preHandWrenches`, one run per cell:**
+
+| setting | completes | fails |
+| --- | --- | --- |
+| shipped `(1,0,1)`, alpha 0.02 | 350 kg | 400 kg |
+| `[0,0,1]` push only, alpha 0.003 / 0.008 / 0.02 / 0.05 | 350 kg | 400 kg |
+| `[1,0,1]` push and lateral, alpha 0.003 | -- | 400 kg |
+| `[1,1,1]`, alpha 0.003 | 500 kg | 600 kg |
+| `[1,1,1]`, alpha 0.01 or 0.03 | 600 kg | 700 kg |
+| **`[1,1,1]`, alpha 0.06** | **725 kg** | 750 kg |
+| `[1,1,0]` and `[0,1,1]`, alpha 0.003 | 500 kg | -- |
+| `[0,1,0]` vertical only, alpha 0.008 | 600 kg | -- |
+| `[1,1,0]` in **world** (horizontal plane), alpha 0.003 | -- | 400 kg |
+
+The pattern across projections is the hand-frame vertical term: every setting
+that keeps it reaches 500 kg or more, every setting that drops it -- push only,
+the shipped projection, the world horizontal plane -- caps at 350 to 400 whatever
+`alpha` does.
+
+Whatever is projected away is a load the stabiliser is not told about, and on
+HRP5P the discarded terms are large: 163 N of net lateral force and, at 500 kg,
+a reference of `(+42, -25, -140) N` in world -- the push is real but the lean
+dominates, because that is what a humanoid pushing half a tonne actually does.
+Dropping the vertical costs 150 kg of envelope; keeping only the vertical buys
+100 more but commands a pure downward pull rather than any estimate of the push.
+
+**Sharing one estimate between the hands changes nothing.** `shared: true`
+averages the measured force in world -- the hand frames are mirrored, so
+averaging in either frame would cancel the push -- filters once and splits it
+evenly. Envelope, travel and the hands' own disagreement are unmoved: at 350 kg
+travel is 0.995 m against 0.992, and the fore-aft disagreement between the hands
+is 35.5 N against 33.8 N. The asymmetry is in the contact, not in the references
+drifting apart.
+
+**`preHandWrenches` must stay zero.** With the blend running, the push reference
+*is* the blend's output; a feed-forward on top of it is what the original
+`testing_harness.py` writes per mass (`10 * mass * friction / 2` per hand), and
+mixing the two drops JVRC1 at 300 kg (travel -1.177 m, base z 0.087) where the
+zero-feed-forward run does +1.054 m at z 0.720.
+
+**The envelope has no hole at the light end.** At `alpha` 0.06 the cart completes
+from 10 kg to 725 kg, and the object's final tracking error grows smoothly with
+the load rather than jumping at a boundary:
+
+| cart | 10 | 100 | 300 | 500 | 700 | 725 |
+| --- | --- | --- | --- | --- | --- | --- |
+| travel [m] | 1.109 | 1.047 | 0.982 | 0.911 | 0.829 | 0.814 |
+| final lag [m] | -0.109 | -0.047 | +0.018 | +0.089 | +0.171 | +0.186 |
+
+Base height holds at 0.712 to 0.719 across all of them, so the failure at 750 kg
+is not the end of a slow collapse.
+
+**Telling the controller the true mass buys nothing; measuring the force is worth
+3x.** A feed-forward `preHandWrenches` is only an initial condition once the blend
+runs -- the blend overwrites the target wrench every cycle, so it decays with
+`tau` -- which means an oracle can only be read with `enable: false`:
+
+| setting | pushes | fails |
+| --- | --- | --- |
+| blend off, no feed-forward | 300 kg | 350 kg |
+| blend off, true mass as `preHandWrenches` on the push axis | 300 kg | 350 kg |
+| blend off, true mass on the harness's lateral axis | 300 kg | 350 kg |
+| blend at `alpha` 0.06, told nothing | 725 kg | 750 kg |
+
+The cart model's mass is equally irrelevant: pinned at 10 kg or set to the true
+mass, the blend stops at the same 725 kg. So the headroom is not an estimation
+problem, and nothing that only sharpens the load estimate will move it.
+
+**A `QP failed to run()` is not by itself a load failure.** With the blend off at
+300 kg the robot pushes the cart 0.997 m of the 1.000 m reference at a steady
+0.723 m base height, then topples in `Free` *after* releasing the handle -- the
+harness scores that as `qp_failed` like a collapse under load. Score a cell by
+what the object did before the hands let go: cut the log at the last `Hold`
+sample, compare travel against the reference there, and check the base height over
+that window. Runs that fail under load look nothing like it -- at 400 kg the same
+setting drags the cart 0.253 m backwards with the base at 0.437 m. The blend's
+runs do not fall after release at any mass it completes.
+
+**The feed-forward's axes are not mirrored the way the harness assumes.** Measured
+on HRP5P at the push, local `z` points along world `-x` for *both* hands while `x`
+points at world `+y` on the right and `-y` on the left:
+
+| | local x | local y | local z |
+| --- | --- | --- | --- |
+| Right | +y world | down | -x world |
+| Left | -y world | up | -x world |
+
+So a push needs the same sign on both hands' `z`, not opposite signs, and the
+original `testing_harness.py`, which writes `force[0]` as `-value` on the left and
+`+value` on the right, produces `2 * value` of net *lateral* force rather than a
+squeeze or a push. That is the 163 N of net lateral measured at the hands.
+
+**Re-measure if:** the hand frames, the hand impedance gains, the control period
+or the robot changes.
+
+**History:** the envelope was 275 kg for every setting until the grippers were
+fixed (LocomanipController `7417204`): mc_rtc's gripper safety latched on the
+startup transient, abandoned the opening 8 degrees from the stance, and left the
+thumb closing on nothing, so the hands pushed with an empty fist. That fix alone
+took the shipped setting from 275 kg to 350. An earlier revision of this section
+blamed the vertical feedback for destabilising HRP5P and reported a fall at
+100 kg; those runs carried a stale +-30 N `preHandWrenches` and a broken grasp,
+and none of their numbers survive.

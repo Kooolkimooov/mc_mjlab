@@ -1,6 +1,16 @@
+diff --git a/include/LocomanipController/ManipManager.h b/include/LocomanipController/ManipManager.h
+index 833b074..44faf22 100644
 --- a/include/LocomanipController/ManipManager.h
 +++ b/include/LocomanipController/ManipManager.h
-@@ -77,6 +77,8 @@
+@@ -17,6 +17,7 @@
+ 
+ #include <LocomanipController/FootTypes.h>
+ #include <LocomanipController/HandTypes.h>
++#include <LocomanipController/ManipPhase.h>
+ 
+ namespace LMC
+ {
+@@ -77,6 +78,8 @@ public:
      double objHorizon = 2.0;
  
      //! Object pose topic name (not subscribe if empty)
@@ -9,55 +19,107 @@
      std::string objPoseTopic;
  
      //! Object velocity topic name (not subscribe if empty)
-@@ -297,6 +299,12 @@
-   {
+@@ -298,6 +301,12 @@ public:
      return static_cast<bool>(objPoseOffsetFunc_);
    };
-+
+ 
 +  double numericPhase(const Hand & hand) const
 +  {
 +    auto it = manipPhases_.find(hand);
 +    return it == manipPhases_.end() ? 0.0 : static_cast<double>(it->second->label());
 +  }
- 
++
    /** \brief Get manipulation phase. */
    inline const std::shared_ptr<ManipPhase::Base> & manipPhase(const Hand & hand) const
---- a/src/ManipManager.cpp
-+++ b/src/ManipManager.cpp
-@@ -19,6 +19,7 @@
-   mcRtcConfig("name", name);
-   mcRtcConfig("objPoseInterpolator", objPoseInterpolator);
-   mcRtcConfig("objHorizon", objHorizon);
-+  mcRtcConfig("enableRos", enableRos);
-   mcRtcConfig("objPoseTopic", objPoseTopic);
-   mcRtcConfig("objVelTopic", objVelTopic);
-   mcRtcConfig("handTaskStiffness", handTaskStiffness);
-@@ -80,11 +81,11 @@
- void ManipManager::reset()
- {
-   // Setup ROS
--  if(nh_)
-+  if(config_.enableRos && nh_)
    {
-     mc_rtc::log::error("[ManipManager] ROS node is already instantiated.");
-   }
--  else
-+  else if(config_.enableRos)
-   {
-     nh_ = std::make_shared<rclcpp::Node>(config_.name);
-     // Use a dedicated callback group so as not to call callbacks of other modules
-@@ -158,7 +159,7 @@
- void ManipManager::update()
- {
-   // Call ROS callback
--  rclcpp::spin_some(nh_->get_node_base_interface());
-+  if(nh_) { rclcpp::spin_some(nh_->get_node_base_interface()); }
+diff --git a/include/LocomanipController/states/ConfigManipState.h b/include/LocomanipController/states/ConfigManipState.h
+index 8124da1..6397eee 100644
+--- a/include/LocomanipController/states/ConfigManipState.h
++++ b/include/LocomanipController/states/ConfigManipState.h
+@@ -1,5 +1,7 @@
+ #pragma once
  
-   if(velModeData_.enabled_)
-   {
++#include <Eigen/Core>
++
+ #include <LocomanipController/State.h>
+ 
+ namespace LMC
+@@ -18,10 +20,35 @@ public:
+   void teardown(mc_control::fsm::Controller & ctl) override;
+ 
+ protected:
++  /** \brief Blend one shared force estimate into both hands' references. */
++  void sharedPush();
++
+   //! Phase
+   int phase_ = 0;
+ 
+   //! End time of velocity mode [sec]
+   double velModeEndTime_ = 0.0;
++
++  //! Whether the push phase blends the measured hand wrench into the target
++  bool adaptHandWrench_ = true;
++
++  //! Blend coefficient per control cycle; its time constant is dt / alpha
++  double adaptAlpha_ = 0.02;
++
++  //! Hand-frame axes the blend is allowed to act on
++  Eigen::Vector3d adaptForceProj_ = Eigen::Vector3d(1, 0, 1);
++  Eigen::Vector3d adaptMomentProj_ = Eigen::Vector3d(0, 1, 0);
++
++  //! Whether the projections are applied in world rather than the hand frame
++  bool adaptWorldProj_ = false;
++
++  //! Whether both hands share one force estimate instead of blending their own
++  bool adaptShared_ = false;
++
++  //! Shared force estimate, in world [N]
++  Eigen::Vector3d sharedForce_ = Eigen::Vector3d::Zero();
++
++  //! Whether the shared estimate has been seeded from the first measurement
++  bool sharedForceInit_ = false;
+ };
+ } // namespace LMC
+diff --git a/include/LocomanipController/states/InitialState.h b/include/LocomanipController/states/InitialState.h
+index 9acc98a..9e424ea 100644
+--- a/include/LocomanipController/states/InitialState.h
++++ b/include/LocomanipController/states/InitialState.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <string>
++#include <unordered_map>
++
+ #include <LocomanipController/State.h>
+ 
+ namespace LMC
+@@ -21,6 +24,9 @@ protected:
+   /** \brief Check whether state is completed. */
+   bool complete() const;
+ 
++  /** \brief Re-send gripper commands that the gripper safety cut short. */
++  void retryGripperCommands();
++
+ protected:
+   //! Phase
+   int phase_ = 0;
+@@ -36,5 +42,11 @@ protected:
+ 
+   //! Stiffness of foot tasks
+   std::unordered_map<Foot, Eigen::Vector6d> footTasksStiffness_;
++
++  //! Requested opening per gripper, kept to detect a command cut short
++  std::unordered_map<std::string, double> gripperOpenings_;
++
++  //! Time until which a cut-short gripper command is re-sent [sec]
++  double gripperRetryEndTime_ = 0.0;
+ };
+ } // namespace LMC
+diff --git a/src/LocomanipController.cpp b/src/LocomanipController.cpp
+index 04a370e..01d33b1 100644
 --- a/src/LocomanipController.cpp
 +++ b/src/LocomanipController.cpp
-@@ -65,6 +65,24 @@
+@@ -65,6 +65,24 @@ LocomanipController::LocomanipController(mc_rbdyn::RobotModulePtr rm,
      mc_rtc::log::warning("[LocomanipController] ManipManager configuration is missing.");
    }
  
@@ -82,13 +144,228 @@
    mc_rtc::log::success("[LocomanipController] Constructed.");
  }
  
---- a/include/LocomanipController/ManipManager.h
-+++ b/include/LocomanipController/ManipManager.h
-@@ -17,6 +17,7 @@
- 
- #include <LocomanipController/FootTypes.h>
- #include <LocomanipController/HandTypes.h>
-+#include <LocomanipController/ManipPhase.h>
- 
- namespace LMC
+diff --git a/src/ManipManager.cpp b/src/ManipManager.cpp
+index 246889e..a35b7aa 100644
+--- a/src/ManipManager.cpp
++++ b/src/ManipManager.cpp
+@@ -19,6 +19,7 @@ void ManipManager::Configuration::load(const mc_rtc::Configuration & mcRtcConfig
+   mcRtcConfig("name", name);
+   mcRtcConfig("objPoseInterpolator", objPoseInterpolator);
+   mcRtcConfig("objHorizon", objHorizon);
++  mcRtcConfig("enableRos", enableRos);
+   mcRtcConfig("objPoseTopic", objPoseTopic);
+   mcRtcConfig("objVelTopic", objVelTopic);
+   mcRtcConfig("handTaskStiffness", handTaskStiffness);
+@@ -80,11 +81,11 @@ ManipManager::ManipManager(LocomanipController * ctlPtr, const mc_rtc::Configura
+ void ManipManager::reset()
  {
+   // Setup ROS
+-  if(nh_)
++  if(config_.enableRos && nh_)
+   {
+     mc_rtc::log::error("[ManipManager] ROS node is already instantiated.");
+   }
+-  else
++  else if(config_.enableRos)
+   {
+     nh_ = std::make_shared<rclcpp::Node>(config_.name);
+     // Use a dedicated callback group so as not to call callbacks of other modules
+@@ -158,7 +159,7 @@ void ManipManager::stop()
+ void ManipManager::update()
+ {
+   // Call ROS callback
+-  rclcpp::spin_some(nh_->get_node_base_interface());
++  if(nh_) { rclcpp::spin_some(nh_->get_node_base_interface()); }
+ 
+   if(velModeData_.enabled_)
+   {
+diff --git a/src/states/ConfigManipState.cpp b/src/states/ConfigManipState.cpp
+index f17404e..ad521a5 100644
+--- a/src/states/ConfigManipState.cpp
++++ b/src/states/ConfigManipState.cpp
+@@ -12,12 +12,58 @@
+ 
+ using namespace LMC;
+ 
++void ConfigManipState::sharedPush()
++{
++  // Both hands push the same object in the same world direction, so estimating
++  // per hand lets the two references drift apart and fight each other. Average
++  // the measurement in world -- the hand frames are mirrored, so averaging in
++  // either frame would cancel the push -- filter once, and split it evenly.
++  Eigen::Vector3d measured = Eigen::Vector3d::Zero();
++  for(const auto & hand : Hands::Both)
++  {
++    const auto & task = ctl().handTasks_.at(hand);
++    measured += task->surfacePose().rotation().transpose() * task->measuredWrench().force();
++  }
++  measured *= 0.5;
++
++  if(!sharedForceInit_)
++  {
++    sharedForce_ = measured;
++    sharedForceInit_ = true;
++  }
++  sharedForce_ = adaptAlpha_ * measured + (1.0 - adaptAlpha_) * sharedForce_;
++
++  for(const auto & hand : Hands::Both)
++  {
++    const auto & task = ctl().handTasks_.at(hand);
++    auto wrench = task->targetWrench();
++    wrench.force() = adaptForceProj_.cwiseProduct(task->surfacePose().rotation() * sharedForce_);
++    wrench.couple() = adaptMomentProj_.cwiseProduct(
++        adaptAlpha_ * task->measuredWrench().couple() + (1.0 - adaptAlpha_) * wrench.couple());
++
++    task->targetWrench(wrench);
++    ctl().manipManager_->setRefHandWrench(hand, wrench, ctl().t(), ctl().dt());
++  }
++}
++
+ void ConfigManipState::start(mc_control::fsm::Controller & _ctl)
+ {
+   State::start(_ctl);
+ 
+   phase_ = 0;
+ 
++  // Defaults reproduce the hardcoded behaviour this used to have.
++  if(config_.has("configs") && config_("configs").has("HandWrenchAdaptation"))
++  {
++    const auto adaptation = config_("configs")("HandWrenchAdaptation");
++    adaptation("enable", adaptHandWrench_);
++    adaptation("alpha", adaptAlpha_);
++    adaptation("forceProjection", adaptForceProj_);
++    adaptation("momentProjection", adaptMomentProj_);
++    adaptation("shared", adaptShared_);
++    adaptation("worldProjection", adaptWorldProj_);
++  }
++
+   output("OK");
+ }
+ 
+@@ -195,12 +241,16 @@ bool ConfigManipState::run(mc_control::fsm::Controller &)
+   }
+   else if(phase_ == 11)
+   {
+-    // if(config_.has("configs") && !config_("configs").has("preHandWrenches"))
+-    // {
+-    double alpha = 0.02;
++    if(adaptHandWrench_ && adaptShared_)
++    {
++      sharedPush();
++    }
++    else if(adaptHandWrench_)
++    {
++    double alpha = adaptAlpha_;
+ 
+-    Eigen::Vector3d force_projection(1, 0, 1);
+-    Eigen::Vector3d moment_projection(0, 1, 0);
++    Eigen::Vector3d force_projection = adaptForceProj_;
++    Eigen::Vector3d moment_projection = adaptMomentProj_;
+ 
+     auto rh_measured_wrench = ctl().handTasks_.at(Hand::Right)->measuredWrench();
+     auto lh_measured_wrench = ctl().handTasks_.at(Hand::Left)->measuredWrench();
+@@ -211,21 +261,30 @@ bool ConfigManipState::run(mc_control::fsm::Controller &)
+     auto rh_filtered_wrench = alpha * rh_measured_wrench + (1 - alpha) * rh_expected_wrench;
+     auto lh_filtered_wrench = alpha * lh_measured_wrench + (1 - alpha) * lh_expected_wrench;
+ 
+-    auto rh_target_wrench = rh_filtered_wrench;
+-    rh_target_wrench.force() = force_projection.cwiseProduct(rh_target_wrench.force());
+-    rh_target_wrench.couple() = moment_projection.cwiseProduct(rh_target_wrench.couple());
++    // The hand frames are robot-specific and mirrored, so a projection meant to
++    // keep a world direction -- the horizontal plane, say -- has to be applied there.
++    auto project = [&](const Hand & hand, sva::ForceVecd wrench) {
++      if(!adaptWorldProj_)
++      {
++        wrench.force() = force_projection.cwiseProduct(wrench.force());
++        wrench.couple() = moment_projection.cwiseProduct(wrench.couple());
++        return wrench;
++      }
++      const Eigen::Matrix3d & E = ctl().handTasks_.at(hand)->surfacePose().rotation();
++      wrench.force() = E * force_projection.cwiseProduct(E.transpose() * wrench.force());
++      wrench.couple() = E * moment_projection.cwiseProduct(E.transpose() * wrench.couple());
++      return wrench;
++    };
+ 
+-    auto lh_target_wrench = lh_filtered_wrench;
+-    lh_target_wrench.force() = force_projection.cwiseProduct(lh_target_wrench.force());
+-    lh_target_wrench.couple() = moment_projection.cwiseProduct(lh_target_wrench.couple());
++    auto rh_target_wrench = project(Hand::Right, rh_filtered_wrench);
++    auto lh_target_wrench = project(Hand::Left, lh_filtered_wrench);
+ 
+     ctl().handTasks_.at(Hand::Right)->targetWrench(rh_target_wrench);
+     ctl().handTasks_.at(Hand::Left)->targetWrench(lh_target_wrench);
+ 
+     ctl().manipManager_->setRefHandWrench(Hand::Right, rh_target_wrench, ctl().t(), ctl().dt());
+     ctl().manipManager_->setRefHandWrench(Hand::Left, lh_target_wrench, ctl().t(), ctl().dt());
+-
+-    // }
++    }
+ 
+     if(config_.has("configs") && config_("configs").has("CentroidalManager"))
+     {
+diff --git a/src/states/InitialState.cpp b/src/states/InitialState.cpp
+index 1546cb5..68de492 100644
+--- a/src/states/InitialState.cpp
++++ b/src/states/InitialState.cpp
+@@ -1,3 +1,5 @@
++#include <cmath>
++
+ #include <mc_rtc/gui/Button.h>
+ #include <mc_tasks/CoMTask.h>
+ #include <mc_tasks/FirstOrderImpedanceTask.h>
+@@ -75,9 +77,17 @@ bool InitialState::run(mc_control::fsm::Controller &)
+     // Send commands to gripper
+     if(config_.has("configs") && config_("configs").has("gripperCommands"))
+     {
++      constexpr double gripperRetryDuration = 5.0; // [sec]
++      gripperRetryEndTime_ = ctl().t() + gripperRetryDuration;
++
+       for(const auto & gripperCommandConfig : config_("configs")("gripperCommands"))
+       {
+-        ctl().robot().gripper(gripperCommandConfig("name")).configure(gripperCommandConfig);
++        const std::string name = gripperCommandConfig("name");
++        ctl().robot().gripper(name).configure(gripperCommandConfig);
++        if(gripperCommandConfig.has("opening"))
++        {
++          gripperOpenings_.emplace(name, static_cast<double>(gripperCommandConfig("opening")));
++        }
+       }
+     }
+ 
+@@ -98,6 +108,8 @@ bool InitialState::run(mc_control::fsm::Controller &)
+     ctl().centroidalManager_->addToLogger(ctl().logger());
+   }
+ 
++  retryGripperCommands();
++
+   // Interpolate task stiffness
+   if(stiffnessRatioFunc_)
+   {
+@@ -120,6 +132,27 @@ bool InitialState::run(mc_control::fsm::Controller &)
+   return complete();
+ }
+ 
++void InitialState::retryGripperCommands()
++{
++  // The gripper safety trips on the transient right after the controller starts:
++  // the command outruns the joint, mc_rtc latches it where the joint stands, and
++  // the opening is abandoned mid-travel. A fresh command clears the latch.
++  if(gripperOpenings_.empty() || ctl().t() > gripperRetryEndTime_)
++  {
++    return;
++  }
++
++  constexpr double openingTolerance = 0.02;
++  for(const auto & [name, opening] : gripperOpenings_)
++  {
++    auto & gripper = ctl().robot().gripper(name);
++    if(gripper.complete() && std::abs(gripper.opening() - opening) > openingTolerance)
++    {
++      gripper.setTargetOpening(opening);
++    }
++  }
++}
++
+ void InitialState::teardown(mc_control::fsm::Controller &) {}
+ 
+ bool InitialState::complete() const
