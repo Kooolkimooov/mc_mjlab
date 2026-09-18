@@ -25,6 +25,7 @@ class WalkingReferenceActionCfg(McRtcResidualActionCfg):
 
   def __post_init__(self) -> None:
     """Declare the reference callbacks; `_validate_cfg` owns the controller check."""
+    super().__post_init__()
     self.datastore_vectors_inputs = tuple(
       dict.fromkeys((*self.datastore_vectors_inputs, WALKING_REF_VEL_SETTER))
     )
@@ -33,7 +34,7 @@ class WalkingReferenceActionCfg(McRtcResidualActionCfg):
     )
 
 
-class WalkingReferenceMixin(McRtcResidualActionBase):
+class WalkingReferenceActionBase(McRtcResidualActionBase):
   """Buffers and absolute reference feed for walking actions."""
 
   cfg: WalkingReferenceActionCfg
@@ -70,7 +71,7 @@ class AbsoluteWalkingReferenceActionCfg(WalkingReferenceActionCfg):
   """Command-manager term sent as an absolute ISMPC ``set_ref_vel`` target."""
 
 
-class AbsoluteWalkingReferenceMixin(WalkingReferenceMixin):
+class AbsoluteWalkingReferenceActionBase(WalkingReferenceActionBase):
   """Send a command-manager term as the controller's walking-velocity target."""
 
   cfg: AbsoluteWalkingReferenceActionCfg

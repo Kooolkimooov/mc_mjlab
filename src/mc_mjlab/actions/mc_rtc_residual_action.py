@@ -85,6 +85,9 @@ class McRtcResidualActionCfg(BaseActionCfg):
   recovery_detector_path: str | None = None
   """Calibration JSON for recovery authority; ``None`` grants full authority."""
 
+  def __post_init__(self) -> None:
+    """End every subclass's ``super().__post_init__()`` chain, so each can call it."""
+
 
 class McRtcResidualActionBase(BaseAction):
   """mc_rtc residual action base: steps controllers via a native manager, adds RL residual."""
@@ -110,9 +113,11 @@ class McRtcResidualActionBase(BaseAction):
 
     self._setup_residual(cfg)
     self._setup_action_extensions(cfg)
-    self._setup_residual_printer(cfg)
 
     self._build_bridge(cfg)
+    # After the bridge: an extension's own printed columns can be sized from the
+    # live layout, which is where the force sensors are first known.
+    self._setup_residual_printer(cfg)
 
     self._manager = None
     self._finalizer = None

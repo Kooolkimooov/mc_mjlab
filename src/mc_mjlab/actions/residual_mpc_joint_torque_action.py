@@ -9,8 +9,8 @@ import torch
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
 from mc_mjlab.actions.walking_reference_action import (
+  AbsoluteWalkingReferenceActionBase,
   AbsoluteWalkingReferenceActionCfg,
-  AbsoluteWalkingReferenceMixin,
 )
 from mc_mjlab.residuals.mpc_math import (
   advance_action_history,
@@ -39,7 +39,7 @@ class ResidualMpcJointTorqueActionCfg(AbsoluteWalkingReferenceActionCfg):
 
 
 class ResidualMpcJointTorqueAction(
-  AbsoluteWalkingReferenceMixin, McRtcResidualActionBase
+  AbsoluteWalkingReferenceActionBase, McRtcResidualActionBase
 ):
   """Blend paper-style leg posture torques onto the mc_rtc nominal effort."""
 
