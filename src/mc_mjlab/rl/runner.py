@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 
@@ -20,6 +22,7 @@ from mc_mjlab.rl.effective_training_manifest import (
   synchronize_resumed_curriculum,
   validate_effective_training_manifest,
 )
+from mc_mjlab.rl.ppo_diagnostics import ppo_diagnostics
 
 
 class McRtcResidualOnPolicyRunner(MjlabOnPolicyRunner):
@@ -40,6 +43,15 @@ class McRtcResidualOnPolicyRunner(MjlabOnPolicyRunner):
     self._configure_actor_update_mask(env)
     self._controller_provenance = collect_controller_provenance(env)
     self._effective_manifest = build_effective_training_manifest(env, train_cfg)
+
+    self.last_ppo_diagnostics: dict[str, float] = {}
+    # rsl_rl's `learn()` offers no per-iteration hook, so the one logging call it
+    # makes is where the diagnostics attach. A task wrapping it afterwards runs
+    # outside this one and reads `last_ppo_diagnostics` rather than recomputing.
+    # docs/ppo.md#training-diagnostics
+    self.logger.log = self._log_with_diagnostics(  # ty: ignore[invalid-assignment]
+      self.logger.log
+    )
     self.setup_task_hooks(env, train_cfg, log_dir)
 
     if log_dir is not None and int(os.environ.get("RANK", "0")) == 0:
@@ -122,6 +134,22 @@ class McRtcResidualOnPolicyRunner(MjlabOnPolicyRunner):
 
   def restore_task_state(self, infos: dict) -> None:
     """Restore the task's own state during a full resume."""
+
+  def _log_with_diagnostics(self, log: Callable[..., Any]) -> Callable[..., Any]:
+    """Wrap the logger so every iteration records the PPO diagnostics first."""
+
+    def logging_call(*args: Any, **kwargs: Any) -> Any:
+      iteration = kwargs.get("it", args[0] if args else None)
+      self.last_ppo_diagnostics = ppo_diagnostics(self.alg)
+
+      writer = self.logger.writer
+      if writer is not None and iteration is not None:
+        for name, value in self.last_ppo_diagnostics.items():
+          writer.add_scalar(f"Diagnostics/{name}", value, iteration)
+
+      return log(*args, **kwargs)
+
+    return logging_call
 
   def _configure_actor_update_mask(self, env: RslRlVecEnvWrapper) -> None:
     """Connect PPO actor updates to the authority applied by the action term."""

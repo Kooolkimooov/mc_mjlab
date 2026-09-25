@@ -14,10 +14,7 @@ from mc_mjlab.tasks.residual_balance import qualification_sidecar
 from mc_mjlab.tasks.residual_balance.achievement_curriculum import (
   AchievementCurriculumBridge,
 )
-from mc_mjlab.tasks.residual_balance.residual_balance_diagnostics import (
-  ppo_diagnostics,
-  training_budget,
-)
+from mc_mjlab.tasks.residual_balance.training_budget import training_budget
 from mc_mjlab.tasks.residual_balance.training_watchdog import (
   RunnerWatchdogBridge,
   WatchdogStop,
@@ -38,9 +35,7 @@ class ResidualBalanceOnPolicyRunner(McRtcResidualOnPolicyRunner):
     self._training_budget = training_budget(env.num_envs, train_cfg)
     self._achievement = AchievementCurriculumBridge(self, log_dir)
     self._watchdog = RunnerWatchdogBridge(self, log_dir)
-    # rsl_rl's `learn()` offers no per-iteration hook, so the one logging call it
-    # makes is where the diagnostics attach. docs/ppo.md#training-diagnostics
-    self.logger.log = self._log_with_diagnostics(  # ty: ignore[invalid-assignment]
+    self.logger.log = self._log_with_curriculum(  # ty: ignore[invalid-assignment]
       self.logger.log
     )
 
@@ -96,26 +91,25 @@ class ResidualBalanceOnPolicyRunner(McRtcResidualOnPolicyRunner):
     qualification_sidecar.enforce(path, full_resume=load_cfg is None)
     return infos
 
-  def _log_with_diagnostics(self, log: Callable[..., Any]) -> Callable[..., Any]:
-    """Wrap the logger so every iteration also records the PPO diagnostics."""
+  def _log_with_curriculum(self, log: Callable[..., Any]) -> Callable[..., Any]:
+    """Wrap the shared logger again so the curriculum and watchdog see each iteration."""
 
     def logging_call(*args: Any, **kwargs: Any) -> Any:
       writer = self.logger.writer
       iteration = kwargs.get("it", args[0] if args else None)
-      diagnostics = ppo_diagnostics(self.alg)
       if writer is not None and iteration is not None:
-        for name, value in diagnostics.items():
-          writer.add_scalar(f"Diagnostics/{name}", value, iteration)
         for name, value in self._achievement.iteration(iteration).items():
           writer.add_scalar(f"Curriculum/Achievement/{name}", value, iteration)
       elif iteration is not None:
         self._achievement.iteration(iteration)
+      # `log` clears the extras, and the wrapper underneath refreshes the
+      # diagnostics, so one is read before the call and the other after.
       episode_extras = list(self.logger.ep_extras)
       result = log(*args, **kwargs)
       if iteration is not None:
         self._watchdog.iteration(
           iteration,
-          diagnostics,
+          self.last_ppo_diagnostics,
           episode_extras,
           kwargs.get("collect_time", 0.0),
           kwargs.get("learn_time", 0.0),

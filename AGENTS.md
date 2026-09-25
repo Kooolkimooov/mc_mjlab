@@ -302,7 +302,12 @@ From mjlab down to mc_rtc:
   contract and immediately recompute curricula after restoring the global
   counter, while actor-only loads enforce the narrower observation/action
   interface. `_RENAMED_MODULES` maps the paths this refactor moved, so an older
-  checkpoint is compared against today's spelling. Both task runners subclass it
+  checkpoint is compared against today's spelling. It also wraps the one logging
+  call rsl_rl makes per iteration and writes `ppo_diagnostics.py`'s eleven
+  `Diagnostics/` scalars there, so every residual task gets them rather than
+  residual_balance alone; a task wrapping that call again reads
+  `last_ppo_diagnostics` instead of recomputing the rollout pass.
+  docs/ppo.md#training-diagnostics. Both task runners subclass it
   through five hooks; the balance one adds the achievement curriculum, the
   training budget and the watchdog, the MPC one an action-semantics gate.
   Position and torque registrations use distinct full task ids as experiment

@@ -328,9 +328,18 @@ sample-count comparable.
 ## Training diagnostics
 
 **Current:** eleven scalars under `Diagnostics/`, from
-`residual_balance_diagnostics.ppo_diagnostics`. rsl_rl logs three losses and the
-learning rate and nothing else, and `learn()` exposes no hook, so the runner
-wraps the one `Logger.log` call each iteration makes and writes them there.
+`mc_mjlab.rl.ppo_diagnostics`. rsl_rl logs three losses and the learning rate and
+nothing else, and `learn()` exposes no hook, so the runner wraps the one
+`Logger.log` call each iteration makes and writes them there.
+
+**They belong to every residual task, not to residual_balance.** The wrapper
+moved to the shared `McRtcResidualOnPolicyRunner` on 2026-09-25, after
+locomanip's first full feedback run saturated its action space over 1000
+iterations with `action_saturation`, `policy_mean_saturation` and
+`explained_variance` all unlogged
+([locomanip.md](locomanip.md#run-2026-09-24_17-38-11_hrp5p-feedback)). A task
+that wraps the logging call again reads `last_ppo_diagnostics` rather than paying
+for the rollout pass twice.
 
 | scalar | what it answers |
 | --- | --- |

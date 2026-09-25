@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 
+import pytest
 import torch
 from conftest import requires_controller
 from rsl_rl.models.mlp_model import MLPModel
@@ -15,10 +16,12 @@ from mc_mjlab.mdp.rewards import (
   requested_action_l2,
   requested_action_rate_l2,
 )
+from mc_mjlab.rl import runner as runner_module
 from mc_mjlab.rl.rollout_adaptive_ppo import (
   RolloutAdaptivePPO,
   normalize_masked_advantages,
 )
+from mc_mjlab.rl.runner import McRtcResidualOnPolicyRunner
 from mc_mjlab.rl.squashed_gaussian import (
   LOG_PROB_FLOOR,
   SquashedGaussianDistribution,
@@ -199,3 +202,51 @@ def test_log_ratio_cannot_overflow() -> None:
   # Exactly the arithmetic that killed the 2026-08-27 run.
   masked_advantage = torch.zeros(1)
   assert torch.isnan(masked_advantage * torch.tensor([float("inf")])).all()
+
+
+class _StubWriter:
+  """Collector standing in for the summary writer."""
+
+  def __init__(self) -> None:
+    self.scalars: dict[str, float] = {}
+
+  def add_scalar(self, name: str, value: float, iteration: int) -> None:
+    """Record one scalar the way the real writer would."""
+    self.scalars[name] = value
+
+
+class _StubLogger:
+  """Logger whose one call per iteration the runner wraps."""
+
+  def __init__(self) -> None:
+    self.writer = _StubWriter()
+    self.calls: list[int] = []
+
+  def log(self, it: int) -> str:
+    """Stand in for rsl_rl's per-iteration logging call."""
+    self.calls.append(it)
+    return "logged"
+
+
+def test_shared_runner_logs_ppo_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
+  """Check every residual task records the diagnostics, not just residual_balance."""
+  runner = McRtcResidualOnPolicyRunner.__new__(McRtcResidualOnPolicyRunner)
+  runner.logger = _StubLogger()
+  runner.last_ppo_diagnostics = {}
+  runner.alg = object()
+  wrapped = runner._log_with_diagnostics(runner.logger.log)
+
+  # An algorithm with no rollout leaves the diagnostics empty rather than wrong,
+  # and the wrapped call still has to reach the logger underneath.
+  assert wrapped(7) == "logged"
+  assert runner.logger.calls == [7]
+  assert runner.last_ppo_diagnostics == {}
+  assert runner.logger.writer.scalars == {}
+
+  monkeypatch.setattr(
+    runner_module, "ppo_diagnostics", lambda alg: {"schedule_kl": 0.25}
+  )
+  assert wrapped(8) == "logged"
+  assert runner.logger.calls == [7, 8]
+  assert runner.last_ppo_diagnostics == {"schedule_kl": 0.25}
+  assert runner.logger.writer.scalars == {"Diagnostics/schedule_kl": 0.25}
