@@ -818,3 +818,80 @@ first write-up of these numbers quoted one run per regime and claimed 36/36
 channels above the floor; three repeats put it at 26-34/36 and showed the
 simulation is not reproducible run to run, so single-run counts overstated what
 the probe can resolve.
+
+## Run 2026-09-24_17-38-11_hrp5p-feedback
+
+**The first full training run of the hand-force feedback task, and a negative
+result.** 2000 iterations, 6 h 36 m, 256 envs over 64 workers, seed 42, HRP5P.
+`model_1800.pt` is the only checkpoint worth keeping.
+
+| iterations | success | complete | length | force RMS | fell_over | collapsed | ctrl-fail |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 0-600 | 0 -> 0.6 | 0 -> 0.85 | 1558 -> 2750 | 0 -> 6 N | 0.031 | 0.099 | 0.037 |
+| 600-1800 | 0.61-0.64 | 0.80-0.85 | ~2700 | 6 -> 13 N | 0.093 | 0.06-0.09 | 0.031 |
+| 1804-1999 | 0.16 | 0.20 | 1488 | 11 N | 0.177 | **0.615** | 0.083 |
+
+It learned the task in 600 iterations, plateaued for 1200, then collapsed at 1804
+and never recovered over the remaining 196.
+
+**The policy saturated its own action space.** `Loss/entropy` fell -3.2 (iteration
+300-900) to -37 (1649) while `Policy/mean_std` stayed pinned at exactly 0.15, the
+ceiling of `std_range`, from iteration ~300 onward. At fixed sigma a 6-D squashed
+Gaussian can only reach that entropy through the tanh log-determinant, so the
+pre-squash mean was driven deep into saturation. `feedback_saturation` (first
+nonzero at iteration 843, rising to 0.05) and force RMS 3 N -> 13 N agree.
+
+**The effort bought nothing.** Between iterations 600 and 1800 the RMS roughly
+doubled with `task_success` and `task_complete` flat.
+
+**What it was not.** Not the learning rate: the adaptive schedule held 2.6e-5 to
+5.9e-5 from iteration ~1700 with no anomaly at 1804 (1803: 5.85e-5, 1805:
+3.90e-5). Not cart mass or a curriculum: the per-200-iteration mean stayed
+141-156 kg and the task has none. Not infrastructure:
+`controller_worker_failed` was 0.0000 for all 2000 iterations. Not exploration
+collapse: sigma was at its *maximum*.
+
+**The critic went first.** `Loss/value` roughly doubled, 0.05-0.06 to 0.10-0.22,
+starting around iteration 1797 -- before the behavioural collapse at 1804. That is
+the documented precondition for this configuration's horizon: `gamma = 0.997`
+leans on the critic, and is only affordable while the critic converges
+(ppo.md#gamma). The proximate trigger is not identifiable beyond that, because
+this task logged none of the `Diagnostics/` scalars that would have shown it --
+see the wiring change below.
+
+**Baseline comparison of `model_1800`** (144 vs 160 paired episodes,
+`logs/comparisons/2026-09-24_17-38-11_model_1800.log`): it is worse than the
+zero-residual controller.
+
+| | baseline | policy | delta | p |
+| --- | --- | --- | --- | --- |
+| survival to cap | 88.2% | 65.6% | -22.6 pp | 3.8e-06 |
+| `task_complete` | 0.882 | 0.656 | -0.226 | 1.1e-06 |
+| reward/step total | 0.01522 | 0.01272 | -16.4% | 1.2e-07 |
+| `object_position_error` | 0.1102 | 0.0629 | **-43%** | 2.2e-05 |
+| `object_yaw_error` | 0.0575 | 0.0231 | **-60%** | 1.7e-05 |
+| `task_success` | 54.2% | 57.5% | +3.3 pp | 0.56 |
+
+**The mechanism has real authority; the trade is bad.** Cart tracking improves
+decisively and survival pays for it. Stratified by mass, the policy helps
+everywhere except above 300 kg (0.353 -> 0.182), on 17 and 33 episodes -- too few
+to establish.
+
+`object_position_tracking` is Hold-gated and the `object_position_error` metric is
+not, so the reward moving one way while the metric moves the other is an
+averaging difference, not a contradiction.
+
+**What changed as a result:**
+
+- every residual runner now logs the eleven `Diagnostics/` scalars, not just
+  residual_balance (ppo.md#training-diagnostics). `explained_variance`,
+  `action_saturation` and `policy_mean_saturation` are the three that would have
+  named this failure while it was happening.
+- locomanip moved to `RolloutAdaptivePPO` (ppo.md#RolloutAdaptivePPO), so the rate
+  follows one full-rollout KL per iteration instead of four per-minibatch ones,
+  and `schedule_kl` is logged.
+- `EPISODE_LENGTH_S` 60 -> 70, and two reward weights moved
+  (#locomanip-reward-weights).
+
+**Re-measure if:** anything in that list is trained. None of it is validated; the
+run that produced this section is the only evidence either way.
