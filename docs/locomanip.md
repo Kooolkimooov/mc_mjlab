@@ -454,6 +454,50 @@ levels are re-measured.
 **History:** added when the actor turned out to be training on clean simulator
 state -- no noise specs and `enable_corruption` false on both groups.
 
+## locomanip reward weights
+
+**Current:** `object_tracking` 1.0, `zmp_tracking` **0.5**, `termination_penalty`
+-200.0, `upright` -2.0, `residual_magnitude` and `residual_rate` **-0.3**.
+The two bold values changed on 2026-09-25 and are **hypotheses, not
+measurements** -- they are the two levers run
+[2026-09-24_17-38-11](#run-2026-09-24_17-38-11_hrp5p-feedback) left open.
+
+**Why `zmp_tracking` came down.** Its per-episode share measured against the
+zero-residual arm was 31.2 of a 43.5 total, against 14.4 for `object_tracking` --
+and the policy moved it by +3.3% per step at p = 0.12, i.e. not at all. The term
+the policy does move was carrying under a third of the signal. Equal kernel
+widths do not make equal contributions: `zmp_tracking` is satisfied on almost
+every grounded step while `object_tracking` is gated on both hands holding.
+
+**Why the request penalties went up.** Over the same run `feedback_force_rms`
+grew 3 N -> 13 N between iterations 600 and 1800 with `task_success` flat, so the
+policy bought effort that returned nothing, and -0.1 priced that at -3.6 per
+episode against a ~40 total. The weight is dense and bounded -- the request is
+clamped into [-1, 1] before it is charged
+(reward-shaping.md#requested_action_l2) -- so raising it cannot create the
+outlier-sample failure that -2000 created for `termination_penalty`.
+
+**Three neighbouring levers were left alone deliberately**, each already closed
+by a measurement in this repo:
+
+| lever | why not |
+| --- | --- |
+| `termination_penalty` past -200 | -2000 was tried: `Loss/value` never converged and the LR pinned to its floor for 20899 iterations (reward-shaping.md#termination_penalty) |
+| `std_range` ceiling | 0.30 was tried and replaced by 0.15 precisely because std climbed 0.2 -> 0.52 unchecked (ppo.md#std_range); the pin at 0.15 is the ceiling working, not a ceiling that is too low |
+| `entropy_coef` | already cut tenfold to 5e-5 on the argument that exploration noise is itself a disturbance on a residual task (ppo.md#entropy_coef) |
+
+A sparse completion bonus was considered and rejected for a fourth reason: at
+`gamma = 0.997` the credit horizon is 6.7 s, so a payment at the end of a 52 s
+cycle is invisible from most of the episode.
+
+**Re-measure if:** anything above is trained. Both changed weights are single
+untested numbers, and the point of changing exactly two is that the next run's
+delta is attributable.
+
+**History:** 2026-09-25 -- halved `zmp_tracking` and tripled the two request
+penalties after the first full feedback run plateaued for 1200 iterations while
+its force effort quadrupled.
+
 ## NUM_ENVS
 
 **Current:** `256` environments over `NUM_WORKERS` 64 mc_rtc worker processes,

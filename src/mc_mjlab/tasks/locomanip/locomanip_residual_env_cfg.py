@@ -66,6 +66,12 @@ OBJECT_TRACKING_STD = 0.04
 #: Kernel width of the ZMP-tracking reward, in metres. docs/locomanip.md#zmp_tracking_std
 ZMP_TRACKING_STD = 0.05
 
+#: Below `object_tracking`'s 1.0. docs/locomanip.md#locomanip-reward-weights
+ZMP_TRACKING_WEIGHT = 0.5
+
+#: Price of a bounded request, magnitude and rate alike.
+REQUEST_WEIGHT = -0.3
+
 # 0.4 s at 50 Hz: one frame cannot separate a heavy cart from a stuck one, and
 # the payload is exactly what this task asks the policy to infer.
 OBJECT_HISTORY = 20
@@ -326,16 +332,16 @@ def _rewards() -> dict[str, RewardTermCfg]:
     ),
     "zmp_tracking": RewardTermCfg(
       func=locomanip_mdp.rewards.zmp_tracking,
-      weight=1.0,
+      weight=ZMP_TRACKING_WEIGHT,
       params={**ZMP_PARAMS, "std": ZMP_TRACKING_STD},
     ),
     "termination_penalty": RewardTermCfg(func=envs_mdp.is_terminated, weight=-200.0),
     "upright": RewardTermCfg(func=envs_mdp.flat_orientation_l2, weight=-2.0),
     "residual_magnitude": RewardTermCfg(
-      func=mdp.rewards.requested_action_l2, weight=-0.1
+      func=mdp.rewards.requested_action_l2, weight=REQUEST_WEIGHT
     ),
     "residual_rate": RewardTermCfg(
-      func=mdp.rewards.requested_action_rate_l2, weight=-0.1
+      func=mdp.rewards.requested_action_rate_l2, weight=REQUEST_WEIGHT
     ),
   }
 
