@@ -53,8 +53,9 @@ FRAMESKIP = 2
 NUM_ENVS = 256
 NUM_WORKERS = 64
 
-# The installed DemoFSM's reach-push-release cycle takes 52.2 s. docs/locomanip.md
-EPISODE_LENGTH_S = 60.0
+# The installed DemoFSM's reach-push-release cycle takes 52.2 s, and a cap only
+# 8 s past that scores a slow cycle as a failure. docs/locomanip.md#EPISODE_LENGTH_S
+EPISODE_LENGTH_S = 70.0
 
 #: Authority for a joint with no hardware entry, in radians. Every residual joint
 #: has one, so this only fills the partition. docs/locomanip.md#residual_fallback_scale

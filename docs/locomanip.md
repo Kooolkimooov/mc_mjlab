@@ -498,6 +498,30 @@ delta is attributable.
 penalties after the first full feedback run plateaued for 1200 iterations while
 its force effort quadrupled.
 
+## EPISODE_LENGTH_S
+
+**Current:** `70.0` s, against a reach-push-release cycle that takes 52.2 s and a
+verification run that took 49.66 s end to end.
+
+**The previous `60.0` scored a slow cycle as a failure.** Eight seconds of margin
+is less than the spread between cart masses: over run
+[2026-09-24_17-38-11](#run-2026-09-24_17-38-11_hrp5p-feedback) the healthy phase
+held a mean episode length of ~2750 of the 3000-step cap, so a typical episode
+ended within 5 s of the wall, and `task_complete` sat at 0.85 with the missing
+share indistinguishable from "ran out of time". Widening the cap separates the
+two without changing what the policy is asked to do.
+
+**It does not change the credit horizon.** `gamma = 0.997` is 6.7 s
+(docs/ppo.md#gamma), far inside either cap, so lengthening the episode changes
+how many cycles fit, not what the policy can see.
+
+**Re-measure if:** the FSM's waypoint durations change, or `Loss/value` stops
+converging -- a longer episode leans on the critic the same way a longer horizon
+does.
+
+**History:** 2026-09-25 -- widened from `60.0` after the first full feedback run
+could not distinguish a failed cycle from a slow one.
+
 ## NUM_ENVS
 
 **Current:** `256` environments over `NUM_WORKERS` 64 mc_rtc worker processes,
