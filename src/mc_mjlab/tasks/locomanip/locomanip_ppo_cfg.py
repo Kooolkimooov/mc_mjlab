@@ -46,6 +46,9 @@ def locomanip_ppo_cfg(
       lam=0.99,
       desired_kl=0.02,
       max_grad_norm=1.0,
+      # One rate decision per rollout from the KL it actually produced, rather
+      # than four per-minibatch ones. docs/ppo.md#RolloutAdaptivePPO
+      class_name="mc_mjlab.rl.rollout_adaptive_ppo:RolloutAdaptivePPO",
     ),
     experiment_name=experiment_name,
     save_interval=20,
