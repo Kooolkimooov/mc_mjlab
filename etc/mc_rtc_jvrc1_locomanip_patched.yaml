@@ -5,49 +5,6 @@ GUIServer:
   Enable: false
 Log: false
 
-# JVRC1 has no etc/robots file in the controller: LocomanipController.yaml's own
-# defaults are already its. docs/locomanip.md#per-robot-controller-config
-OverwriteConfigKeys: [MjlabCartDemo]
-OverwriteConfigList:
-  MjlabCartDemo:
-    CentroidalManager:
-      method: PreviewControlExtZmp
-    ManipManager:
-      enableRos: false
-    CompletionState: LMC::DemoHold
-    DemoFSM:
-      Managed: false
-      StepByStep: false
-      init: LMC::DemoInitial
-      states:
-        LMC::DemoInitial:
-          base: LMC::Initial
-          configs:
-            autoStartTime: 0.0
-            gripperCommands:
-              - {name: l_gripper, opening: 1.0}
-              - {name: r_gripper, opening: 1.0}
-        LMC::DemoPush:
-          base: LMC::ConfigManip
-          configs:
-            reach: true
-            release: true
-            waypointList:
-              - duration: 30.0
-                relPose:
-                  translation: [1.0, 0, 0]
-            preHandWrenches:
-              Left: {force: [0, 0, 0], couple: [0, 0, 0]}
-              Right: {force: [0, 0, 0], couple: [0, 0, 0]}
-        LMC::DemoHold:
-          base: Pause
-          duration: 3600
-      transitions:
-        - [LMC::DemoInitial, OK, LMC::DemoPush, Auto]
-        - [LMC::DemoPush, OK, LMC::DemoHold, Auto]
-
-robots:
-  obj:
-    module: LMC/Cart
-    init_pos:
-      translation: [0.75, 0, 0]
+# The cart demo itself -- the FSM, the push waypoint, CompletionState, the cart
+# and each robot's own tasks -- is the controller's, on its mc_mjlab-setup
+# branch. docs/locomanip.md#per-robot-controller-config

@@ -2,16 +2,15 @@
 
 ## per-robot-controller-config
 
-**Current:** the robot-specific half of Locomanip's configuration is the
-*controller's* to hold, not this repo's. mc_rtc loads it for free:
-`MCController::robot_config()` reads
+**Current:** Locomanip's configuration is the *controller's* to hold, not this
+repo's -- both the robot-specific half and the cart demo itself. mc_rtc loads
+the robot-specific half for free: `MCController::robot_config()` reads
 `<the directory the controller library loads from>/<controller name>/<robot
 MODULE name>.yaml` and `~/.config/mc_rtc/controllers/<controller
 name>/<module>.yaml` into `config("robots")(<module>)`, and
 `BaselineWalkingController`'s constructor then does `config().load(rconfig)`,
 promoting it to the root before `OverwriteConfigList` is applied. So the
-precedence is: base YAML, then the per-robot file, then this repo's
-`MjlabCartDemo` overwrite.
+precedence is: base YAML, then the per-robot file, then any overwrite.
 
 | Robot | Where its Locomanip configuration lives |
 | --- | --- |
@@ -45,16 +44,49 @@ running mis-configured.
 2026-09-18 did not record the per-robot file, so its signature cannot see a
 change to it.
 
+**The project YAML cannot reach the FSM, which is why the demo moved too.**
+`MCGlobalController::GlobalConfiguration::load_controllers_configs` seeds the
+controller's configuration with the *project* `mc_rtc.yaml` and then loads the
+installed `<lib>/etc/<controller>.yaml` **over** it, so a `states:` block in this
+repo's profile is overwritten rather than applied. And `fsm::Controller` builds
+the factory and executor in its own constructor, before BWC's constructor runs
+`OverwriteConfigList` -- so an overwrite cannot reach the root FSM either. The
+only project-side lever was LocomanipController's opt-in `DemoFSM` reload, which
+is a second, complete FSM; keeping the demo there meant keeping a copy of the
+controller's own states in this repo.
+
 What stays in this repo is only what mc_rtc cannot know: which profile to run
 (`etc/mc_rtc_{hrp5,jvrc1}_locomanip_patched.yaml`, differing in `MainRobot`
 alone), and `tasks/locomanip/profiles.py`'s two scene values -- where the cart
 stands and which MuJoCo bodies are the hands.
 
-**Re-measure if:** BWC stops promoting `robots/<module>` to the root, or a
-robot package starts shipping a Locomanip section that conflicts with
-`MjlabCartDemo`.
+`DemoFSM` survives as the probe's lever rather than the demo's:
+`scripts/probe_hand_wrench_adaptation.py` reads the installed FSM back and
+re-emits it as a `DemoFSM` with one state's `HandWrenchAdaptation` changed
+(#HandWrenchAdaptation), which is the only way a script can vary a state config
+without writing into the workspace.
 
-**History:** 2026-09-18 -- moved HRP5P's `HandTaskList`, `objToHandTranss` and
+**Re-measure if:** BWC stops promoting `robots/<module>` to the root, `load_config`
+stops letting the installed file win over the project one, a robot package starts
+shipping a Locomanip section that conflicts, or the FSM is built after overwrite
+processing.
+
+**History:** 2026-09-28 -- moved the rest of the demo out: the `MjlabCartDemo`
+overwrite is gone, and `ManipManager.enableRos: false`, `CompletionState:
+LMC::Pause_`, the hour-long hold and HRP5P's `PreviewControlExtZmp` now sit in
+the controller's own `etc/LocomanipController.in.yaml` and
+`etc/robots/hrp5_p.yaml`. The overwrite's `StepByStep: false` was dropped as a
+no-op: `Executor.cpp` fires an `Auto` transition regardless of `step_by_step_`,
+and all three transitions are `Auto`.
+
+Verified by `verify_locomanip.py --cycles 1` on both robots, each cycle completing
+and holding its 2 s: JVRC1 reproduces its recorded 0.779 m position miss at
+0.7801 m, and HRP5P's cart error is 0.14663 m before the move against 0.14917,
+0.15088 and 0.15695 m after. The 7.8 mm spread across three identical post-move
+runs is wider than the 4.3 mm between the configurations, so the gap is the
+gate's own noise (#task_success) rather than the move.
+
+2026-09-18 -- moved HRP5P's `HandTaskList`, `objToHandTranss` and
 `preReachTranss` out of this repo's profile and into the controller. Three
 wrong turns on the way, each worth not repeating: per-robot *branches* of this
 repo; a patch adding `ControllerParameters::overwrite_config` to
@@ -80,12 +112,13 @@ leave the earlier native input offsets unchanged.
 
 **Current:** the demo needs features upstream Locomanip does not have:
 `ManipManager.enableRos`, numeric object/phase/completion datastore callbacks,
-an opt-in `DemoFSM` reload, the `HandWrenchAdaptation` block, and the
-initial-gripper retry that HRP5P needs to grasp at all. They live on the `ros2`
-branch of the LocomanipController checkout, which also installs
-`etc/robots/hrp5_p.yaml` (#per-robot-controller-config). Build that checkout and
-install the rebuilt libraries into the sourced workspace. The repository profile
-uses these features without changing the installed controller YAML.
+`CompletionState`, an opt-in `DemoFSM` reload, the `HandWrenchAdaptation` block,
+and the initial-gripper retry that HRP5P needs to grasp at all. They live on the
+`mc_mjlab-setup` branch of the LocomanipController checkout, which also carries
+the cart demo's own configuration (#per-robot-controller-config): its FSM, the
+push waypoint and the two robots' YAML. Build that checkout and install the
+rebuilt libraries *and* both YAML files into the sourced workspace -- the
+configuration is no longer something this repo's profile supplies.
 
 ```sh
 cd ~/workspace/src/catkin_locomanip_ws/src/LocomanipController
@@ -103,10 +136,18 @@ install -m 755 /tmp/locomanip-build/src/states/*State.so \
   "$HOME/workspace/install/lib/mc_controller/locomanip_controller/states/"
 install -D -m 644 etc/robots/hrp5_p.yaml \
   "$HOME/workspace/install/lib/mc_controller/LocomanipController/hrp5_p.yaml"
+install -m 644 /tmp/locomanip-build/etc/LocomanipController.yaml \
+  "$HOME/workspace/install/lib/mc_controller/etc/LocomanipController.yaml"
 ```
 
-These targeted installs leave the machine-wide `LocomanipController.yaml`
-untouched. A broad `cmake --install` would regenerate and overwrite it.
+The last line is the demo's configuration, and `configure_file` writes it at the
+*configure* step -- a YAML-only change needs no `cmake --build`. It overwrites the
+machine-wide `LocomanipController.yaml` on purpose, which is what moving the demo
+into the controller bought; a broad `cmake --install` now lands the same content.
+
+**Beware `testing_harness_hrp5p.py`**, the checkout's own mass sweep: it rewrites
+`etc/LocomanipController.in.yaml` with `yaml.safe_dump` to set the arm's blend, so
+every comment in that file is stripped the first time a sweep runs.
 
 **Re-measure if:** Locomanip gains native non-ROS object input, its FSM is built
 after overwrite processing, or equivalent datastore callbacks land upstream.
@@ -199,7 +240,7 @@ What the wiring fixes, and why each choice is not free:
 | `frameskip` | 2 | 1 kHz physics into the config's 2 ms controller period |
 | `jacobian` | `sparse` | HRP5P plus the free cart is 65 velocities, over MuJoCo Warp's dense limit of 60 |
 | `required_controller` | `LocomanipController` | a wrong `Enabled` otherwise surfaces as a missing datastore callback |
-| `episode_length_s` | 60.0 | the installed DemoFSM completes its cycle in 52.194 s |
+| `episode_length_s` | 60.0 | the installed FSM completes its cycle in 52.194 s |
 | `num_envs` | 32 | a starting point, not a measurement: one Locomanip controller per env, built serially, plus a cart |
 
 **Deliberately absent**, in the order they are likely to matter: per-episode goal
@@ -404,7 +445,7 @@ no fall termination on the step. Those tolerances are
 acceptance run agree on what "done" means.
 
 **Why `task_complete` alone is not success.** `Locomanip::complete` reports that
-the executor reached `LMC::DemoHold`, and `ConfigManipState` leaves the push
+the executor reached `LMC::Pause_`, and `ConfigManipState` leaves the push
 phase when its waypoint queue empties -- on a schedule, not on arrival. A cart
 that never moved completes exactly like one that arrived.
 
@@ -416,6 +457,12 @@ with the cart 0.29-0.33 m out, where completion would never have fired at all.
 
 `task_complete` stays in the metrics beside it: the gap between the two is how
 often the schedule outran the cart.
+
+**The 0.15 m tolerance is inside the run-to-run noise on HRP5P.** Three identical
+`--task demo` cycles on 2026-09-28 gave 0.14917, 0.15088 and 0.15695 m, so the
+same configuration passes or fails the position check by which run you look at.
+Read a single cycle's `cart_position` as a coin toss at this tolerance; only a
+distance well clear of 0.15 m says anything.
 
 **Re-measure if:** the FSM's waypoint durations change, or the acceptance
 script's tolerances move.

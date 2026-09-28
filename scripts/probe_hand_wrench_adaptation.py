@@ -17,6 +17,7 @@ from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
 )
 from mc_mjlab.tasks.locomanip.mdp import accessors, metrics, observations
 from mc_mjlab.tasks.locomanip.profiles import HRP5P
+from mc_mjlab.utils.controller_install import controller_config_paths
 
 #: The push state's blend settings, as `HandWrenchAdaptation` understands them.
 #: The shipped projection drops HRP5P at 100 kg. docs/locomanip.md
@@ -31,16 +32,35 @@ ARMS: dict[str, dict[str, Any]] = {
   },
 }
 
-PUSH_STATE = "LMC::DemoPush"
+PUSH_STATE = "LMC::PushCart_"
+
+#: The overwrite profile this probe adds; the shipped configuration names none.
+OVERWRITE_KEY = "MjlabHandWrench"
+
+
+def installed_fsm() -> dict[str, Any]:
+  """The controller's own FSM, as the keys a ``DemoFSM`` reload needs."""
+  installed = next(
+    path
+    for path in controller_config_paths("LocomanipController")
+    if path.parent.name == "etc"
+  )
+  config = yaml.safe_load(installed.read_text())
+  return {key: config[key] for key in ("states", "transitions", "init")}
 
 
 def configure(arm: str, log_dir: Path | None, scratch: Path) -> Path:
   """Write an mc_rtc config for this arm, with controller logging when asked."""
   config = yaml.safe_load(HRP5P.mc_rtc_yaml.read_text())
-  state = config["OverwriteConfigList"]["MjlabCartDemo"]["DemoFSM"]["states"][
-    PUSH_STATE
-  ]
-  state.setdefault("configs", {})["HandWrenchAdaptation"] = ARMS[arm]
+
+  # The root FSM is built before OverwriteConfigList reaches it, so the blend can
+  # only arrive as a DemoFSM reload of the installed one.
+  fsm = installed_fsm()
+  push = fsm["states"][PUSH_STATE].setdefault("configs", {})
+  push["HandWrenchAdaptation"] = ARMS[arm]
+  config["OverwriteConfigKeys"] = [OVERWRITE_KEY]
+  config["OverwriteConfigList"] = {OVERWRITE_KEY: {"DemoFSM": fsm}}
+
   if log_dir is not None:
     log_dir.mkdir(parents=True, exist_ok=True)
     config["Log"] = True
