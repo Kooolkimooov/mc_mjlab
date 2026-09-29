@@ -87,13 +87,19 @@ with per-joint gains derived from the reflected rotor inertia the MJCF already
 carries. Those defaults are then overwritten by `PDgains_sim.dat` at action-term
 init — see [coupling.md](coupling.md#invariants-and-traps).
 
-Actuators are hard-clamped at the mc_rtc RobotModule effort limits. The settled
-zero-residual baseline reaches only `0.133/0.203/0.229/0.40` of those limits at
-median/p90/p99/max, so the clamp is inert after the reset transient. The torque
-action also clamps explicitly, making the safety boundary independent of the
-actuator implementation. HRP5P finger bounds are empty in the module; those
-upper-body joints retain the unclamped actuator fallback and are excluded from
-the robot's residual-capable joint set.
+Actuators are hard-clamped at the mc_rtc RobotModule effort limits. The previously
+measured settled zero-residual baseline reaches only `0.133/0.203/0.229/0.40` of
+those limits at median/p90/p99/max. That measurement does not cover every
+controller: JVRC1's 10 kg cart gait saturates its 100 Nm knee limits in
+42.46% / 40.72% of 5,000 samples over Hold +4 to +14 s. Its mc_mujoco reference
+uses unclamped PD and reaches 117.45 Nm. Removing only the knee caps restores
+nominal stability in a diagnostic; see
+[JVRC1 knee effort limits](locomanip.md#jvrc1-knee-effort-limits).
+
+The torque action also clamps explicitly, making the safety boundary independent
+of the actuator implementation. HRP5P finger bounds are empty in the module;
+those upper-body joints retain the unclamped actuator fallback and are excluded
+from the robot's residual-capable joint set.
 
 ## sensors
 

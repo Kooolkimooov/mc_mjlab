@@ -389,6 +389,262 @@ changes what `alpha` scales.
   `set_const_fixed` term that rescaled the cart's own reference weights by hand
   until mujoco-warp 3.11 made the workaround unnecessary, and it was dropped.
 
+## JVRC1 hand-force blend in mc_mjlab
+
+**Current:** the instability is caused by insufficient knee torque authority.
+mc_mjlab caps both JVRC1 knees at the RobotModule's 100 Nm; mc_mujoco's PD
+actuation is unclamped and its nominal cart gait needs up to 117.45 Nm. Removing
+only the two knee caps in a diagnostic restores nominal stability. The recovered
+blend therefore compares different actuator limits across the simulators. See
+[JVRC1 knee effort limits](#jvrc1-knee-effort-limits) for the matched intervention,
+loaded checks and remaining limits of the comparison. The earlier measurements
+below retain the history of the investigation.
+
+**The block, recovered from the controller's own history.** `git log -S
+measuredWrench` on `ConfigManipState.cpp` reaches commit `e1f57c9` (2026-07-02
+09:02), the revision current when `tests/test_logs_translate_force=auto` was
+written (Jul 2 09:46). It hardcoded `double alpha = 0.1`, summed both hands
+through a constant `diag(-1, -1, 1)` mirror, filtered once and halved, and forced
+the couple to zero. That algebra reduces exactly to today's `sharedPush()`: with
+`lh_target = M*prev` and `M*M = I` the expected sum is `2*prev`, so
+`new = alpha*(measured_sum/2) + (1-alpha)*prev`. As configuration:
+
+```yaml
+HandWrenchAdaptation:
+  enable: true
+  shared: true
+  alpha: 0.1
+  forceProjection: [1, 1, 1]
+  momentProjection: [0, 0, 0]
+```
+
+It lives in `LocomanipController/etc/robots/jvrc1.yaml` as a `DemoFSM` reload,
+because a per-robot file cannot reach the FSM any other way and cannot reuse
+`LMC::PushCart_`'s name. docs/locomanip.md#per-robot-controller-config
+
+**Under mc_mujoco it works**, coarse sweep, `--ref-mass 1.0` so the controller has
+no payload knowledge, `LMC::Pause_` shortened from 3600 s to 3 s to keep each log
+near 140 MB instead of 9.8 GB:
+
+| mass | pos err | worst tau | z min | final state |
+| --- | --- | --- | --- | --- |
+| 1.0 kg | 0.003 | 1.14 | 0.720 | Pause |
+| 100.0 kg | 0.018 | 1.51 | 0.718 | Pause |
+| 215.4 kg | 0.006 | 1.63 | 0.706 | Pause |
+| **464.2 kg** | **0.008** | **1.82** | **0.709** | Pause |
+| 1000.0 kg | 1.315 | 18.60 | 0.094 | fail |
+
+That matches the historical `translate_force=auto` arm (0.013 m at 494 kg, tau
+1.75) and its failure signature (754 kg, tau 19.41).
+
+**Under mc_mjlab with module effort limits it does not.** Same masses through
+`verify_locomanip.py --task position --cart-mass`:
+
+| mass | cart err | robot fwd | z min | contact | completed |
+| --- | --- | --- | --- | --- | --- |
+| 1.0 kg | 0.471 | +1.525 | 0.713 | 33.0 s | yes |
+| 10.0 kg | 0.204 | +1.268 | 0.567 | 27.6 s | no |
+| 100.0 kg | 0.254 | **-0.189** | 0.579 | 6.8 s | no |
+| 215.4 kg | 0.273 | **-0.244** | 0.576 | 7.3 s | no |
+| 464.2 kg | 0.290 | **-0.232** | 0.623 | 8.2 s | no |
+| 1000.0 kg | 0.222 | -0.140 | 0.627 | 8.9 s | no |
+
+Only 1 kg completes. From 100 kg the robot travels backwards and loses hand
+contact after 7-9 s. Every loaded run sits at z 0.567-0.627 against JVRC1's
+`0.7 * 0.828 = 0.579` collapse threshold, so the task's own height check ends the
+episode; mc_mujoco holds 0.706-0.722 under the same load and has no such check.
+
+**At 10 kg the config is the differentiator, and any single gain reduction fixes
+it.** One gate cycle each, reverting one field of the block to its compiled
+default while the rest stay:
+
+| variant | cart err | fwd | z min | contact | upright |
+| --- | --- | --- | --- | --- | --- |
+| compiled defaults | 0.769 | 1.829 | 0.694 | 33.0 s | yes |
+| full recovered block | 0.103 | 0.588 | 0.550 | 14.1 s | **no** |
+| `shared: false` | 0.992 | 2.032 | 0.691 | 33.0 s | yes |
+| `alpha: 0.02` | 0.858 | 1.891 | 0.689 | 33.0 s | yes |
+| `forceProjection [1,0,1]` | 0.800 | 1.861 | 0.700 | 33.0 s | yes |
+| `momentProjection [0,1,0]` | 0.099 | 0.942 | 0.549 | 23.7 s | **no** |
+
+`shared`, `alpha` and `forceProjection` together set the loop gain; the moment
+projection is irrelevant. The stability ceiling is between 0.07 and 0.10 -- every
+alpha from 0.02 to 0.07 stays upright, 0.10 falls -- which mirrors the HRP5P
+plateau in #HandWrenchAdaptation. But no alpha recovers the envelope: 0.07 and
+0.02 both fail from 100 kg up, at the same z.
+
+**The signature is an oscillation, not an inverted force.** Left hand `fy`
+through Hold, medians over 0.5 s windows:
+
+| t since Hold | mc_mjlab measured | mc_mujoco measured |
+| --- | --- | --- |
+| 0-2 s | 1.2, 3.5, 6.6 | 0.7, 3.3, 6.8 |
+| 3 s | -8.4 | -8.6 |
+| 4 s on | +3.1, -0.3, -6.4, +2.5, -2.6, +13.1 | -17.2, -19.1, -12.0, -19.1, -13.5, -19.0 |
+
+Both agree for the first 3 s including the reversal. mc_mujoco then settles to a
+steady -13 to -19 N; mc_mjlab's sign flips every window. An FFT over Hold +4-14 s
+puts both at **1.00 Hz with a 2 Hz harmonic** -- the gait, since
+`FootManager.footstepDuration: 0.9` -- at std **15.27 N** here against **5.68 N**
+there. Same mode, three times the amplitude.
+
+**Eliminated, each by measurement:**
+
+- *Wrench sign or frame.* Signs and magnitudes agree at matched Hold windows. Both
+  simulators copy MuJoCo sensordata verbatim (`mj_sim.cpp:758`,
+  `sim_controller_bridge.py:294`); the negation to mc_rtc's convention happens
+  natively for both.
+- *A missing gain.* Foot sensors total 581.6 N here and 581.9 N there against
+  JVRC1's 612.1 N -- ratio 0.950 and 0.951, the shortfall being mass below the
+  ankle sites.
+- *Hand sensor fidelity.* `|site sensor| / |contact sensor|` scatters 0.19-2.60
+  during gait, which is wrist-sensor distal inertia, and mc_mujoco reads the same
+  channel from the same MJCF.
+- *Grasp orientation.* Hand position and surface z axis agree to three decimals;
+  the quaternions differ only by an overall sign.
+- *Control period.* mc_mjlab runs JVRC1 at 2 ms against the controller config's
+  5 ms, and `alpha` is per period -- but forcing 5 ms (`Timestep 0.005`,
+  `frameskip 5`, `decimation 5`) made it worse: fwd 0.036 m, still falling.
+- *Dispatch lag.* Collecting each solve in the period that dispatched it, instead
+  of one period later, changed nothing: z min 0.549 against 0.550.
+- *Solver options.* mjlab matches the XML on iterations, tolerance, solver and
+  cone; only `jacobian` differs, dense against sparse.
+- *Object state feedback.* Both routes carry the pose;
+  docs/coupling.md#object-state-feedback.
+
+**The NaN lead is resolved (2026-09-29).** The 251 `FootManager_*`,
+`CentroidalManager_*`, `ManipManager_*` and `*Task_*` channels previously
+reported as NaN from sample 0 had finite values in the raw binary payload.
+`finish_reset` calls the controller's reset after global initialization has
+already done so; both calls register `perf_UpdateContacts`. mc_rtc's logger
+overwrites the callback without emitting a removal event, leaving its reader
+with one extra key and shifting subsequent values. This also happens on startup,
+so skipping episode resets could not eliminate it. `mc_log_ui` uses the same
+converter, and its agreement was not independent evidence of live NaNs.
+
+The bridge now removes that entry explicitly before the second reset. A native
+regression test fails before the fix and passes after it. Repairing the duplicate
+event in a copy of the archived 25 s log restores **12,498 / 12,500** finite
+`CentroidalManager_ZMP_measured_x` and `FootManager_refZmp_x` samples. A fresh
+15 s JVRC1 demo gives **7,498 / 7,500** finite samples; the two missing samples
+precede manager registration. See [controller logs](coupling.md#controller-logs)
+for the cause and recovery details. No protected-member accessor is needed to
+read those channels. Existing uncorrected exports and their `zmp_err_mean_m`
+remain untrustworthy.
+
+**The centroidal configuration gap is also eliminated.** JVRC1 inherits the
+top-level `CentroidalManager` block; its per-robot section need not repeat it.
+The recovered mc_mjlab log and the archived mc_mujoco comparison both report
+`method: PreviewControlExtZmp`, `refComZ: 0.825`, `dcmGainP: 2`,
+`comZGainP: 2000`, `comZGainD: 500` and `zmpVelGain: 0.02`, with ZMP and CoM-Z
+feedback enabled and both `useActualStateForMpc` and
+`useActualComForWrenchDist` false.
+
+**What the recovered logs add.** One archived trace per simulator, measured over
+Hold +4 to +14 s (5,000 mc_mjlab samples at 2 ms; 2,000 mc_mujoco samples at
+5 ms). The mc_mjlab source is
+`mjlab25-LocomanipController-2026-09-29-14-11-57.bin`; the reference is the saved
+`mcm.flat` used in the earlier force comparison. These are a diagnostic pair,
+not a new payload sweep:
+
+| quantity | mc_mjlab | mc_mujoco |
+| --- | --- | --- |
+| measured minus control ZMP, x RMS | 0.04854 m | 0.01435 m |
+| measured minus control ZMP, y RMS | 0.04391 m | 0.02043 m |
+| actual CoM z, mean / std | 0.81700 / 0.00433 m | 0.82424 / 0.00127 m |
+| external-ZMP x offset, mean / std | +0.00414 / 0.01738 m | -0.02977 / 0.00733 m |
+
+**Resolved by the physical intervention below:** the earlier exclusions did not
+test actuator torque saturation. Matching PD gains does not match actuation when
+one simulator clips their output. The logger fix made this visible in `tauIn`;
+it changed no targets or feedback itself.
+
+**Re-measure if:** the coupling's control period changes, the blend's
+implementation changes again, or the actuator effort bounds change.
+
+## JVRC1 knee effort limits
+
+**Current:** `get_robot_cfg` passes `get_effort_limits("JVRC1")` to each ideal
+PD actuator. mjlab clamps the computed PD torque before writing MuJoCo's `ctrl`.
+`R_KNEE` and `L_KNEE` each have a 100 Nm magnitude limit. mc_mujoco's motors have
+neither control nor force limits, and its PD loop applies the full torque. The
+`EFFORT_LIMIT = inf` helper default is only a fallback; the robot-specific config
+supplies finite limits. Nominal position/velocity target clipping was inactive
+in every diagnostic below, which did not make the torque clamp inactive.
+
+One fresh 10 kg zero-action demo per intervention, seed 42, simulation step
+1 ms, controller period/frameskip/decimation 2 ms/2/2, recovered blend unchanged.
+No checkpoint or encoder randomization. The archived mc_mujoco nominal reference
+uses 5 ms. Statistics use Hold +4 to +14 s: **5,000 samples per mc_mjlab run** and
+**2,000 mc_mujoco samples**. Knee torque is the measured actuator torque `tauIn`,
+not the kinematic controller's zero `tauOut`.
+
+| quantity | module limits | unclamped PD | mc_mujoco reference |
+| --- | --- | --- | --- |
+| left hand fy mean / std | +2.25 / 17.27 N | -15.00 / 5.64 N | -13.97 / 5.68 N |
+| x ZMP error RMS | 0.04796 m | 0.01401 m | 0.01435 m |
+| y ZMP error RMS | 0.04472 m | 0.02024 m | 0.02043 m |
+| true minus estimated base x, mean | 0.17408 m | 0.02046 m | 0.01616 m |
+| base x error, Hold +9 to +10 s mean | 0.19120 m | 0.02277 m | 0.01825 m |
+| right / left knee at 100 Nm | 42.46% / 40.72% | 0.02% / 0% | 0% / 0% |
+| right / left knee above 100 Nm | 0% / 0% | 21.86% / 21.70% | 22.75% / 21.75% |
+| both knees absolute torque p90 / p99 / max | 100 / 100 / 100 Nm | 107.96 / 114.67 / 116.11 Nm | 109.22 / 115.75 / 117.45 Nm |
+
+![Matched hand force, base estimation and knee torque traces](figures/jvrc1-effort-limits.svg)
+
+The traces separate when the gait starts, about three seconds into Hold. The
+bounded run spends much more of each stance at its knee limit, the base estimate
+falls behind simulation truth, and the hand/ZMP loop amplifies the gait. Removing
+the caps brings all three signals close to the mc_mujoco reference. The
+intervention establishes torque saturation as the cause of the nominal
+instability; the base-estimation drift is part of that disturbed loop, rather
+than independent evidence of a broken observer.
+
+| fresh diagnostic | duration | minimum root z | robot forward | final cart position error | physical fall |
+| --- | --- | --- | --- | --- | --- |
+| 10 kg, module limits | 31.232 s | 0.54906 m | 1.45828 m | 0.46531 m | yes |
+| 10 kg, only knees unclamped | 40.000 s | 0.72187 m | 1.17205 m | 0.12060 m | no |
+| 10 kg, all PD unclamped | 43.396 s | 0.72298 m | 1.18399 m | 0.12169 m | no |
+| 100 kg, module limits | 12.162 s | 0.54898 m | -0.33515 m | 0.37558 m | yes |
+| 100 kg, all PD unclamped | 40.000 s | 0.72129 m | 1.09085 m | 0.03268 m | no |
+| 464.2 kg, all PD unclamped | 40.000 s | 0.72153 m | 1.07020 m | 0.00384 m | no |
+
+Loaded diagnostics change only cart mass, retaining the asset's diagonal inertia
+`[1, 1, 1]`, as the mc_mujoco sweep does. The task's payload randomization also
+scales inertia, so these are not replicas of its earlier sweep. The 40 s runs
+cover the push and release onset, not the complete acceptance gate. The 43.396 s
+nominal run reaches the configured completion state, then truncates on a worker
+timeout during Exit; it is evidence of physical stability, not a healthy final
+controller gate. The 0.12 m nominal endpoint error also remains larger than the
+historical mc_mujoco result.
+
+**Controls that did not recover the bounded gait:** one run each. CPU MuJoCo
+3.11.0 on the same scene stays upright to 43.314 s but misses the cart target by
+0.92875 m. The installed mc_mujoco engine, MuJoCo 3.3.6, substituted into the
+same mjlab pipeline reaches 40 s with 0.92838 m error. Restoring mc_mujoco's
+second coplanar cart floor falls at 18.194 s; at 5 ms it falls at 29.870 s.
+Removing the extra policy-boundary `forward` call falls at 33.344 s. The compiled
+robot masses, inertias, damping, armature and mesh vertices agree. These controls
+show sensitivity in late collapse timing, while the earlier poor tracking
+persists with the torque caps.
+
+**Meaning for the baseline:** the recovered blend expects knee torque authority
+above the current module limits even at 10 kg. Reproducing mc_mujoco requires
+explicitly matching that authority; evaluating a bounded controller requires
+keeping the limits and changing the controller's gait or load allocation. A gain
+reduction that merely stops the fall does not establish a feasible loaded gait.
+The diagnostic changes no shipped actuator or controller configuration.
+
+**Re-measure if:** knee effort bounds, PD gains, footstep timing, cart contact
+dynamics or the blend change. Compare saturation during the cart gait itself;
+an unrelated settled zero-residual baseline cannot certify these caps as inert.
+
+**History:** 2026-09-29 -- followed the recovered logger channels to stance-time
+knee saturation, then independently removed all PD caps and only the knee caps.
+The plot retains the archived mc_mujoco reference and the two new nominal traces.
+Local diagnostic code, state snapshots and reports are saved under
+`logs/locomanip/instability-2026-09-29/`.
+
 ## zmp_tracking
 
 **Current:** the reward and the `zmp_error` metric compare the planned ZMP
