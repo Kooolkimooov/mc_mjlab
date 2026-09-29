@@ -10,6 +10,7 @@ from conftest import requires_controller
 from mjlab.envs import ManagerBasedRlEnvCfg
 
 import mc_mjlab.tasks  # noqa: F401
+from mc_mjlab import mdp
 from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionActionCfg,
 )
@@ -23,6 +24,7 @@ from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
   DECIMATION,
   FORCE_SENSORS,
   FRAMESKIP,
+  HAND_FORCE_SENSORS,
   OBJECT_HISTORY,
   SUCCESS_POSITION_TOLERANCE_M,
   SUCCESS_YAW_TOLERANCE_RAD,
@@ -128,6 +130,16 @@ def test_the_zmp_reward_has_the_callbacks_it_compares() -> None:
   assert {PLANNED_ZMP, CONTROL_COM} <= outputs
   assert cfg.rewards["zmp_tracking"].params["std"] == ZMP_TRACKING_STD
   assert set(cfg.metrics) >= {"zmp_error", "zmp_grounded"}
+
+  # The planned side inverts every contact, so the hands belong in the measured
+  # one; the load gate stays on the feet. docs/locomanip.md#zmp_tracking
+  for params in (cfg.rewards["zmp_tracking"].params, cfg.metrics["zmp_error"].params):
+    assert set(HAND_FORCE_SENSORS) <= set(params["contact_sensor_names"])
+    assert set(mdp.sensors.GROUND_CONTACT_SENSORS) <= set(
+      params["contact_sensor_names"]
+    )
+    assert params["sensor_names"] == mdp.sensors.GROUND_CONTACT_SENSORS
+  assert "contact_sensor_names" not in cfg.metrics["zmp_grounded"].params
 
 
 def test_the_critic_sees_more_than_the_actor() -> None:

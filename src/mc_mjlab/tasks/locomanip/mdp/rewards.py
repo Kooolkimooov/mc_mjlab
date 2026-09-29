@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from mc_mjlab.mdp.sensors import zmp_sensors
+from mc_mjlab.mdp.sensors import contact_zmp_sensors
 from mc_mjlab.tasks.locomanip.mdp import accessors
 
 if TYPE_CHECKING:
@@ -39,8 +39,11 @@ class zmp_tracking:
   """Gaussian kernel on the distance from the controller's planned ZMP."""
 
   def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
-    self._sensors = zmp_sensors(
-      env, cfg.params["sensor_names"], cfg.params["asset_cfg"].name
+    self._contacts, self._ground = contact_zmp_sensors(
+      env,
+      cfg.params["sensor_names"],
+      cfg.params.get("contact_sensor_names"),
+      cfg.params["asset_cfg"].name,
     )
 
   def __call__(
@@ -49,11 +52,14 @@ class zmp_tracking:
     sensor_names: tuple[str, ...],
     asset_cfg: SceneEntityCfg,
     std: float,
+    contact_sensor_names: tuple[str, ...] | None = None,
     action_name: str = accessors.ACTION_NAME,
     min_normal_force: float = 20.0,
   ) -> torch.Tensor:
-    del sensor_names, asset_cfg  # Resolved at init.
-    error, normal_force = self._sensors.offset_error(env, action_name, min_normal_force)
+    del sensor_names, asset_cfg, contact_sensor_names  # Resolved at init.
+    # planned_zmp inverts the whole centroidal wrench, hands included.
+    error, _ = self._contacts.offset_error(env, action_name, min_normal_force)
+    _, normal_force = self._ground.measured_offset(env, min_normal_force)
     # Unloaded feet have no centre of pressure, so they score nothing rather than
     # a free maximum. docs/locomanip.md#zmp_tracking_std
     return torch.exp(-error.square() / std**2) * (normal_force >= min_normal_force)

@@ -16,15 +16,13 @@ from mc_mjlab.tasks.locomanip import mdp
 from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
   CART_MASS_RANGE_KG,
   EPISODE_LENGTH_S,
+  HAND_FORCE_SENSORS,
   NUM_ENVS,
   NUM_WORKERS,
   PLAY_PRINT_RESIDUAL_EVERY,
   make_locomanip_residual_env_cfg,
 )
 from mc_mjlab.tasks.locomanip.profiles import HRP5P, LocomanipProfile
-
-#: The two hands the controller grasps the cart with, in policy order.
-HAND_FORCE_SENSORS = ("LeftHandForceSensor", "RightHandForceSensor")
 
 
 def locomanip_feedback_env_cfg(

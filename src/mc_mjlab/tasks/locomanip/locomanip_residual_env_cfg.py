@@ -85,9 +85,18 @@ FORCE_SENSORS = (
   "RightHandForceSensor_fsensor",
 )
 
+#: The two hands the controller grasps the cart with, in policy order.
+HAND_FORCE_SENSORS = ("LeftHandForceSensor", "RightHandForceSensor")
+
 ZMP_PARAMS = {
   "sensor_names": mdp.sensors.GROUND_CONTACT_SENSORS,
   "asset_cfg": SceneEntityCfg("robot"),
+}
+
+#: The planned ZMP inverts every contact, hands included. docs/locomanip.md#zmp_tracking
+CONTACT_ZMP_PARAMS = {
+  **ZMP_PARAMS,
+  "contact_sensor_names": mdp.sensors.GROUND_CONTACT_SENSORS + HAND_FORCE_SENSORS,
 }
 
 #: The masses the mc_mujoco sweep characterised. docs/locomanip.md#cart_mass_range_kg
@@ -334,7 +343,7 @@ def _rewards() -> dict[str, RewardTermCfg]:
     "zmp_tracking": RewardTermCfg(
       func=locomanip_mdp.rewards.zmp_tracking,
       weight=ZMP_TRACKING_WEIGHT,
-      params={**ZMP_PARAMS, "std": ZMP_TRACKING_STD},
+      params={**CONTACT_ZMP_PARAMS, "std": ZMP_TRACKING_STD},
     ),
     "termination_penalty": RewardTermCfg(func=envs_mdp.is_terminated, weight=-200.0),
     "upright": RewardTermCfg(func=envs_mdp.flat_orientation_l2, weight=-2.0),
@@ -426,7 +435,9 @@ def _metrics() -> dict[str, MetricsTermCfg]:
       func=locomanip_mdp.metrics.object_position_error
     ),
     # Read tracking quality as `zmp_error / zmp_grounded`, never zmp_error alone.
-    "zmp_error": MetricsTermCfg(func=mdp.metrics.zmp_error, params=dict(ZMP_PARAMS)),
+    "zmp_error": MetricsTermCfg(
+      func=mdp.metrics.zmp_error, params=dict(CONTACT_ZMP_PARAMS)
+    ),
     "zmp_grounded": MetricsTermCfg(
       func=mdp.metrics.zmp_grounded, params=dict(ZMP_PARAMS)
     ),

@@ -9,7 +9,7 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 
 from mc_mjlab.bridge.controller_datastore import CONTROL_COM_VEL
 from mc_mjlab.mdp.disturbances import age_since_push, push_term
-from mc_mjlab.mdp.sensors import residual_term, zmp_sensors
+from mc_mjlab.mdp.sensors import contact_zmp_sensors, residual_term, zmp_sensors
 from mc_mjlab.robots import robot_module as mc_rtc
 
 if TYPE_CHECKING:
@@ -67,8 +67,11 @@ class zmp_error:
   # Read as `zmp_error / zmp_grounded`; alone it falls when the feet lift.
 
   def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
-    self._sensors = zmp_sensors(
-      env, cfg.params["sensor_names"], cfg.params["asset_cfg"].name
+    self._contacts, self._ground = contact_zmp_sensors(
+      env,
+      cfg.params["sensor_names"],
+      cfg.params.get("contact_sensor_names"),
+      cfg.params["asset_cfg"].name,
     )
 
   def __call__(
@@ -76,14 +79,16 @@ class zmp_error:
     env: ManagerBasedRlEnv,
     sensor_names: tuple[str, ...],
     asset_cfg: SceneEntityCfg,
+    contact_sensor_names: tuple[str, ...] | None = None,
     action_name: str = "mc_rtc_residual",
     min_normal_force: float = 20.0,
     plane_height: float = 0.0,
   ) -> torch.Tensor:
-    del sensor_names, asset_cfg  # Resolved at init.
-    error, normal_force = self._sensors.offset_error(
+    del sensor_names, asset_cfg, contact_sensor_names  # Resolved at init.
+    error, _ = self._contacts.offset_error(
       env, action_name, min_normal_force, plane_height
     )
+    _, normal_force = self._ground.measured_offset(env, min_normal_force, plane_height)
     return error * (normal_force >= min_normal_force)
 
 

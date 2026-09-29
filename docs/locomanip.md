@@ -389,11 +389,52 @@ changes what `alpha` scales.
   `set_const_fixed` term that rescaled the cart's own reference weights by hand
   until mujoco-warp 3.11 made the workaround unnecessary, and it was dropped.
 
+## zmp_tracking
+
+**Current:** the reward and the `zmp_error` metric compare the planned ZMP
+against the centre of pressure of **every** contact -- both feet and both hands
+(`CONTACT_ZMP_PARAMS`) -- while the `min_normal_force` gate still reads the feet
+alone (`ZMP_PARAMS`). Two `ZmpSensors` instances, resolved once by
+`mdp.sensors.contact_zmp_sensors`; the caches are keyed by sensor set, so the
+foot-only one is still shared with `gait_phase`, `foot_load_share` and
+`zmp_grounded`.
+
+**Why:** `planned_zmp` (docs/coupling.md#planned_zmp) inverts the centroidal
+equation `m(c̈ - g) = ΣF` with `dL/dt = 0`, so it is the ground-plane
+intersection of the resultant of *all* external contact forces. Aggregating only
+the feet compares that against a different wrench the moment the hands carry
+load, and the two disagree by `f·(p_hand_z - h) / F_z`. For a 50 N push with the
+hands 0.2 m above the CoM and `F_z ≈ 520 N` that is **≈0.096 m** -- about twice
+`ZMP_TRACKING_STD`, which drives the kernel to ~0.03 for a robot tracking its
+plan perfectly. With `CART_MASS_RANGE_KG = (1.0, 1000.0)` the task guarantees
+such pushes, so the term was paying the policy least exactly where the
+manipulation was going best.
+
+Aggregating the hands is the correction rather than building a second reference:
+the ground-plane ZMP of the total contact wrench *is* the centroidal ZMP, so the
+two sides of the comparison become the same quantity again, with no new
+datastore callback and no assumption about what the controller planned for the
+hands.
+
+**Residual error:** the identity assumes `dL/dt = 0`, which `planned_zmp` also
+assumes, and the MuJoCo site wrenches carry the distal links' own inertia -- the
+same approximation the foot sensors already made, now applied at the wrists too.
+
+**Re-measure if:** the hands grasp somewhere other than the cart handle, the
+robot gains a third contact set, or `planned_zmp` starts reporting a
+hand-corrected plan of its own.
+
+**History:** 2026-09-28 -- found by review; before it, the measured side was
+`GROUND_CONTACT_SENSORS` only. No locomanip training curve taken before this date
+is comparable with one taken after, since the reward's value changed wherever the
+hands were loaded.
+
 ## ZMP_TRACKING_STD
 
 **Current:** `0.05` m, the Gaussian kernel width of the `zmp_tracking` reward,
-which scores the distance between the measured centre of pressure and the ZMP the
-controller planned, and scores **zero** on any step whose feet carry less than
+which scores the distance between the measured centre of pressure -- over every
+contact, see `zmp_tracking` above -- and the ZMP the controller planned, and
+scores **zero** on any step whose feet carry less than
 `min_normal_force` (20 N) -- an unloaded foot has no centre of pressure, and
 without the mask a robot in flight would collect the maximum.
 
@@ -403,7 +444,9 @@ the ground.
 
 **Not measured for this task**, but it does discriminate: on one zero-residual
 HRP5P episode with a 112 kg cart, the kernel read 0.9995-0.9998 through the
-approach and dropped to 0.745 once the push loaded the feet. The width still has
+approach and dropped to 0.745 once the push loaded the feet. That reading was
+taken with the foot-only measured side, so the 0.745 confounds tracking error
+with the hand-force bias `zmp_tracking` above removes; it has not been retaken. The width still has
 to be placed against the error distribution *during the push*, over episodes and
 masses, which has not been taken.
 

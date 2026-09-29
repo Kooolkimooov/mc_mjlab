@@ -205,6 +205,19 @@ def zmp_sensors(
   return sensors
 
 
+def contact_zmp_sensors(
+  env: ManagerBasedRlEnv,
+  sensor_names: tuple[str, ...],
+  contact_sensor_names: tuple[str, ...] | None,
+  asset_name: str,
+) -> tuple[ZmpSensors, ZmpSensors]:
+  """``(every contact, the ground contacts alone)``: the ZMP set and its load gate."""
+  ground = zmp_sensors(env, sensor_names, asset_name)
+  if not contact_sensor_names:
+    return ground, ground
+  return zmp_sensors(env, tuple(contact_sensor_names), asset_name), ground
+
+
 def planned_zmp_offset(
   env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
 ) -> torch.Tensor:
