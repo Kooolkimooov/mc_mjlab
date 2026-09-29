@@ -20,6 +20,7 @@ from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
   NUM_ENVS,
   NUM_WORKERS,
   PLAY_PRINT_RESIDUAL_EVERY,
+  add_cart_mass_printout,
   make_locomanip_residual_env_cfg,
 )
 from mc_mjlab.tasks.locomanip.profiles import HRP5P, LocomanipProfile
@@ -41,6 +42,7 @@ def locomanip_feedback_env_cfg(
     )
     action.num_workers = None
     cfg.observations["actor"].enable_corruption = False
+    add_cart_mass_printout(cfg)
   return cfg
 
 

@@ -128,7 +128,18 @@ def locomanip_residual_env_cfg(
     # itself from the env count it actually gets.
     cfg.actions[locomanip_mdp.accessors.ACTION_NAME].num_workers = None
     cfg.observations["actor"].enable_corruption = False
+    add_cart_mass_printout(cfg)
   return cfg
+
+
+def add_cart_mass_printout(cfg: ManagerBasedRlEnvCfg) -> None:
+  """Announce each episode's drawn payload, which no viewer surfaces itself."""
+  # Last in the dict, so it runs after `cart_payload` has drawn.
+  if "cart_payload" not in cfg.events:
+    return
+  cfg.events["cart_payload_printout"] = EventTermCfg(
+    func=locomanip_mdp.events.print_object_mass, mode="reset"
+  )
 
 
 def make_locomanip_residual_env_cfg(

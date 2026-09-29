@@ -3,6 +3,13 @@
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
+
+from mc_mjlab.tasks.locomanip.mdp.accessors import OBJECT_ENTITY, object_mass_kg
+
+if TYPE_CHECKING:
+  import torch
+  from mjlab.envs import ManagerBasedRlEnv
 
 
 def mass_alpha_range(
@@ -16,3 +23,16 @@ def mass_alpha_range(
     0.5 * math.log(low / nominal_mass_kg),
     0.5 * math.log(high / nominal_mass_kg),
   )
+
+
+def print_object_mass(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None,
+  entity_name: str = OBJECT_ENTITY,
+) -> None:
+  """Print each reset row's drawn payload; the viewers show no event or action term."""
+  # Registered after `cart_payload`, so the draw it reports is this episode's.
+  mass = object_mass_kg(env, entity_name)
+  rows = range(env.num_envs) if env_ids is None else env_ids.tolist()
+  drawn = ", ".join(f"env {int(row)}: {float(mass[int(row)]):.1f} kg" for row in rows)
+  print(f"[cart] {drawn}", flush=True)

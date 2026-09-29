@@ -150,7 +150,7 @@ def run(args: argparse.Namespace) -> bool:
       profile=ROBOTS[args.robot],
       num_envs=1,
       num_workers=1,
-      cart_mass_range_kg=(10.0, 10.0),
+      cart_mass_range_kg=(args.cart_mass, args.cart_mass),
       console_output="single" if args.console else "none",
     )
     cfg.events.pop("encoder_bias")
@@ -271,6 +271,9 @@ def main() -> None:
   parser.add_argument("--cycles", type=int, default=5)
   parser.add_argument("--isolation", action="store_true")
   parser.add_argument("--max-seconds", type=float, default=60.0)
+  parser.add_argument(
+    "--cart-mass", type=float, default=10.0, help="payload for the non-demo tasks"
+  )
   parser.add_argument("--device", default="cuda:0")
   parser.add_argument("--console", action="store_true")
   parser.add_argument("--robot", default="HRP5P", choices=sorted(ROBOTS))
