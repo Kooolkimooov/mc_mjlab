@@ -87,6 +87,9 @@ void ControllerInstance::finish_reset(IoInput input, const sva::PTransformd &pos
     apply_input(input);
     apply_objects(input, true);
 
+    // Logger overwrite emits an add without a remove, shifting every later column.
+    // The global init already registered this entry. docs/coupling.md#controller-logs
+    controller.logger().removeLogEntry("perf_UpdateContacts");
     controller.reset({controller.robot().mbc().q});
     controller.resetObserverPipelines();
 

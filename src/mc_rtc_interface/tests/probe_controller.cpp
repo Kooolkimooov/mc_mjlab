@@ -11,6 +11,7 @@ struct ProbeController : mc_control::MCController
         ProbeController(mc_rbdyn::RobotModulePtr module, double dt, const mc_rtc::Configuration &config)
             : MCController(module, dt)
         {
+            base_reset = config("ProbeBaseReset", false);
             if (config("ProbeObject", false))
             {
                 loadRobot(mc_rbdyn::RobotLoader::get_robot_module("object", MC_RTC_TEST_ASSET_DIR, "cart"), "obj");
@@ -104,9 +105,10 @@ struct ProbeController : mc_control::MCController
             ProbeControl::instance().live--;
         }
 
-        void reset(const mc_control::ControllerResetData &) override
+        void reset(const mc_control::ControllerResetData &data) override
         {
             if (ProbeControl::instance().fail_reset) throw std::runtime_error("probe reset failure");
+            if (base_reset) MCController::reset(data);
             reset_pose = realRobot().posW();
             if (robots().hasRobot("obj"))
             {
@@ -119,6 +121,12 @@ struct ProbeController : mc_control::MCController
         {
             if (throw_step) throw std::runtime_error("probe step failure");
             if (scalar < 0.0) return false;
+            if (base_reset && !logging_started)
+            {
+                logger().addLogEntry(
+                    "probe_position", [this]() -> Eigen::Vector3d { return reset_pose.translation(); });
+                logging_started = true;
+            }
             const auto &order = robot().refJointOrder();
             for (std::size_t i = 0; i < order.size(); ++i)
             {
@@ -134,6 +142,7 @@ struct ProbeController : mc_control::MCController
         std::string      support_foot_name = "LeftFootCenter";
         double           scalar            = 0.0;
         bool             throw_step = false, throw_output = false;
+        bool             base_reset = false, logging_started = false;
         Eigen::Vector3d  vector                 = Eigen::Vector3d::Zero();
         sva::PTransformd reset_pose             = sva::PTransformd::Identity();
         Eigen::Vector3d  reset_object_reference = Eigen::Vector3d::Zero();

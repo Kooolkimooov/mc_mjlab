@@ -57,6 +57,42 @@ persists until a collected native result acknowledges it.
 
 **History:** [pose-seeding measurements](coupling-history.md#reset-pose-seeding).
 
+## controller logs
+
+**Current:** `ControllerInstance::finish_reset` explicitly removes
+`perf_UpdateContacts` before its second `MCController::reset`. Global
+initialization has already called that reset once. The second call is needed
+after measured poses and sensors are seeded, but the installed logger's
+`addLogEntry(..., overwrite=true)` erases the old callback and appends a new
+`KeyAddedEvent` without a `KeyRemovedEvent`. The binary reader then has one more
+key than the writer has values, shifting all subsequent columns. A type mismatch
+can make those columns appear entirely NaN in both `mc_bin_to_flat` and
+`mc_log_ui`; they share the same reader and are not independent checks.
+
+Removing the entry first emits the missing event without changing controller
+execution. `test_host_logging` uses the real base reset and checks a vector
+registered during `run()` through `mc_rtc::log::FlatLog`, after both initialization
+and an episode reset. It fails without the removal and passes with it.
+
+**Re-measure if:** mc_rtc fixes overwrite event serialization, the second reset
+is removed, or another reset callback starts overwriting log entries.
+
+**History:** 2026-09-29 -- traced the 251 NaN manager/task channels reported in
+[the JVRC1 blend investigation](locomanip.md#jvrc1-hand-force-blend-in-mc_mjlab)
+to a duplicate `perf_UpdateContacts` add in sample zero. The raw MessagePack
+values were finite. Inserting a remove event immediately before that duplicate
+in a copy of `mjlab25-LocomanipController-2026-09-29-14-11-57.bin` let the standard
+converter recover **12,498 / 12,500** finite `FootManager_refZmp_x` and
+`CentroidalManager_ZMP_measured_x` samples; the first two precede registration.
+A new 15 s JVRC1 zero-residual demo with the bridge fix gave **7,498 / 7,500**
+finite samples on both channels, **7,500 / 7,500** finite `perf_UpdateContacts`
+samples, minimum root z **0.691 m**, and both hands in Hold at the end. All 17
+native checks passed. This repairs observability, not the blend's stability.
+
+Old `.flat` exports remain corrupt. Recover the key events in a copy of the
+original `.bin` before converting again; do not replace NaNs with zeros or infer
+that the controller's live managers held NaNs.
+
 ## Worker failure is a truncation
 
 **Current:** native `OutputLayout.Status` is `OK=0`, `QP_FAILED=1`,

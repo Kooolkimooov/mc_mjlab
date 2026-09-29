@@ -131,7 +131,7 @@ ControllerModulePaths: ['$<TARGET_FILE_DIR:InstanceProbe>']
 "
 )
 
-foreach(test IN ITEMS host_failures host_io instance_datastore_plugin)
+foreach(test IN ITEMS host_failures host_io host_logging instance_datastore_plugin)
     add_executable(test_${test} tests/test_${test}.cpp)
     target_link_libraries(test_${test} PRIVATE mc_rtc_interface_core InstanceProbe)
     target_compile_options(test_${test} PRIVATE -UNDEBUG)
@@ -294,6 +294,7 @@ foreach(check_target check check-native)
     test_host_reset_outputs
     test_host_failures
     test_host_io
+    test_host_logging
     test_worker_ipc
   )
 endforeach()
