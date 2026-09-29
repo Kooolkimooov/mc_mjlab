@@ -12,7 +12,7 @@ import torch
 from test_manager_bindings import make_configuration, make_layout
 
 import mc_rtc_interface as native_typed
-from mc_mjlab.bridge.controller_objects import object_state
+from mc_mjlab.bridge.controller_objects import OBJECT_STRIDE, world_angular_velocity
 from mc_mjlab.bridge.shared_memory import create_shm, row_window
 
 native = cast(Any, native_typed)
@@ -28,21 +28,21 @@ def test_object_layout_preserves_earlier_columns(count: int) -> None:
   layout.input.datastore_vector3 = ["velocity"]
   assert layout.input.objects_offset() == start
   assert layout.input.root_offset() == root
-  assert layout.input.datastore_scalar_offset() == start + 13 * count
-  assert layout.input.reset_offset() == start + 13 * count + 4
+  assert layout.input.datastore_scalar_offset() == start + OBJECT_STRIDE * count
+  assert layout.input.reset_offset() == start + OBJECT_STRIDE * count + 4
+  assert native.IoLayout().input.object_state_size == OBJECT_STRIDE
 
 
-def test_object_pose_and_velocity_conventions() -> None:
+def test_object_angular_velocity_rotates_into_world() -> None:
+  """Verify the free joint's body-frame angular velocity reaches the layout in world."""
   half = math.sqrt(0.5)
-  qpos = torch.tensor([[10.75, 3, 0, half, 0, 0, half], [0.75, 0, 0, 1, 0, 0, 0]])
-  qvel = torch.tensor([[1.0, 2, 3, 1, 0, 0], [1.0, 2, 3, 1, 0, 0]])
-  origins = torch.tensor([[10.0, 3, 0], [0.0, 0, 0]])
-  actual = object_state(qpos, qvel, origins)
-  torch.testing.assert_close(actual[:, :3], torch.tensor([[0.75, 0, 0], [0.75, 0, 0]]))
-  torch.testing.assert_close(actual[0, 3:7], torch.tensor([0.0, 0, half, half]))
-  torch.testing.assert_close(actual[:, 7:10], qvel[:, :3])
+  quat = torch.tensor([[half, 0, 0, half], [1.0, 0, 0, 0]])
+  local = torch.tensor([[1.0, 0, 0], [1.0, 0, 0]])
   torch.testing.assert_close(
-    actual[:, 10:13], torch.tensor([[0.0, 1, 0], [1.0, 0, 0]]), atol=2e-7, rtol=1e-6
+    world_angular_velocity(quat, local),
+    torch.tensor([[0.0, 1, 0], [1.0, 0, 0]]),
+    atol=2e-7,
+    rtol=1e-6,
   )
 
 

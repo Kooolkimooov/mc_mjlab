@@ -44,7 +44,9 @@ struct InputLayout
         inline static constexpr std::size_t root_state_size   = 3 + 4 + 3;
         inline static constexpr std::size_t body_sensor_size  = 3 + 3;
         inline static constexpr std::size_t force_sensor_size = 3 + 3;
-        inline static constexpr std::size_t object_state_size = 3 + 4 + 3 + 3;
+        // Position, quaternion (xyzw), linear velocity, world angular velocity,
+        // linear acceleration: what mc_mujoco feeds a floating-base robot.
+        inline static constexpr std::size_t object_state_size = 3 + 4 + 3 + 3 + 3;
 
         inline static const std::string floating_base_sensor = "FloatingBase";
 

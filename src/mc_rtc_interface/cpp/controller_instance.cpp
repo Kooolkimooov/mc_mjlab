@@ -36,14 +36,12 @@ void ControllerInstance::initialize(IoInput input, IoOutput output)
         m_io_to_mbc.push_back(match == to.end() ? invalid_index : static_cast<std::size_t>(match - to.begin()));
     }
 
-    const auto pose  = prepare_reset(input);
-    auto       poses = object_poses(input);
-    const auto name  = m_controller->controller().robot().name();
-    poses[name]      = pose;
-    apply_objects(input, true);
-    m_controller->init({{name, m_q}}, poses);
+    const auto name = m_controller->controller().robot().name();
 
-    finish_reset(input, pose);
+    prepare_reset(input);
+    m_controller->init({{name, m_q}}, m_reset_poses);
+
+    finish_reset(input);
     apply_output(output);
 
     m_failed      = false;
@@ -58,34 +56,58 @@ void ControllerInstance::reset(IoInput input, IoOutput output)
         return;
     }
 
-    const auto pose  = prepare_reset(input);
-    const auto name  = m_controller->controller().robot().name();
-    auto       poses = object_poses(input);
-    poses[name]      = pose;
-    m_controller->reset({{name, m_q}}, poses);
-    finish_reset(input, pose);
+    const auto name = m_controller->controller().robot().name();
+
+    prepare_reset(input);
+    m_controller->reset({{name, m_q}}, m_reset_poses);
+
+    finish_reset(input);
     apply_output(output);
 
     m_failed = false;
 }
 
-sva::PTransformd ControllerInstance::prepare_reset(IoInput input)
+void ControllerInstance::prepare_reset(IoInput input)
 {
     io_to_encoders(input.subspan(m_layout.input.q_offset()), m_q);
 
-    const auto root            = input.subspan(m_layout.input.root_offset(), InputLayout::root_state_size);
-    const auto world_from_body = utils::geometry::quaternion_xyzw(root.subspan<3, 4>());
-    const auto body_from_world = world_from_body.inverse();
-    return sva::PTransformd(body_from_world, utils::geometry::vector3(root, 0));
+    const auto root = input.subspan(m_layout.input.root_offset(), InputLayout::root_state_size);
+
+    m_reset_poses.clear();
+    m_reset_poses.emplace(
+        m_controller->controller().robot().name(),
+        sva::PTransformd(
+            utils::geometry::quaternion_xyzw(root.subspan<3, 4>()).inverse(), utils::geometry::vector3(root, 0)));
+
+    for (std::size_t i = 0; i < m_layout.input.objects.size(); ++i)
+    {
+        const auto state = input.subspan(
+            m_layout.input.objects_offset() + InputLayout::object_state_size * i, InputLayout::object_state_size);
+        m_reset_poses.emplace(
+            m_layout.input.objects[i],
+            sva::PTransformd(
+                utils::geometry::quaternion_xyzw(state.subspan<3, 4>()).inverse(), utils::geometry::vector3(state, 0)));
+    }
 }
 
-void ControllerInstance::finish_reset(IoInput input, const sva::PTransformd &pose)
+void ControllerInstance::finish_reset(IoInput input)
 {
     auto &controller = m_controller->controller();
-    controller.realRobot().posW(pose);
+    controller.realRobot().posW(m_reset_poses.at(controller.robot().name()));
 
     apply_input(input);
-    apply_objects(input, true);
+
+    // The reference robot is the ManipManager's to drive, so only a reset may move
+    // it; apply_input places the measured one every step.
+    for (const auto &object : m_layout.input.objects)
+    {
+        auto       &reference = controller.robot(object);
+        const auto &measured  = controller.realRobot(object);
+        reference.posW(measured.posW());
+        reference.velW(measured.velW());
+        reference.forwardKinematics();
+        reference.forwardVelocity();
+    }
 
     // Logger overwrite emits an add without a remove, shifting every later column.
     // The global init already registered this entry. docs/coupling.md#controller-logs
@@ -148,6 +170,7 @@ void ControllerInstance::apply_input(IoInput input)
     m_controller->setEncoderVelocities(m_qd);
     m_controller->setJointTorques(m_tau);
 
+    auto       &controller      = m_controller->controller();
     const auto  root            = input.subspan(m_layout.input.root_offset(), InputLayout::root_state_size);
     const auto  world_from_body = utils::geometry::quaternion_xyzw(root.subspan<3, 4>());
     const auto  body_from_world = world_from_body.inverse();
@@ -182,48 +205,35 @@ void ControllerInstance::apply_input(IoInput input)
     }
 
     m_controller->setWrenches(wrenches);
-    apply_objects(input);
-}
 
-std::map<std::string, sva::PTransformd> ControllerInstance::object_poses(IoInput input) const
-{
-    std::map<std::string, sva::PTransformd> poses;
-    const auto                             &controller = m_controller->controller();
     for (std::size_t i = 0; i < m_layout.input.objects.size(); ++i)
     {
-        const auto &name = m_layout.input.objects[i];
-        if (name == controller.robot().name() || !controller.robots().hasRobot(name) ||
-            !controller.realRobots().hasRobot(name))
-            throw std::invalid_argument("invalid controller object: " + name);
-        const auto state = input.subspan(
+        const auto &object = m_layout.input.objects[i];
+        const auto  state  = input.subspan(
             m_layout.input.objects_offset() + InputLayout::object_state_size * i, InputLayout::object_state_size);
-        poses.emplace(
-            name,
-            sva::PTransformd(
-                utils::geometry::quaternion_xyzw(state.subspan<3, 4>()).inverse(), utils::geometry::vector3(state, 0)));
-    }
-    return poses;
-}
+        const auto object_from_world = utils::geometry::quaternion_xyzw(state.subspan<3, 4>()).inverse();
+        const auto position          = utils::geometry::vector3(state, 0);
+        const auto linear            = utils::geometry::vector3(state, 7);
+        const auto angular           = utils::geometry::vector3(state, 10);
+        const auto accel             = utils::geometry::vector3(state, 13);
 
-void ControllerInstance::apply_objects(IoInput input, bool seed_reference)
-{
-    auto      &controller = m_controller->controller();
-    const auto poses      = object_poses(input);
-    for (std::size_t i = 0; i < m_layout.input.objects.size(); ++i)
-    {
-        const auto &name  = m_layout.input.objects[i];
-        const auto  state = input.subspan(
-            m_layout.input.objects_offset() + InputLayout::object_state_size * i, InputLayout::object_state_size);
-        const sva::MotionVecd velocity(utils::geometry::vector3(state, 10), utils::geometry::vector3(state, 7));
-        auto                  update = [&](mc_rbdyn::Robot &robot)
-        {
-            robot.posW(poses.at(name));
-            robot.velW(velocity);
-            robot.forwardKinematics();
-            robot.forwardVelocity();
-        };
-        update(controller.realRobot(name));
-        if (seed_reference) update(controller.robot(name));
+        if (object == controller.robot().name() || !controller.robots().hasRobot(object) ||
+            !controller.realRobots().hasRobot(object))
+            throw std::invalid_argument("invalid controller object: " + object);
+
+        // mc_mujoco feeds every floating-base robot these five and we did not; no
+        // consumer is identified. docs/coupling.md#object-state-feedback
+        m_controller->setSensorPositions(object, {{base, position}});
+        m_controller->setSensorOrientations(object, {{base, object_from_world}});
+        m_controller->setSensorLinearVelocities(object, {{base, linear}});
+        m_controller->setSensorAngularVelocities(object, {{base, angular}});
+        m_controller->setSensorLinearAccelerations(object, {{base, accel}});
+
+        auto &measured = controller.realRobot(object);
+        measured.posW({object_from_world, position});
+        measured.velW({angular, linear});
+        measured.forwardKinematics();
+        measured.forwardVelocity();
     }
 }
 

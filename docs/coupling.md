@@ -219,6 +219,53 @@ does not name.
 until then every controller the tests touch happened to be installed on the one
 machine that ran them.
 
+## object-state-feedback
+
+**Current:** the object block is 16 doubles per controller object -- position, xyzw
+orientation, linear velocity, world angular velocity, linear acceleration -- and
+`apply_input` both places `realRobot(object)` and sets that object's
+`FloatingBase` body sensor from them, matching what mc_mujoco's `mj_sim.cpp`
+does for every floating-base robot.
+
+**The two simulators deliver the measured object by different routes**, which is
+why their logs disagree. Measured at 10 kg on JVRC1:
+
+| channel | mc_mjlab | mc_mujoco |
+| --- | --- | --- |
+| `obj_ff_tx` (reference robot) | 0.750 -> 1.164 | 0.750 -> 1.750 |
+| `obj_ff_real_tx` (measured robot) | 0.750 -> 1.399 | **0.7500, every sample** |
+| `obj_FloatingBase_position_x` (sensor) | **0, before this change** | 0.750 -> 1.848 |
+
+mc_mujoco writes only the sensor and leaves the measured robot frozen at its init
+pose; before this change mc_mjlab wrote only the robot. Neither is starved: both
+carry the pose. `realObj()` is `realRobot("obj")`, and inside the controller its
+only writers are ManipManager's ROS callbacks, which `enableManagerUpdate`/
+`enableRos: false` leaves idle -- so mc_mujoco runs the whole cart demo with a
+stale measured object and completes it. Readers are `ConfigManipState`'s
+`preUpdateObj` branch (default false), a GUI button, and two log entries.
+
+**No consumer of the sensor is identified.** The change closes a real parity gap
+and it does something measurable -- on the JVRC1 10 kg gate it lifted bilateral
+contact from 14.1 s to 20.6-26.0 s and forward travel from 0.59 m to 0.75-1.06 m
+-- but the robot still falls to the same 0.549 m in 3 of 3 cycles, so it is not
+the fix for docs/locomanip.md#JVRC1-hand-force-blend-in-mc_mjlab.
+
+**It also makes mjlab logs readable by the sweep tooling.**
+`logs/locomanip/mass-sweep/analyze_log.py` reads the object position from
+`obj_FloatingBase_position_x`, so before this change it reported a stationary
+cart for every mc_mjlab log while working correctly on mc_mujoco ones. That trap
+cost a wrong diagnosis; see the History below.
+
+**Re-measure if:** mc_rtc starts running an observer pipeline for object robots,
+or a controller begins reading `realObj()` on a live path.
+
+**History:** 2026-09-29 -- added while chasing the JVRC1 blend failure, on the
+theory that the controller was planning against an object at the world origin.
+That theory was wrong: `obj_ff_real_tx` had always been correct and only the
+sensor channel read zero. The parity is still worth having, and the acceleration
+column is new, but the justification in the first version of this section did not
+survive contact with the logs.
+
 ## Datastore callbacks
 
 **Current:** there is no alias layer. A task names native callbacks directly in
