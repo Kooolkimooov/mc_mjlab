@@ -27,9 +27,11 @@ from mc_mjlab.actions.walking_reference_action import (
 )
 from mc_mjlab.bridge.sim_controller_bridge import SimControllerBridge
 from mc_mjlab.residuals.printer import ResidualPrinter
+from mc_mjlab.rl.controller_provenance import provenance_signature
 from mc_mjlab.utils.controller_install import (
   controller_config_paths,
   controller_is_installed,
+  user_controller_config_paths,
 )
 
 
@@ -336,3 +338,38 @@ def test_controller_is_installed_finds_the_workspace_controller() -> None:
   assert controller_is_installed("LogisticController_ismpc")
   assert controller_config_paths("LocomanipController")
   assert not controller_config_paths("NoSuchController")
+
+
+def test_user_controller_overrides_enter_provenance() -> None:
+  """Verify the files mc_rtc merges from the user's tree are candidates, not matches."""
+  root = Path.home() / ".config" / "mc_rtc" / "controllers"
+  paths = user_controller_config_paths("NoSuchController")
+  assert paths == sorted(
+    root / f"NoSuchController.{suffix}" for suffix in ("conf", "yaml", "yml")
+  )
+  assert not any(path.exists() for path in paths)
+
+
+def test_absent_provenance_files_leave_the_signature_alone() -> None:
+  """Verify a role added after a checkpoint does not by itself invalidate it."""
+  before = {
+    "controller_name": "C",
+    "files": [{"role": "project_mc_rtc", "present": True, "sha256": "a"}],
+  }
+  after = {
+    "controller_name": "C",
+    "files": [
+      *before["files"],
+      {"role": "user_controller_config_0", "present": False},
+    ],
+  }
+  assert provenance_signature(before) == provenance_signature(after)
+
+  appeared = {
+    "controller_name": "C",
+    "files": [
+      *before["files"],
+      {"role": "user_controller_config_0", "present": True, "sha256": "b"},
+    ],
+  }
+  assert provenance_signature(before) != provenance_signature(appeared)

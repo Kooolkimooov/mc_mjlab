@@ -219,6 +219,35 @@ does not name.
 until then every controller the tests touch happened to be installed on the one
 machine that ran them.
 
+## user_controller_config_paths
+
+**Current:** provenance records the installed configuration *and* the three
+files mc_rtc would merge over it from the user's own tree:
+`~/.config/mc_rtc/controllers/<name>.{conf,yaml,yml}`, plus every per-robot file
+already sitting under `~/.config/mc_rtc/controllers/<name>/`. The first three are
+recorded whether or not they exist, because an absent one is a file that takes
+effect the moment somebody creates it -- and creating it can move a hand
+transform or a gain while the checkpoint's own YAML is untouched.
+
+This list is deliberately **not** part of `controller_config_paths`, which also
+backs `controller_is_installed`: a user override alone does not make a
+controller loadable, and folding it in would report a controller the workspace
+never shipped as installed.
+
+`provenance_signature` now drops absent records instead of encoding them. Both
+sides of the comparison are reduced by the same function, so this is not a
+weakening: a file present at training and missing now still loses its record and
+still mismatches, and a file that *appears* still adds one. What it buys is that
+a role added to provenance later -- these three, or the next ones -- does not by
+itself invalidate every checkpoint taken before it existed.
+
+**Re-measure if:** mc_rtc changes its user configuration search path, or a
+controller starts reading configuration from a third location.
+
+**History:** 2026-09-28 -- added with the review that found provenance searching
+installed directories only. `~/.config/mc_rtc/controllers/` was empty on the
+development machine, so nothing had yet diverged.
+
 ## object-state-feedback
 
 **Current:** the object block is 16 doubles per controller object -- position, xyzw

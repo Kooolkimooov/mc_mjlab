@@ -12,7 +12,10 @@ from mjlab.rl import RslRlVecEnvWrapper
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionCfg
 from mc_mjlab.bridge.config import get_controller_name
-from mc_mjlab.utils.controller_install import controller_config_paths
+from mc_mjlab.utils.controller_install import (
+  controller_config_paths,
+  user_controller_config_paths,
+)
 
 
 def _file_record(role: str, path: Path) -> dict[str, str | bool]:
@@ -47,6 +50,10 @@ def collect_controller_provenance(env: RslRlVecEnvWrapper) -> dict:
     _file_record(f"controller_config_{index}", path)
     for index, path in enumerate(controller_config_paths(controller_name))
   )
+  records.extend(
+    _file_record(f"user_controller_config_{index}", path)
+    for index, path in enumerate(user_controller_config_paths(controller_name))
+  )
   return {"controller_name": controller_name, "files": records}
 
 
@@ -68,8 +75,12 @@ def materialize_provenance(provenance: dict, log_dir: Path) -> None:
 
 def provenance_signature(provenance: dict) -> tuple:
   """Reduce provenance to the values that affect reproducibility."""
+  # Both sides are reduced here, so an absent file is simply not a record: a role
+  # added after a checkpoint leaves it loadable, while a file appearing under one
+  # still trips the comparison. docs/coupling.md#user_controller_config_paths
   files = tuple(
-    (record["role"], record["present"], record.get("sha256"))
+    (record["role"], record["sha256"])
     for record in provenance["files"]
+    if record["present"]
   )
   return provenance["controller_name"], files
