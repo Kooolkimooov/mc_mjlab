@@ -119,6 +119,11 @@ class ResidualFeedbackActionBase(McRtcResidualActionBase):
 
     super().process_actions(actions[:, :width])
 
+    # The gate moves per control period; the mask is per transition, so it
+    # accumulates from zero. docs/residual-feedback.md#actor_update_gate
+    if self.cfg.gate_scalar_outputs:
+      self._actor_update_gate.zero_()
+
   def _build_bridge(self, cfg: McRtcResidualActionCfg) -> None:
     """Size the blocks against the live layout, then bind them to the bridge."""
     super()._build_bridge(cfg)
@@ -297,7 +302,7 @@ class ResidualFeedbackActionBase(McRtcResidualActionBase):
       active = active & (self.datastore_scalar_output(name) == self.cfg.gate_value)
 
     self._last_gate.copy_(active)
-    self._actor_update_gate.copy_(self._last_gate)
+    torch.maximum(self._actor_update_gate, self._last_gate, out=self._actor_update_gate)
 
   def _scatter_joint_block(self, block: torch.Tensor, out: torch.Tensor) -> None:
     """Widen a residual-joint block to every target, leaving the rest unbiased."""

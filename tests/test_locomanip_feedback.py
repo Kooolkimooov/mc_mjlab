@@ -183,6 +183,23 @@ def test_gate_closes_on_phase_staleness_and_failures(
   torch.testing.assert_close(action.last_gate, torch.tensor([1.0, 0, 0]))
 
 
+def test_actor_update_mask_spans_the_whole_policy_step(
+  action: ResidualFeedbackJointPositionAction,
+) -> None:
+  """Verify a transition whose gate closes mid-step still trained the actor."""
+  action.process_actions(torch.ones(3, 6))
+  action._advance_action_extensions()
+  action._datastore_scalar_outputs[accessors.LEFT_PHASE][0] = 0
+  action.controller_failed[1] = True
+  action._advance_action_extensions()
+  torch.testing.assert_close(action.last_gate, torch.tensor([0.0, 0, 1]))
+  torch.testing.assert_close(action.actor_update_gate, torch.ones(3))
+
+  action.process_actions(torch.ones(3, 6))
+  action._advance_action_extensions()
+  torch.testing.assert_close(action.actor_update_gate, torch.tensor([0.0, 0, 1]))
+
+
 def test_request_costs_history_and_partial_reset(
   action: ResidualFeedbackJointPositionAction,
 ) -> None:

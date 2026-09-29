@@ -494,6 +494,38 @@ recorded checkpoint is tied to that width.
 - 2026-09-01 — `root_pose` added beside `joint_position` and both enabled by
   default; scales set from the probe above.
 
+## actor_update_gate
+
+**Current:** `ResidualFeedbackActionBase` accumulates the PPO actor-update mask
+across the policy step: `process_actions` zeroes it, and each
+`_refresh_feedback_gate` ORs that control period's gate in. The mask therefore
+answers "did the feedback act at *any* point during this transition", which is
+the question `RolloutAdaptivePPO.record_actor_update_mask` asks once, after the
+whole step.
+
+**Why:** locomanip runs `DECIMATION = 20` with `FRAMESKIP = 2`, so there are
+**ten** control periods per policy step, and the gate is re-evaluated in every
+one -- `gate_scalar_outputs` reads the hands' phase, which leaves Hold mid-step,
+and the gate also closes on a controller or worker failure. Copying the gate
+each period left the mask holding the *last* period's value, so a step whose
+feedback drove nine periods and then saw Hold end was dropped from the actor
+update entirely, and its advantage was renormalized away with it. The inverse
+error existed too: nine closed periods and one open one counted as a full
+transition.
+
+This does not touch the base class. `McRtcResidualActionBase` sets the mask once
+in `process_actions` from the recovery gate, which is constant across the step
+there, so a copy is already the accumulation.
+
+Note the mask must survive `reset()` -- PPO reads it after terminal environments
+have auto-reset -- which is why only `process_actions` clears it.
+
+**Re-measure if:** the gate gains a source that changes faster than a control
+period, or the decimation stops being a multiple of the frameskip.
+
+**History:** 2026-09-28 -- found by review; reproduced as a dispatch active for
+the early periods of a step followed by gate closure, yielding a zero mask.
+
 ## survival_kick_curriculum
 
 **Current:** `initial_velocity_kick.scale` moves on the smoothed fraction of
