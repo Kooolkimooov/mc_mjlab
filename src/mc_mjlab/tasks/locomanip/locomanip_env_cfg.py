@@ -55,8 +55,8 @@ def locomanip_env_cfg(
       params={"limit_angle": math.pi / 3},
     ),
     "collapsed": TerminationTermCfg(
-      func=env_mdp.root_height_below_minimum,
-      params={"minimum_height": 0.55},
+      func=mdp.terminations.collapsed,
+      params={"minimum_height": 0.55, "limit_angle": math.pi / 3},
     ),
     "controller_failed": TerminationTermCfg(
       func=mdp.terminations.controller_failed,

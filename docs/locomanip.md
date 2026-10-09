@@ -906,6 +906,10 @@ the measured foot ZMP offset. Cart mass and true hand-cart force remain
 critic-only because payload affects fall risk, even though cart pose and
 trajectory tracking no longer enter the actor or reward.
 
+Both trainable tasks and the play-only demo classify a low tilted robot as
+`fell_over`; `collapsed` requires low height *and* orientation within the tilt
+limit. The two labels cannot coincide.
+
 `safe_completion` is the comparison's primary success metric: the controller
 must complete its cycle without a fall or controller/worker fault on that step.
 `robot_displacement` is reported beside it so a policy that stays upright by

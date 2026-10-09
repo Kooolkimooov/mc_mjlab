@@ -25,6 +25,7 @@ from mc_mjlab.residuals.authority import TORQUE_FRACTION
 from mc_mjlab.tasks.locomanip import DEMO_TASK_IDS, RESIDUAL_TASK_IDS
 from mc_mjlab.tasks.locomanip.cart import cart_nominal_mass_kg
 from mc_mjlab.tasks.locomanip.evaluation import LOCOMANIP_EVALUATION
+from mc_mjlab.tasks.locomanip.locomanip_env_cfg import locomanip_env_cfg
 from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
   CART_MASS_RANGE_KG,
   DECIMATION,
@@ -192,6 +193,31 @@ def test_safety_observations_cover_fall_and_contact_precursors() -> None:
     *SOLE_VELOCIMETERS,
   ):
     assert terms[name].history_length == SAFETY_HISTORY
+
+
+def test_fall_labels_partition_low_and_tilted_states(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  """A low tilted robot is a topple, and only a low upright robot collapses."""
+  low = torch.tensor([False, True, False, True])
+  tilted = torch.tensor([False, False, True, True])
+  monkeypatch.setattr(
+    mdp.terminations.mjlab_terminations, "root_height_below_minimum", lambda *args: low
+  )
+  monkeypatch.setattr(
+    mdp.terminations.mjlab_terminations, "bad_orientation", lambda *args: tilted
+  )
+  env = cast(ManagerBasedRlEnv, SimpleNamespace())
+  collapsed = mdp.terminations.collapsed(env, minimum_height=0.5, limit_angle=0.7)
+  assert collapsed.tolist() == [False, True, False, False]
+  assert not torch.any(collapsed & tilted)
+
+  for cfg in (make_locomanip_residual_env_cfg(), locomanip_env_cfg(HRP5P)):
+    assert cfg.terminations["collapsed"].func is mdp.terminations.collapsed
+    assert (
+      cfg.terminations["collapsed"].params["limit_angle"]
+      == cfg.terminations["fell_over"].params["limit_angle"]
+    )
 
 
 def test_collapse_guard_warns_early_and_rising_is_safer(
