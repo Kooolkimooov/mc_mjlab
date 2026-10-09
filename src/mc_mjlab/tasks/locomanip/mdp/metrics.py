@@ -34,6 +34,25 @@ def task_complete(
   return term.datastore_scalar_output(accessors.COMPLETE)
 
 
+def safe_completion(
+  env: ManagerBasedRlEnv, action_name: str = accessors.ACTION_NAME
+) -> torch.Tensor:
+  """Completion without a fall or controller failure on the final step."""
+  term = accessors.residual_action(env, action_name)
+  success = term.datastore_scalar_output(accessors.COMPLETE) > 0.0
+  success &= ~(term.controller_failed | term.controller_worker_failed)
+  for name in accessors.FALL_TERMINATIONS:
+    if name in env.termination_manager.active_terms:
+      success &= ~env.termination_manager.get_term(name)
+  return success.to(torch.float32)
+
+
+def robot_displacement(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """Robot root displacement along the cart-push axis, in metres."""
+  robot = env.scene[accessors.ROBOT_ENTITY]
+  return robot.data.root_link_pos_w[:, 0] - env.scene.env_origins[:, 0]
+
+
 def task_success(
   env: ManagerBasedRlEnv,
   position_tolerance_m: float,

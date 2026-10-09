@@ -38,7 +38,7 @@ from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
   SUCCESS_YAW_TOLERANCE_RAD,
   make_locomanip_residual_env_cfg,
 )
-from mc_mjlab.tasks.locomanip.mdp import accessors, rewards
+from mc_mjlab.tasks.locomanip.mdp import accessors, metrics, rewards
 from mc_mjlab.tasks.locomanip.mdp.events import mass_alpha_range
 from mc_mjlab.tasks.locomanip.profiles import HRP5P, PROFILES
 
@@ -209,6 +209,31 @@ def test_collapse_guard_warns_early_and_rising_is_safer(
   torch.testing.assert_close(risk, torch.tensor([0.0, 0.36, 0.72]))
 
 
+def test_safe_completion_excludes_falls_and_controller_faults(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  """The safety verdict only accepts a healthy completed cycle."""
+  term = SimpleNamespace(
+    datastore_scalar_output=lambda name: torch.ones(5),
+    controller_failed=torch.tensor([False, False, False, False, True]),
+    controller_worker_failed=torch.tensor([False, False, False, True, False]),
+  )
+  monkeypatch.setattr(accessors, "residual_action", lambda env, name: term)
+  labels = {
+    "fell_over": torch.tensor([False, True, False, False, False]),
+    "collapsed": torch.tensor([False, False, True, False, False]),
+  }
+  env = cast(
+    ManagerBasedRlEnv,
+    SimpleNamespace(
+      termination_manager=SimpleNamespace(
+        active_terms=list(labels), get_term=lambda name: labels[name]
+      )
+    ),
+  )
+  assert metrics.safe_completion(env).tolist() == [1.0, 0.0, 0.0, 0.0, 0.0]
+
+
 def test_the_payload_evidence_carries_history() -> None:
   """Verify one frame is not all the policy gets of the cart it must infer."""
   actor = make_locomanip_residual_env_cfg().observations["actor"].terms
@@ -276,16 +301,18 @@ def test_payload_is_drawn_every_episode() -> None:
 
 
 def test_success_is_physical_not_the_controller_schedule() -> None:
-  """Verify the verdict is the cart's placement, not the FSM reaching its hold."""
+  """Keep cart placement diagnostic while scoring safe controller completion."""
   cfg = make_locomanip_residual_env_cfg()
-  success = cfg.metrics["task_success"]
-  assert success.reduce == "last"
-  assert success.params["position_tolerance_m"] == SUCCESS_POSITION_TOLERANCE_M
-  assert success.params["yaw_tolerance_rad"] == SUCCESS_YAW_TOLERANCE_RAD
-  assert LOCOMANIP_EVALUATION.success == "task_success"
-  # Kept beside it: the gap between the two is how often the schedule outran it.
-  assert "task_complete" in cfg.metrics
-  assert {"task_complete", "task_success"} <= set(LOCOMANIP_EVALUATION.metrics)
+  cart_success = cfg.metrics["task_success"]
+  assert cart_success.reduce == "last"
+  assert cart_success.params["position_tolerance_m"] == SUCCESS_POSITION_TOLERANCE_M
+  assert cart_success.params["yaw_tolerance_rad"] == SUCCESS_YAW_TOLERANCE_RAD
+  assert LOCOMANIP_EVALUATION.success == "safe_completion"
+  assert cfg.metrics["safe_completion"].reduce == "last"
+  assert cfg.metrics["robot_displacement"].reduce == "last"
+  assert {"task_complete", "task_success", "robot_displacement"} <= set(
+    LOCOMANIP_EVALUATION.metrics
+  )
 
 
 def test_the_payload_metric_names_the_randomized_body() -> None:

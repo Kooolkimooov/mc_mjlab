@@ -502,6 +502,12 @@ def _metrics() -> dict[str, MetricsTermCfg]:
     "task_complete": MetricsTermCfg(
       func=locomanip_mdp.metrics.task_complete, reduce="last"
     ),
+    "safe_completion": MetricsTermCfg(
+      func=locomanip_mdp.metrics.safe_completion, reduce="last"
+    ),
+    "robot_displacement": MetricsTermCfg(
+      func=locomanip_mdp.metrics.robot_displacement, reduce="last"
+    ),
     "task_success": MetricsTermCfg(
       func=locomanip_mdp.metrics.task_success,
       params={

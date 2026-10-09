@@ -762,8 +762,8 @@ ever bounded a cycle that would not end.
 
 ## task_success
 
-**Current:** the metric the comparison scores, and the one
-`tasks/locomanip/evaluation.py` declares as its verdict. It is the FSM's
+**Current:** a cart-placement diagnostic retained in the comparison. The
+comparison's safety verdict is now `safe_completion`. `task_success` is the FSM's
 `Locomanip::complete` **and** the cart within `SUCCESS_POSITION_TOLERANCE_M`
 (0.15 m) of its commanded position, **and** within `SUCCESS_YAW_TOLERANCE_RAD`
 (10 degrees) of its commanded yaw, **and** no controller or worker failure, and
@@ -905,6 +905,13 @@ signals carry five frames of history. The critic also sees true CoM state and
 the measured foot ZMP offset. Cart mass and true hand-cart force remain
 critic-only because payload affects fall risk, even though cart pose and
 trajectory tracking no longer enter the actor or reward.
+
+`safe_completion` is the comparison's primary success metric: the controller
+must complete its cycle without a fall or controller/worker fault on that step.
+`robot_displacement` is reported beside it so a policy that stays upright by
+halting forward motion can be rejected. `task_success` still reports the old
+cart-placement gate as a separate diagnostic, and cart mass still stratifies
+the comparison.
 
 **Re-measure if:** any reward weight or threshold is tuned, the hand contacts or
 controller references change, or training starts on another robot. Judge a
