@@ -7,11 +7,6 @@ namespace instance_datastore_plugin
 {
     namespace
     {
-        constexpr double gravity          = 9.81;
-        constexpr double free_fall_margin = 1e-3;
-
-        const std::string support_foot_name_callback = "ismpc_walking::support_foot_name";
-
         void register_name(mc_control::MCController &controller, const std::string &name)
         {
             const auto &prefix = IoLayout::plugin_prefix;
@@ -57,6 +52,9 @@ namespace instance_datastore_plugin
 
     Eigen::Vector3d planned_zmp(const mc_control::MCController &controller)
     {
+        constexpr double gravity          = 9.81;
+        constexpr double free_fall_margin = 1e-3;
+
         const auto com          = controller.robot().com();
         const auto acceleration = controller.robot().comAcceleration();
         const auto vertical     = acceleration.z() + gravity;
@@ -70,6 +68,8 @@ namespace instance_datastore_plugin
 
     double support_foot(const mc_control::MCController &controller)
     {
+        const std::string support_foot_name_callback = "ismpc_walking::support_foot_name";
+
         const auto &datastore = controller.datastore();
         if (!datastore.has(support_foot_name_callback))
             throw std::invalid_argument("support_foot requires " + support_foot_name_callback);
