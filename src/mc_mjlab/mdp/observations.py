@@ -53,13 +53,14 @@ def controller_position_error(
   env: ManagerBasedRlEnv,
   action_name: str = "mc_rtc_residual",
   biased: bool = True,
+  residual_only: bool = True,
 ) -> torch.Tensor:
   """Controller reference minus encoder-visible or privileged joint position."""
   term = residual_term(env, action_name)
   asset = env.scene[term.cfg.entity_name]
   position = asset.data.joint_pos_biased if biased else asset.data.joint_pos
   error = term.controller_reference("q") - position[:, term.target_ids]
-  return residual_columns(term, error)
+  return residual_columns(term, error) if residual_only else error
 
 
 def controller_reference_velocity(

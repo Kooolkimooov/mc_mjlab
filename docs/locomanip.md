@@ -302,9 +302,10 @@ own push direction: a positive residual adds to it.
 - 2026-09-16 -- calibrated from a uniform 0.01 rad inherited from
   `residual_balance`, whose ankle-authority screen has no bearing on pushing.
 
-## OBJECT_TRACKING_STD
+## Retired object tracking width
 
-**Current:** `0.04` m, the Gaussian kernel width of `object_position_tracking`.
+**Retired:** `OBJECT_TRACKING_STD` was `0.04` m, the Gaussian kernel width of
+`object_position_tracking`. Object tracking is no longer a reward.
 
 **Placed against the baseline's own error, not guessed.** Zero-residual episodes
 on HRP5P put the cart 0.02-0.06 m from its commanded position at the nominal
@@ -647,7 +648,7 @@ Local diagnostic code, state snapshots and reports are saved under
 
 ## zmp_tracking
 
-**Current:** the reward and the `zmp_error` metric compare the planned ZMP
+**Current:** `zmp_error` remains a diagnostic metric. The retired reward compared the planned ZMP
 against the centre of pressure of **every** contact -- both feet and both hands
 (`CONTACT_ZMP_PARAMS`) -- while the `min_normal_force` gate still reads the feet
 alone (`ZMP_PARAMS`). Two `ZmpSensors` instances, resolved once by
@@ -661,7 +662,7 @@ intersection of the resultant of *all* external contact forces. Aggregating only
 the feet compares that against a different wrench the moment the hands carry
 load, and the two disagree by `f·(p_hand_z - h) / F_z`. For a 50 N push with the
 hands 0.2 m above the CoM and `F_z ≈ 520 N` that is **≈0.096 m** -- about twice
-`ZMP_TRACKING_STD`, which drives the kernel to ~0.03 for a robot tracking its
+the former `ZMP_TRACKING_STD`, which drove the kernel to ~0.03 for a robot tracking its
 plan perfectly. With `CART_MASS_RANGE_KG = (1.0, 1000.0)` the task guarantees
 such pushes, so the term was paying the policy least exactly where the
 manipulation was going best.
@@ -685,9 +686,9 @@ hand-corrected plan of its own.
 is comparable with one taken after, since the reward's value changed wherever the
 hands were loaded.
 
-## ZMP_TRACKING_STD
+## Retired ZMP tracking width
 
-**Current:** `0.05` m, the Gaussian kernel width of the `zmp_tracking` reward,
+**Retired:** `ZMP_TRACKING_STD` was `0.05` m, the Gaussian kernel width of the `zmp_tracking` reward,
 which scores the distance between the measured centre of pressure -- over every
 contact, see `zmp_tracking` above -- and the ZMP the controller planned, and
 scores **zero** on any step whose feet carry less than
@@ -710,12 +711,11 @@ masses, which has not been taken.
 
 **History:** chosen as a round number, half of `residual_balance`'s `DCM_STD`.
 
-## OBJECT_HISTORY
+## FORCE_HISTORY
 
-**Current:** `20` frames, 0.4 s at the 50 Hz policy rate, on the object's
-velocity and tracking error and on all four force sensors -- the terms that carry
-evidence about the payload. The manipulation phase, the completion flag and the
-proprioception terms stay single-frame.
+**Current:** `20` frames, 0.4 s at the 50 Hz policy rate, on all four force
+sensors. The manipulation phase and completion flag stay single-frame. Balance
+signals use `SAFETY_HISTORY = 5` frames.
 
 **Why any history at all:** the task randomizes the cart's mass and never tells
 the controller or the policy what it is, and one frame of force and velocity
@@ -723,14 +723,13 @@ cannot separate a heavy cart from a stuck one. 0.4 s matches
 `residual_balance`'s `CONTROLLER_HISTORY`, and covers both the hand-wrench
 filter's own 0.1 s constant and a footstep.
 
-**Cost:** the actor grows from 175 to 536 dimensions, the critic to 657, since
-`flatten_history_dim` defaults to true and each term flattens term-major.
-
 **Re-measure if:** the policy rate changes, or an ablation shows a shorter window
 identifies the payload as well.
 
-**History:** added with the payload randomization; without it the mass is not
-identifiable from the observation at all.
+**History:** added with payload randomization, while the actor still saw object
+state: that policy grew from 175 to 536 actor dimensions and 657 critic
+dimensions with this history. Those counts do not describe the safety policy;
+the force history stays for detecting changes in hand and foot loading.
 
 ## task_complete
 
@@ -798,9 +797,9 @@ script's tolerances move.
 **History:** added when a review pointed out that the evaluation spec was scoring
 the controller's own schedule rather than where the cart ended up.
 
-## OBJECT_POSE_NOISE
+## Retired object pose noise
 
-**Current:** `OBJECT_POSE_NOISE_M` 0.02 m and `OBJECT_YAW_NOISE_RAD` 2 degrees,
+**Retired:** `OBJECT_POSE_NOISE_M` was 0.02 m and `OBJECT_YAW_NOISE_RAD` 2 degrees,
 uniform, on the actor's `object_pose`, `object_velocity`,
 `object_position_error` and `object_yaw_error`. The proprioception terms carry
 `residual_balance`'s own levels, which were measured on this robot
@@ -831,7 +830,7 @@ state -- no noise specs and `enable_corruption` false on both groups.
 
 ## locomanip reward weights
 
-**Current:** `object_tracking` 1.0, `zmp_tracking` **0.5**, `termination_penalty`
+**Retired:** `object_tracking` 1.0, `zmp_tracking` **0.5**, `termination_penalty`
 -200.0, `upright` -2.0, `residual_magnitude` and `residual_rate` **-0.3**.
 The two bold values changed on 2026-09-25 and are **hypotheses, not
 measurements** -- they are the two levers run
@@ -872,6 +871,64 @@ delta is attributable.
 **History:** 2026-09-25 -- halved `zmp_tracking` and tripled the two request
 penalties after the first full feedback run plateaued for 1200 iterations while
 its force effort quadrupled.
+
+## locomanip safety objective
+
+**Current:** the trainable position and hand-feedback tasks reward
+`contact_dcm_stability` at 1.0, retain `termination_penalty` -200 and `upright`
+-2.0, and charge `collapse_risk` -2.0, `rapid_tilt` -0.2, `foot_slip` -1.0,
+and the existing residual magnitude/rate costs -0.3 each. `zmp_tracking` is
+retired as a reward but its `zmp_error` and `zmp_grounded` diagnostics remain.
+These weights are initial hypotheses, not a measured optimum.
+
+`contact_dcm_stability` uses the commanded CoM velocity and the equivalent
+ground-plane ZMP of the *foot and hand* wrench together. Its Gaussian width,
+`CONTACT_DCM_STD = 0.10` m, is an initial choice; it shares only the value with
+`residual_balance`'s `DCM_STD`. The feet alone gate the reward at 20 N: unloaded
+feet cannot earn balance credit from hand contact. This is an instantaneous
+dynamic measure under the linear inverted-pendulum approximation; the moving
+cart is not a fixed support, so the value is not a proof of future capturability.
+The old foot-only DCM formula would omit the hand wrench during Hold, exactly
+when the task is most loaded.
+
+`collapse_risk` starts `COLLAPSE_WARNING_MARGIN = 0.08` m above each robot's
+existing 70%-of-nominal height termination, and doubles its bounded penalty when
+downward speed reaches `DOWNWARD_SPEED = 0.30` m/s. `rapid_tilt` charges only
+roll/pitch angular speed above `FREE_TILT_RATE = 0.50` rad/s.
+The loaded-foot `foot_slip` term uses the sole velocimeters already installed on
+the robot assets. These guards leave normal swing-foot motion uncharged.
+
+Actor observations now add root height and vertical speed, foot normal loads
+and load share, sole velocities, controller joint-position error, and planned
+CoM velocity. Base angular velocity, delivered action and the new balance
+signals carry five frames of history. The critic also sees true CoM state and
+the measured foot ZMP offset. Cart mass and true hand-cart force remain
+critic-only because payload affects fall risk, even though cart pose and
+trajectory tracking no longer enter the actor or reward.
+
+**Re-measure if:** any reward weight or threshold is tuned, the hand contacts or
+controller references change, or training starts on another robot. Judge a
+candidate by survival to controller completion and fall hazard by phase and
+payload mass, with robot displacement to catch a policy that suppresses walking.
+
+**Runtime check, 2026-10-09:** one step completed with finite rewards for the
+position task and both feedback robot profiles. A zero-action HRP5P feedback
+rollout at fixed 10 kg, seed 42, encoder bias disabled, ended at step 56
+(1.12 s) as `fell_over`, before Hold. A matching control with the new safety
+observations and rewards removed ended at the same step with the same label
+(one run per condition, seed unspecified for that pair). This checks that the
+new terms did not cause the early fall in that setup; it does not validate the
+contact DCM reward under a loaded hand contact. Recheck the installed
+controller and workspace before treating a longer rollout as a reward test.
+
+**Runtime check, 2026-10-09, later:** `scripts/verify_locomanip.py --cycles 1`
+in that setup (zero action, fixed 10 kg, seed 42, encoder bias removed) did
+*not* reproduce the fall. The feedback task completed at 47.66 s with cart error
+0.144 m and 0.25 degrees, 1.166 m forward and minimum root height 0.7227 m; the
+position task at 47.62 s with 0.137 m, 1.52 degrees, 1.171 m and 0.7235 m.
+Neither reported a controller failure. One run each, and what differed in the
+1.12 s rollout was not recorded. Both fail only `held_two_seconds` (0.0 s),
+because `task_complete` now truncates the episode on the completion step.
 
 ## EPISODE_LENGTH_S
 

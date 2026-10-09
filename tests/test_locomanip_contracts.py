@@ -3,18 +3,24 @@
 from __future__ import annotations
 
 import math
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
+import torch
 from conftest import requires_controller
-from mjlab.envs import ManagerBasedRlEnvCfg
+from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 
 import mc_mjlab.tasks  # noqa: F401
 from mc_mjlab import mdp
 from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionActionCfg,
 )
-from mc_mjlab.bridge.controller_datastore import CONTROL_COM, PLANNED_ZMP
+from mc_mjlab.bridge.controller_datastore import (
+  CONTROL_COM,
+  CONTROL_COM_VEL,
+  PLANNED_ZMP,
+)
 from mc_mjlab.residuals.authority import TORQUE_FRACTION
 from mc_mjlab.tasks.locomanip import DEMO_TASK_IDS, RESIDUAL_TASK_IDS
 from mc_mjlab.tasks.locomanip.cart import cart_nominal_mass_kg
@@ -22,16 +28,17 @@ from mc_mjlab.tasks.locomanip.evaluation import LOCOMANIP_EVALUATION
 from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
   CART_MASS_RANGE_KG,
   DECIMATION,
+  FORCE_HISTORY,
   FORCE_SENSORS,
   FRAMESKIP,
   HAND_FORCE_SENSORS,
-  OBJECT_HISTORY,
+  SAFETY_HISTORY,
+  SOLE_VELOCIMETERS,
   SUCCESS_POSITION_TOLERANCE_M,
   SUCCESS_YAW_TOLERANCE_RAD,
-  ZMP_TRACKING_STD,
   make_locomanip_residual_env_cfg,
 )
-from mc_mjlab.tasks.locomanip.mdp import accessors
+from mc_mjlab.tasks.locomanip.mdp import accessors, rewards
 from mc_mjlab.tasks.locomanip.mdp.events import mass_alpha_range
 from mc_mjlab.tasks.locomanip.profiles import HRP5P, PROFILES
 
@@ -113,6 +120,7 @@ def test_declared_datastore_outputs_cover_the_terms() -> None:
     accessors.OBJECT_REFERENCE_RPY,
     PLANNED_ZMP,
     CONTROL_COM,
+    CONTROL_COM_VEL,
   }
   assert set(action.datastore_scalar_outputs) == {
     accessors.LEFT_PHASE,
@@ -123,17 +131,18 @@ def test_declared_datastore_outputs_cover_the_terms() -> None:
   assert action.required_controller == accessors.REQUIRED_CONTROLLER
 
 
-def test_the_zmp_reward_has_the_callbacks_it_compares() -> None:
-  """Verify the planned ZMP and its CoM reference are collected for the reward."""
+def test_balance_reward_uses_every_contact_and_keeps_zmp_diagnostic() -> None:
+  """Verify the balance reward sees hand loads and the ZMP metric keeps its plan."""
   cfg = make_locomanip_residual_env_cfg()
   outputs = set(_action(cfg).datastore_vectors_outputs)
-  assert {PLANNED_ZMP, CONTROL_COM} <= outputs
-  assert cfg.rewards["zmp_tracking"].params["std"] == ZMP_TRACKING_STD
+  assert {PLANNED_ZMP, CONTROL_COM, CONTROL_COM_VEL} <= outputs
+  assert "zmp_tracking" not in cfg.rewards
   assert set(cfg.metrics) >= {"zmp_error", "zmp_grounded"}
 
-  # The planned side inverts every contact, so the hands belong in the measured
-  # one; the load gate stays on the feet. docs/locomanip.md#zmp_tracking
-  for params in (cfg.rewards["zmp_tracking"].params, cfg.metrics["zmp_error"].params):
+  for params in (
+    cfg.rewards["contact_dcm_stability"].params,
+    cfg.metrics["zmp_error"].params,
+  ):
     assert set(HAND_FORCE_SENSORS) <= set(params["contact_sensor_names"])
     assert set(mdp.sensors.GROUND_CONTACT_SENSORS) <= set(
       params["contact_sensor_names"]
@@ -148,17 +157,63 @@ def test_the_critic_sees_more_than_the_actor() -> None:
   actor = set(observations["actor"].terms)
   critic = set(observations["critic"].terms)
   assert actor < critic
-  assert critic - actor == {"object_mass", "hand_contact_force"}
+  assert critic - actor == {
+    "object_mass",
+    "hand_contact_force",
+    "com_state",
+    "measured_zmp_offset",
+  }
   assert set(FORCE_SENSORS) <= actor
+  assert not any(name.startswith("object_") for name in actor)
+  assert "object_tracking" not in make_locomanip_residual_env_cfg().rewards
+
+
+def test_safety_observations_cover_fall_and_contact_precursors() -> None:
+  """Verify both policies see balance precursors and their relevant history."""
+  terms = make_locomanip_residual_env_cfg().observations["actor"].terms
+  expected = {
+    "root_height",
+    "root_vertical_velocity",
+    "foot_load_share",
+    "foot_normal_forces",
+    "controller_pos_error",
+    "controller_planned_com_vel",
+    *SOLE_VELOCIMETERS,
+  }
+  assert expected <= set(terms)
+  for name in (
+    "base_ang_vel",
+    "root_vertical_velocity",
+    "actions",
+    "controller_pos_error",
+    "controller_planned_com_vel",
+    "foot_load_share",
+    "foot_normal_forces",
+    *SOLE_VELOCIMETERS,
+  ):
+    assert terms[name].history_length == SAFETY_HISTORY
+
+
+def test_collapse_guard_warns_early_and_rising_is_safer(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  """A descending low root pays more, while healthy height pays nothing."""
+  heights = torch.tensor([[0.72], [0.54], [0.54]])
+  speeds = torch.tensor([[-0.4], [0.2], [-0.4]])
+  monkeypatch.setattr(rewards, "root_height", lambda env: heights)
+  monkeypatch.setattr(rewards, "root_vertical_velocity", lambda env: speeds)
+  env = cast(ManagerBasedRlEnv, SimpleNamespace())
+  risk = rewards.collapse_risk(
+    env, minimum_height=0.5, warning_margin=0.1, downward_speed=0.3
+  )
+  torch.testing.assert_close(risk, torch.tensor([0.0, 0.36, 0.72]))
 
 
 def test_the_payload_evidence_carries_history() -> None:
   """Verify one frame is not all the policy gets of the cart it must infer."""
   actor = make_locomanip_residual_env_cfg().observations["actor"].terms
-  carried = {"object_velocity", "object_position_error", "object_yaw_error"}
-  carried |= set(FORCE_SENSORS)
-  for name in carried:
-    assert actor[name].history_length == OBJECT_HISTORY, name
+  for name in FORCE_SENSORS:
+    assert actor[name].history_length == FORCE_HISTORY, name
   assert actor["manipulation_phase"].history_length == 0
 
 
@@ -169,7 +224,7 @@ def test_only_the_actor_pays_for_noise() -> None:
   assert actor.enable_corruption
   assert not critic.enable_corruption
   noisy = {name for name, term in actor.terms.items() if term.noise is not None}
-  assert {"base_lin_vel", "joint_pos", "object_pose", "object_yaw_error"} <= noisy
+  assert {"base_lin_vel", "joint_pos"} <= noisy
   assert all(term.noise is None for term in critic.terms.values())
 
 

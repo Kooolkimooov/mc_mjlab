@@ -27,7 +27,11 @@ from mc_mjlab import mdp
 from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionActionCfg,
 )
-from mc_mjlab.bridge.controller_datastore import CONTROL_COM, PLANNED_ZMP
+from mc_mjlab.bridge.controller_datastore import (
+  CONTROL_COM,
+  CONTROL_COM_VEL,
+  PLANNED_ZMP,
+)
 from mc_mjlab.residuals.authority import TORQUE_FRACTION, hardware_residual_scales
 from mc_mjlab.robots import robot_module as mc_rtc
 from mc_mjlab.robots.registry import (
@@ -61,21 +65,22 @@ EPISODE_LENGTH_S = 70.0
 #: has one, so this only fills the partition. docs/locomanip.md#residual_fallback_scale
 RESIDUAL_FALLBACK_SCALE = 0.01
 
-#: Kernel width of the object-tracking reward, in metres. docs/locomanip.md#object_tracking_std
-OBJECT_TRACKING_STD = 0.04
-
-#: Kernel width of the ZMP-tracking reward, in metres. docs/locomanip.md#zmp_tracking_std
-ZMP_TRACKING_STD = 0.05
-
-#: Below `object_tracking`'s 1.0. docs/locomanip.md#locomanip-reward-weights
-ZMP_TRACKING_WEIGHT = 0.5
+#: `contact_dcm_stability` width, m. docs/locomanip.md#locomanip-safety-objective
+CONTACT_DCM_STD = 0.10
+#: `collapse_risk` starts this far above the collapse height, in metres.
+COLLAPSE_WARNING_MARGIN = 0.08
+#: Descent speed at which `collapse_risk` doubles, in m/s.
+DOWNWARD_SPEED = 0.30
+#: Roll/pitch rate `rapid_tilt` leaves uncharged, in rad/s.
+FREE_TILT_RATE = 0.50
+SOLE_VELOCIMETERS = ("left_foot_lin_vel", "right_foot_lin_vel")
+SAFETY_HISTORY = 5
 
 #: Price of a bounded request, magnitude and rate alike.
 REQUEST_WEIGHT = -0.3
 
-# 0.4 s at 50 Hz: one frame cannot separate a heavy cart from a stuck one, and
-# the payload is exactly what this task asks the policy to infer.
-OBJECT_HISTORY = 20
+# 0.4 s at 50 Hz covers the hand-wrench filter and a footstep.
+FORCE_HISTORY = 20
 
 #: The wrench channels the policy gets: both feet, both hands.
 FORCE_SENSORS = (
@@ -103,10 +108,6 @@ CONTACT_ZMP_PARAMS = {
 CART_MASS_RANGE_KG = (1.0, 1000.0)
 
 FALL_LIMIT_ANGLE = math.radians(45.0)
-
-#: Stand-in for a pose tracker, in metres and radians. docs/locomanip.md#object_pose_noise
-OBJECT_POSE_NOISE_M = 0.02
-OBJECT_YAW_NOISE_RAD = math.radians(2.0)
 
 #: What `verify_locomanip.py` accepts as a placed cart. docs/locomanip.md#task_success
 SUCCESS_POSITION_TOLERANCE_M = 0.15
@@ -173,7 +174,7 @@ def make_locomanip_residual_env_cfg(
       print_residual_every,
     ),
     observations=_observations(),
-    rewards=_rewards(),
+    rewards=_rewards(robot_name),
     terminations=_terminations(robot_name),
     events=_events(cart_pose_range, cart_mass_range_kg),
     metrics=_metrics(),
@@ -240,9 +241,10 @@ def _actions(
       datastore_vectors_outputs=(
         locomanip_mdp.accessors.OBJECT_REFERENCE_POSITION,
         locomanip_mdp.accessors.OBJECT_REFERENCE_RPY,
-        # The ZMP reward compares these two. docs/coupling.md#planned_zmp
+        # The ZMP metric compares these two. docs/coupling.md#planned_zmp
         PLANNED_ZMP,
         CONTROL_COM,
+        CONTROL_COM_VEL,
       ),
       datastore_scalar_outputs=(
         locomanip_mdp.accessors.LEFT_PHASE,
@@ -260,19 +262,29 @@ def _actions(
 
 
 def _observations() -> dict[str, ObservationGroupCfg]:
-  """Proprioception and object state for both, plus what only the critic may see."""
-  # Noise levels are residual_balance's, measured on this robot. The object terms
-  # are the exception: they are simulator truth standing in for a pose tracker.
-  # docs/observations.md docs/locomanip.md#object_pose_noise
+  """Balance state for the actor and ground truth for the critic."""
+  # Noise levels are residual_balance's, measured on this robot.
+  # docs/observations.md
   terms = {
     "base_lin_vel": ObservationTermCfg(
       func=envs_mdp.base_lin_vel, noise=Unoise(n_min=-0.02, n_max=0.02)
     ),
     "base_ang_vel": ObservationTermCfg(
-      func=envs_mdp.base_ang_vel, noise=Unoise(n_min=-0.03, n_max=0.03)
+      func=envs_mdp.base_ang_vel,
+      noise=Unoise(n_min=-0.03, n_max=0.03),
+      history_length=SAFETY_HISTORY,
     ),
     "projected_gravity": ObservationTermCfg(
       func=envs_mdp.projected_gravity, noise=Unoise(n_min=-0.05, n_max=0.05)
+    ),
+    "root_height": ObservationTermCfg(
+      func=locomanip_mdp.observations.root_height,
+      noise=Unoise(n_min=-0.01, n_max=0.01),
+    ),
+    "root_vertical_velocity": ObservationTermCfg(
+      func=locomanip_mdp.observations.root_vertical_velocity,
+      noise=Unoise(n_min=-0.02, n_max=0.02),
+      history_length=SAFETY_HISTORY,
     ),
     # `biased=True` is what makes the `encoder_bias` startup event take effect.
     "joint_pos": ObservationTermCfg(
@@ -283,25 +295,25 @@ def _observations() -> dict[str, ObservationGroupCfg]:
     "joint_vel": ObservationTermCfg(
       func=envs_mdp.joint_vel_rel, noise=Unoise(n_min=-0.05, n_max=0.05)
     ),
-    "actions": ObservationTermCfg(func=mdp.observations.executed_action),
-    "object_pose": ObservationTermCfg(
-      func=locomanip_mdp.observations.object_pose,
-      noise=Unoise(n_min=-OBJECT_POSE_NOISE_M, n_max=OBJECT_POSE_NOISE_M),
+    "actions": ObservationTermCfg(
+      func=mdp.observations.executed_action, history_length=SAFETY_HISTORY
     ),
-    "object_velocity": ObservationTermCfg(
-      func=locomanip_mdp.observations.object_velocity,
-      noise=Unoise(n_min=-OBJECT_POSE_NOISE_M, n_max=OBJECT_POSE_NOISE_M),
-      history_length=OBJECT_HISTORY,
+    "controller_pos_error": ObservationTermCfg(
+      func=mdp.observations.controller_position_error,
+      params={"residual_only": False},
+      noise=Unoise(n_min=-0.01, n_max=0.01),
+      history_length=SAFETY_HISTORY,
     ),
-    "object_position_error": ObservationTermCfg(
-      func=locomanip_mdp.observations.object_position_error,
-      noise=Unoise(n_min=-OBJECT_POSE_NOISE_M, n_max=OBJECT_POSE_NOISE_M),
-      history_length=OBJECT_HISTORY,
+    "controller_planned_com_vel": ObservationTermCfg(
+      func=mdp.observations.controller_planned_com_velocity,
+      history_length=SAFETY_HISTORY,
     ),
-    "object_yaw_error": ObservationTermCfg(
-      func=locomanip_mdp.observations.object_yaw_error,
-      noise=Unoise(n_min=-OBJECT_YAW_NOISE_RAD, n_max=OBJECT_YAW_NOISE_RAD),
-      history_length=OBJECT_HISTORY,
+    "foot_load_share": ObservationTermCfg(
+      func=mdp.sensors.foot_load_share, history_length=SAFETY_HISTORY
+    ),
+    "foot_normal_forces": ObservationTermCfg(
+      func=locomanip_mdp.observations.foot_normal_forces,
+      history_length=SAFETY_HISTORY,
     ),
     "manipulation_phase": ObservationTermCfg(
       func=locomanip_mdp.observations.manipulation_phase
@@ -311,9 +323,17 @@ def _observations() -> dict[str, ObservationGroupCfg]:
       name: ObservationTermCfg(
         func=envs_mdp.builtin_sensor,
         params={"sensor_name": f"robot/{name}"},
-        history_length=OBJECT_HISTORY,
+        history_length=FORCE_HISTORY,
       )
       for name in FORCE_SENSORS
+    },
+    **{
+      name: ObservationTermCfg(
+        func=envs_mdp.builtin_sensor,
+        params={"sensor_name": f"robot/{name}"},
+        history_length=SAFETY_HISTORY,
+      )
+      for name in SOLE_VELOCIMETERS
     },
   }
 
@@ -324,14 +344,20 @@ def _observations() -> dict[str, ObservationGroupCfg]:
     for name, term in terms.items()
   }
   critic_terms["joint_pos"] = replace(critic_terms["joint_pos"], params={})
+  critic_terms["controller_pos_error"] = replace(
+    critic_terms["controller_pos_error"],
+    params={**critic_terms["controller_pos_error"].params, "biased": False},
+  )
 
   # Privileged: exogenous, and the single largest source of return variance here.
   critic_terms |= {
     "object_mass": ObservationTermCfg(func=locomanip_mdp.observations.object_mass),
     "hand_contact_force": ObservationTermCfg(
       func=locomanip_mdp.observations.hand_contact_force,
-      history_length=OBJECT_HISTORY,
+      history_length=FORCE_HISTORY,
     ),
+    "com_state": ObservationTermCfg(func=locomanip_mdp.observations.com_state),
+    "measured_zmp_offset": ObservationTermCfg(func=mdp.sensors.measured_zmp_offset),
   }
   return {
     "actor": ObservationGroupCfg(
@@ -343,21 +369,36 @@ def _observations() -> dict[str, ObservationGroupCfg]:
   }
 
 
-def _rewards() -> dict[str, RewardTermCfg]:
-  """One task term and the regularizers every residual task carries."""
+def _rewards(robot_name: str) -> dict[str, RewardTermCfg]:
+  """Reward dynamic balance and charge near falls and unsafe contact."""
+  minimum_height = 0.7 * mc_rtc.get_default_root_position(robot_name)[2]
   return {
-    "object_tracking": RewardTermCfg(
-      func=locomanip_mdp.rewards.object_position_tracking,
+    "contact_dcm_stability": RewardTermCfg(
+      func=locomanip_mdp.rewards.contact_dcm_stability,
       weight=1.0,
-      params={"std": OBJECT_TRACKING_STD},
-    ),
-    "zmp_tracking": RewardTermCfg(
-      func=locomanip_mdp.rewards.zmp_tracking,
-      weight=ZMP_TRACKING_WEIGHT,
-      params={**CONTACT_ZMP_PARAMS, "std": ZMP_TRACKING_STD},
+      params={**CONTACT_ZMP_PARAMS, "std": CONTACT_DCM_STD},
     ),
     "termination_penalty": RewardTermCfg(func=envs_mdp.is_terminated, weight=-200.0),
     "upright": RewardTermCfg(func=envs_mdp.flat_orientation_l2, weight=-2.0),
+    "collapse_risk": RewardTermCfg(
+      func=locomanip_mdp.rewards.collapse_risk,
+      weight=-2.0,
+      params={
+        "minimum_height": minimum_height,
+        "warning_margin": COLLAPSE_WARNING_MARGIN,
+        "downward_speed": DOWNWARD_SPEED,
+      },
+    ),
+    "rapid_tilt": RewardTermCfg(
+      func=locomanip_mdp.rewards.rapid_tilt,
+      weight=-0.2,
+      params={"free_rate": FREE_TILT_RATE},
+    ),
+    "foot_slip": RewardTermCfg(
+      func=mdp.rewards.foot_slip,
+      weight=-1.0,
+      params={**ZMP_PARAMS, "velocimeter_names": SOLE_VELOCIMETERS},
+    ),
     "residual_magnitude": RewardTermCfg(
       func=mdp.rewards.requested_action_l2, weight=REQUEST_WEIGHT
     ),

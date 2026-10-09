@@ -1,4 +1,4 @@
-"""The task objective: keep the object on the trajectory the controller planned."""
+"""Balance and safety rewards only the Locomanip task scores."""
 
 from __future__ import annotations
 
@@ -8,6 +8,10 @@ import torch
 
 from mc_mjlab.mdp.sensors import contact_zmp_sensors
 from mc_mjlab.tasks.locomanip.mdp import accessors
+from mc_mjlab.tasks.locomanip.mdp.observations import (
+  root_height,
+  root_vertical_velocity,
+)
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -15,28 +19,8 @@ if TYPE_CHECKING:
   from mjlab.managers.scene_entity_config import SceneEntityCfg
 
 
-def object_position_tracking(
-  env: ManagerBasedRlEnv, std: float, action_name: str = accessors.ACTION_NAME
-) -> torch.Tensor:
-  """Gaussian kernel on the object's distance from its commanded position."""
-  error = accessors.object_position_error(env, action_name)
-  # Before the grasp and after the release the object cannot be moved at all, so
-  # a kernel on its error is a constant the policy earns for free.
-  return torch.exp(-error.square().sum(dim=-1) / std**2) * accessors.holding(
-    env, action_name
-  )
-
-
-def object_yaw_tracking(
-  env: ManagerBasedRlEnv, std: float, action_name: str = accessors.ACTION_NAME
-) -> torch.Tensor:
-  """Gaussian kernel on the object's angle from its commanded yaw."""
-  error = accessors.object_yaw_error(env, action_name)
-  return torch.exp(-error.square() / std**2) * accessors.holding(env, action_name)
-
-
-class zmp_tracking:
-  """Gaussian kernel on the distance from the controller's planned ZMP."""
+class contact_dcm_stability:
+  """Score commanded CoM motion against the net contact wrench."""
 
   def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
     self._contacts, self._ground = contact_zmp_sensors(
@@ -57,9 +41,30 @@ class zmp_tracking:
     min_normal_force: float = 20.0,
   ) -> torch.Tensor:
     del sensor_names, asset_cfg, contact_sensor_names  # Resolved at init.
-    # planned_zmp inverts the whole centroidal wrench, hands included.
-    error, _ = self._contacts.offset_error(env, action_name, min_normal_force)
+    error, _ = self._contacts.dcm_offset(env, action_name, min_normal_force)
     _, normal_force = self._ground.measured_offset(env, min_normal_force)
     # Unloaded feet have no centre of pressure, so they score nothing rather than
-    # a free maximum. docs/locomanip.md#zmp_tracking_std
+    # a free maximum. docs/locomanip.md#locomanip-safety-objective
     return torch.exp(-error.square() / std**2) * (normal_force >= min_normal_force)
+
+
+def collapse_risk(
+  env: ManagerBasedRlEnv,
+  minimum_height: float,
+  warning_margin: float,
+  downward_speed: float,
+) -> torch.Tensor:
+  """Penalize a low root earlier when it is still descending."""
+  shortfall = minimum_height + warning_margin - root_height(env).squeeze(-1)
+  proximity = (shortfall / warning_margin).clamp(min=0.0, max=1.0)
+  descent = (-root_vertical_velocity(env).squeeze(-1) / downward_speed).clamp(
+    min=0.0, max=1.0
+  )
+  return proximity.square() * (1.0 + descent)
+
+
+def rapid_tilt(env: ManagerBasedRlEnv, free_rate: float) -> torch.Tensor:
+  """Charge only roll and pitch rates above the normal motion band."""
+  velocity = env.scene[accessors.ROBOT_ENTITY].data.root_link_ang_vel_b[:, :2]
+  rate = torch.linalg.vector_norm(velocity, dim=-1)
+  return (rate - free_rate).clamp(min=0.0).square()

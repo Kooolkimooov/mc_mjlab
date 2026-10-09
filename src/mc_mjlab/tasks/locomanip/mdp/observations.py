@@ -1,4 +1,4 @@
-"""What the policy sees of the object it is manipulating."""
+"""What the Locomanip policy and critic see beyond proprioception."""
 
 from __future__ import annotations
 
@@ -6,43 +6,40 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from mc_mjlab.mdp.sensors import GROUND_CONTACT_SENSORS, zmp_sensors
 from mc_mjlab.tasks.locomanip.mdp import accessors
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
 
-def object_position_error(
-  env: ManagerBasedRlEnv, action_name: str = accessors.ACTION_NAME
-) -> torch.Tensor:
-  """Tracking error of the commanded object position, in the robot's root frame."""
-  error = accessors.object_position_error(env, action_name)
-  return accessors.to_base_frame(env, error)
+def root_height(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """Root height above the environment's ground plane, in metres."""
+  root = env.scene[accessors.ROBOT_ENTITY].data.root_link_pos_w
+  return (root[:, 2] - env.scene.env_origins[:, 2]).unsqueeze(-1)
 
 
-def object_yaw_error(
-  env: ManagerBasedRlEnv, action_name: str = accessors.ACTION_NAME
-) -> torch.Tensor:
-  """Tracking error of the commanded object yaw, as one column."""
-  return accessors.object_yaw_error(env, action_name).unsqueeze(-1)
+def root_vertical_velocity(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """World-vertical root velocity, in metres per second."""
+  velocity = env.scene[accessors.ROBOT_ENTITY].data.root_link_lin_vel_w
+  return velocity[:, 2:3]
 
 
-def object_pose(
-  env: ManagerBasedRlEnv, entity_name: str = accessors.OBJECT_ENTITY
-) -> torch.Tensor:
-  """Measured object position in the robot's root frame."""
-  entity = accessors.object_entity(env, entity_name)
+def foot_normal_forces(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """Nonnegative vertical ground loads under both feet, in kilonewtons."""
+  forces = zmp_sensors(
+    env, GROUND_CONTACT_SENSORS, accessors.ROBOT_ENTITY
+  ).normal_forces(env)
+  return forces.clamp(min=0.0) * 0.001
+
+
+def com_state(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """Privileged CoM position and velocity relative to the ground plane."""
   robot = env.scene[accessors.ROBOT_ENTITY]
-  offset = entity.data.root_link_pos_w - robot.data.root_link_pos_w
-  return accessors.to_base_frame(env, offset)
-
-
-def object_velocity(
-  env: ManagerBasedRlEnv, entity_name: str = accessors.OBJECT_ENTITY
-) -> torch.Tensor:
-  """Measured object linear velocity in the robot's root frame."""
-  velocity = accessors.object_entity(env, entity_name).data.root_link_lin_vel_w
-  return accessors.to_base_frame(env, velocity)
+  body_id = robot.indexing.root_body_id
+  com = env.sim.data.subtree_com[:, body_id] - env.scene.env_origins
+  velocity = env.sim.data.subtree_linvel[:, body_id]
+  return torch.cat((com, velocity), dim=-1)
 
 
 def manipulation_phase(
