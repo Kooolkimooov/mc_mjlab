@@ -188,6 +188,12 @@ def test_worker_failure_truncates_instead_of_penalising() -> None:
   assert not terminations["controller_failed"].time_out
 
 
+def test_completion_ends_the_episode_without_a_penalty() -> None:
+  """Verify the FSM's own verdict truncates, so the Exit state is never entered."""
+  terminations = make_locomanip_residual_env_cfg().terminations
+  assert terminations["task_complete"].time_out
+
+
 def test_scene_resets_joints_first() -> None:
   """Verify the only term that resets joints leads the reset events."""
   events = make_locomanip_residual_env_cfg().events

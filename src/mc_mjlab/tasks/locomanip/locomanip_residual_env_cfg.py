@@ -382,6 +382,9 @@ def _terminations(robot_name: str) -> dict[str, TerminationTermCfg]:
         "limit_angle": FALL_LIMIT_ANGLE,
       },
     ),
+    "task_complete": TerminationTermCfg(
+      func=locomanip_mdp.terminations.task_complete, time_out=True
+    ),
     "controller_failed": TerminationTermCfg(func=mdp.terminations.controller_failed),
     # Exogenous, so bootstrap instead of charging the fall penalty to the policy.
     # docs/coupling.md#worker-failure-is-a-truncation

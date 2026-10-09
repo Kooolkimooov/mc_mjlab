@@ -732,6 +732,35 @@ identifies the payload as well.
 **History:** added with the payload randomization; without it the mass is not
 identifiable from the observation at all.
 
+## task_complete
+
+**Current:** a termination, carrying `time_out=True`, so the episode ends the
+step the controller raises `Locomanip::complete` and the value bootstraps rather
+than paying the fall penalty. Nothing after the FSM's own verdict is the task.
+
+**Why it is a termination and not just a metric.** Without it the FSM runs on
+into the state after the cycle for the rest of the 70 s episode, and on JVRC1
+that state wedges the worker. Seen twice: the 2026-09-29 nominal diagnostic
+truncated on a worker timeout during Exit, and the first JVRC1 feedback training
+run (2026-09-29, unclamped knees) stalled permanently the step after
+`task_complete` first reached 1.0 -- iterations 0-30 at 0.0000, 31 at 0.7500, 32
+at 1.0000, then 35 minutes of 60 s `controller_timeout_ms` expiries and worker
+respawns without completing a single further iteration. HRP5P completes the same
+cycle without wedging, which is why its 2000-iteration run never saw this.
+
+**What it changes in the objective.** Episodes now end at completion rather than
+at the 70 s cap, so a completed episode is shorter and its reward sum smaller.
+Read `Episode_Reward/*` against episode length accordingly, and note that the
+2026-09-24 HRP5P feedback run trained *with* the post-completion tail: its
+episode sums are not comparable term by term with any run after this.
+
+**Re-measure if:** the controller's post-cycle state changes, or the episode cap
+moves.
+
+**History:** 2026-09-29 -- added after the wedge above. Terminating on the
+controller's verdict was already the intent of `EPISODE_LENGTH_S`, which only
+ever bounded a cycle that would not end.
+
 ## task_success
 
 **Current:** the metric the comparison scores, and the one
