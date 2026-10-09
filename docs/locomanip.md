@@ -748,7 +748,7 @@ respawns without completing a single further iteration. HRP5P completes the same
 cycle without wedging, which is why its 2000-iteration run never saw this.
 
 **What it changes in the objective.** Episodes now end at completion rather than
-at the 70 s cap, so a completed episode is shorter and its reward sum smaller.
+at the cap (then 70 s), so a completed episode is shorter and its reward sum smaller.
 Read `Episode_Reward/*` against episode length accordingly, and note that the
 2026-09-24 HRP5P feedback run trained *with* the post-completion tail: its
 episode sums are not comparable term by term with any run after this.
@@ -943,27 +943,33 @@ because `task_complete` now truncates the episode on the completion step.
 
 ## EPISODE_LENGTH_S
 
-**Current:** `70.0` s, against a reach-push-release cycle that takes 52.2 s and a
-verification run that took 49.66 s end to end.
+**Current:** `49.66` s (2483 policy steps): the slowest completion of a
+successful push measured on 2026-10-09 plus a 2 s margin. One-cycle
+`scripts/verify_locomanip.py` runs, HRP5P, zero action, fixed 10 kg, seed 42,
+encoder bias removed, one run each, raised `Locomanip::complete` at 47.642 s
+(demo), 47.62 s (position) and 47.66 s (feedback). Since `task_complete`
+truncates every completed episode, the cap only ever ends an episode that has
+not completed, which `safe_completion` then scores as a failure.
 
-**The previous `60.0` scored a slow cycle as a failure.** Eight seconds of margin
-is less than the spread between cart masses: over run
-[2026-09-24_17-38-11](#run-2026-09-24_17-38-11_hrp5p-feedback) the healthy phase
-held a mean episode length of ~2750 of the 3000-step cap, so a typical episode
-ended within 5 s of the wall, and `task_complete` sat at 0.85 with the missing
-share indistinguishable from "ran out of time". Widening the cap separates the
-two without changing what the policy is asked to do.
+**The margin is a choice, not a measurement.** Completion time varies with
+cart mass: over run [2026-09-24_17-38-11](#run-2026-09-24_17-38-11_hrp5p-feedback)
+the healthy phase held a mean episode length of ~2750 of a 3000-step cap against
+a then-52.2 s cycle, and `task_complete` sat at 0.85 with the missing share
+indistinguishable from "ran out of time". The spread over the mass range and the
+JVRC1 cycle, which shares this constant, have not been measured against 49.66 s.
 
 **It does not change the credit horizon.** `gamma = 0.997` is 6.7 s
-(docs/ppo.md#gamma), far inside either cap, so lengthening the episode changes
-how many cycles fit, not what the policy can see.
+(docs/ppo.md#gamma), far inside the cap, so the cap changes how much of a slow
+cycle fits, not what the policy can see.
 
-**Re-measure if:** the FSM's waypoint durations change, or `Loss/value` stops
-converging -- a longer episode leans on the critic the same way a longer horizon
-does.
+**Re-measure if:** the FSM's waypoint durations change, `task_complete` falls
+while `safe_completion`'s misses end at the cap, or training starts on JVRC1 or
+at cart masses far from 10 kg.
 
-**History:** 2026-09-25 -- widened from `60.0` after the first full feedback run
-could not distinguish a failed cycle from a slow one.
+**History:** 2026-09-25 -- widened from `60.0` to `70.0` after the first full
+feedback run could not distinguish a failed cycle from a slow one; the cycle then
+took 52.2 s. 2026-10-09 -- cut to `49.66` once completion truncated the episode
+and the installed cycle measured 47.66 s.
 
 ## NUM_ENVS
 

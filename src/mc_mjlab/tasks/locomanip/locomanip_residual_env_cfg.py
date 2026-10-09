@@ -57,9 +57,9 @@ FRAMESKIP = 2
 NUM_ENVS = 256
 NUM_WORKERS = 64
 
-# The installed FSM's reach-push-release cycle takes 52.2 s, and a cap only
-# 8 s past that scores a slow cycle as a failure. docs/locomanip.md#EPISODE_LENGTH_S
-EPISODE_LENGTH_S = 70.0
+# A 10 kg HRP5P cycle raises completion by 47.66 s; the cap adds 2 s for slower
+# ones. docs/locomanip.md#EPISODE_LENGTH_S
+EPISODE_LENGTH_S = 49.66
 
 #: Authority for a joint with no hardware entry, in radians. Every residual joint
 #: has one, so this only fills the partition. docs/locomanip.md#residual_fallback_scale
