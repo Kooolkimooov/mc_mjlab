@@ -337,8 +337,8 @@ changes.
 
 ## cart_mass_range_kg
 
-**Current:** `(1.0, 1000.0)` kg -- the range the mc_mujoco sweep characterised --
-drawn per episode by a `reset`-mode `dr.pseudo_inertia` event on the cart body.
+**Current:** `(10.0, 1000.0)` kg -- the range the mc_mujoco sweep characterised,
+above the carts the grasp shoves away (below) -- drawn per episode by a `reset`-mode `dr.pseudo_inertia` event on the cart body.
 Its `alpha` is a *log* scale (mass and inertia both scale by `e^(2a)`), so
 `mdp.events.mass_alpha_range` converts kilograms to it and a uniform draw in
 `alpha` is log-uniform in mass, the spacing the sweep used. `dr.body_mass` is the
@@ -378,10 +378,33 @@ It was never this task's scene: on 3.10.0.2 a `dr.body_mass` term added to
 Nor was it the contact budget (`nconmax` 100 to 2000, `njmax` 1500 to 40000
 change nothing), CUDA graph capture, the event's mode, or the `cart_floor` pair.
 
-**Re-measure if:** the mujoco-warp pin moves below 3.11, or `pseudo_inertia`
-changes what `alpha` scales.
+**Why not below 10 kg: Grasp shoves a light cart off the hands.** One
+zero-action HRP5P position-task cycle per mass, seed 42, encoder bias removed,
+episode cap lifted to 90 s (`scripts/verify_locomanip.py` trace), 2026-10-10:
+
+| | 1.5 kg | 3 kg | 10 kg |
+| --- | --- | --- | --- |
+| Grasp -> Hold | 7.70 -> 11.70 s | 7.70 -> 10.18 s | 7.69 -> 10.63 s |
+| cart x at Hold (starts at 0.90 m) | 1.82 m | 1.02 m | ~0.90 m |
+| hand-cart contact during Hold | none | single hand, from ~26 s | both hands |
+| Ungrasp -> Release | 44.70 -> 48.70 s | 43.20 -> 45.24 s | -> 46.16 s |
+| `Locomanip::complete` | 50.20 s | 46.74 s | 47.66 s |
+
+The controller completes on its own clocks -- a 30 s waypoint, and Grasp and
+Ungrasp end on the gripper's `complete()` -- so a light cycle "completes" with
+no push at all, and `task_success` passes when the shoved cart happens to stop
+near the target (0.138 m at 1.5 kg). Under the 49.66 s cap the late completions
+read as time-outs instead: `compare_to_baseline.py` on `model_1960` of run
+2026-10-09_15-16-21 (64 envs, 30 min, randomized) timed out 95 baseline and 98
+policy episodes, every one with a cart under 6.01 kg and both hands still out of
+Free, and completed 0/49 and 2/58 below 2 kg. Neither arm is pushing there, so
+that band measures the grasp, not the policy.
+
+**Re-measure if:** the mujoco-warp pin moves below 3.11, `pseudo_inertia`
+changes what `alpha` scales, or the grasp approach or gripper commands change.
 
 **History:**
+- 2026-10-10 -- lower bound raised from `1.0` to `10.0` after the traces above.
 - 2026-09-17 -- read the nominal from the asset instead of a `10.0` constant,
   after a sweep run left `Cart.xml` and `Cart.urdf` at 350 kg: every draw would
   have been 35x its intended mass.

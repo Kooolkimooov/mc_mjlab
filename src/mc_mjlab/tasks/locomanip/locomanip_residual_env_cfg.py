@@ -104,8 +104,8 @@ CONTACT_ZMP_PARAMS = {
   "contact_sensor_names": mdp.sensors.GROUND_CONTACT_SENSORS + HAND_FORCE_SENSORS,
 }
 
-#: The masses the mc_mujoco sweep characterised. docs/locomanip.md#cart_mass_range_kg
-CART_MASS_RANGE_KG = (1.0, 1000.0)
+#: The swept range above the carts Grasp shoves away. docs/locomanip.md#cart_mass_range_kg
+CART_MASS_RANGE_KG = (10.0, 1000.0)
 
 FALL_LIMIT_ANGLE = math.radians(45.0)
 
