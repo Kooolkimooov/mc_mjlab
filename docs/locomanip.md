@@ -109,8 +109,12 @@ ships its own `HandWrenchAdaptation` -- HRP5P `alpha: 0.06` (#HandWrenchAdaptati
 JVRC1 `alpha: 0.008` (#jvrc1-hand-force-blend-in-mc_mjlab). JVRC1 at 0.008, one
 demo cycle as above: upright (z min 0.6914 m), completes and holds 2.0 s with
 33.0 s bilateral contact, and fails only `cart_position` -- 0.9007 m error after
-walking 1.9553 m, the overshoot every stable alpha in that section shows. HRP5P at
-0.06 is not yet measured in mc_mjlab.
+walking 1.9553 m, the overshoot every stable alpha in that section shows. HRP5P,
+one cycle each on the installed files: the compiled default passes every gate
+(cart 0.1435 m, 1.2024 m forward, z min 0.7219 m); 0.06 completes, holds 2.0 s
+with 33.0 s bilateral contact and z min 0.7078 m, and fails only `cart_position`
+at 0.1588 m against the 0.15 m tolerance -- within the 7.8 mm run-to-run spread
+#task_success records, so one run does not separate the two blends at 10 kg.
 
 2026-09-28 -- moved the rest of the demo out: the `MjlabCartDemo`
 overwrite is gone, and `ManipManager.enableRos: false`, `CompletionState:
