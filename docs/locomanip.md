@@ -7,15 +7,25 @@ repo's -- both the robot-specific half and the cart demo itself. mc_rtc loads
 the robot-specific half for free: `MCController::robot_config()` reads
 `<the directory the controller library loads from>/<controller name>/<robot
 MODULE name>.yaml` and `~/.config/mc_rtc/controllers/<controller
-name>/<module>.yaml` into `config("robots")(<module>)`, and
-`BaselineWalkingController`'s constructor then does `config().load(rconfig)`,
-promoting it to the root before `OverwriteConfigList` is applied. So the
-precedence is: base YAML, then the per-robot file, then any overwrite.
+name>/<module>.yaml`. LocomanipController constructs with
+`ControllerParameters{}.load_robot_config_into({}).overwrite_config(true)`, as
+`LogisticController` does, so `MCController`'s constructor merges that file at
+the configuration **root** -- before `fsm::Controller` loads `states`, so a
+`states:` entry in it merges into the state of the same name. The walking
+configuration still sits under `robots: <module>:`, which
+`BaselineWalkingController`'s constructor promotes to the root with
+`config().load(rconfig)` before `OverwriteConfigList` is applied. So the
+precedence is: base YAML, then the per-robot file, then its `robots/<module>`
+promotion, then any overwrite.
 
-| Robot | Where its Locomanip configuration lives |
-| --- | --- |
-| HRP5P | `LocomanipController/etc/robots/hrp5_p.yaml`, installed by `install_controller_robot_configuration` |
-| JVRC1 | the `robots: jvrc1:` section inside `LocomanipController.yaml` itself |
+| Robot | Walking configuration | State overrides |
+| --- | --- | --- |
+| HRP5P | `robots: hrp5_p:` in `LocomanipController/etc/robots/hrp5_p.yaml`, installed by `install_controller_robot_configuration` | `HandWrenchAdaptation` on `LMC::PushCart_`, same file |
+| JVRC1 | `robots: jvrc1:` in `LocomanipController/etc/robots/jvrc1.yaml` | `HandWrenchAdaptation` on `LMC::PushCart_`, same file |
+
+Each per-robot file also sets the cart's start, `robots: obj: init_pos` (#cart_init_x);
+the base `LocomanipController.yaml` declares only the cart's module, so it carries
+no robot-specific section at all.
 
 The controller owns both, which is how `mc_logistic_controller` does it -- its
 `src/controller/etc/robots/{hrp5_p,rhps1}.yaml` install into each
@@ -27,9 +37,10 @@ The controller owns both, which is how `mc_logistic_controller` does it -- its
 installs last wins. LocomanipController's copy is therefore the *complete*
 configuration rather than a supplement -- it carries `mc_hrp5_p`'s posture
 weights, CoM active joints, base frame, foot timings and `refComZ: 0.95`
-verbatim, so either install leaves HRP5P configured the same. Reinstalling
-`mc_hrp5_p` drops only the three Locomanip keys; re-run the targeted install
-below to put them back.
+verbatim, under `robots: hrp5_p:`. `mc_hrp5_p`'s file is flat, so with the
+root merge above, reinstalling `mc_hrp5_p` leaves `robots/hrp5_p` empty and
+construction throws (next paragraph) rather than running without the Locomanip
+keys; re-run the targeted install below to put them back.
 
 **The filename is the robot MODULE name, not `MainRobot`.** `hrp5_p` and
 `jvrc1`, never `HRP5P`/`JVRC1` -- and a file under the wrong name is simply not
@@ -53,7 +64,8 @@ the factory and executor in its own constructor, before BWC's constructor runs
 `OverwriteConfigList` -- so an overwrite cannot reach the root FSM either. The
 only project-side lever was LocomanipController's opt-in `DemoFSM` reload, which
 is a second, complete FSM; keeping the demo there meant keeping a copy of the
-controller's own states in this repo.
+controller's own states in this repo. The controller-side per-robot file *can*
+reach states, through the root merge above.
 
 What stays in this repo is only what mc_rtc cannot know: which profile to run
 (`etc/mc_rtc_{hrp5,jvrc1}_locomanip_patched.yaml`, differing in `MainRobot`
@@ -66,12 +78,41 @@ re-emits it as a `DemoFSM` with one state's `HandWrenchAdaptation` changed
 (#HandWrenchAdaptation), which is the only way a script can vary a state config
 without writing into the workspace.
 
-**Re-measure if:** BWC stops promoting `robots/<module>` to the root, `load_config`
-stops letting the installed file win over the project one, a robot package starts
-shipping a Locomanip section that conflicts, or the FSM is built after overwrite
-processing.
+**Re-measure if:** LocomanipController stops constructing with
+`load_robot_config_into({})` and `overwrite_config(true)`, BWC stops promoting
+`robots/<module>` to the root, `load_config` stops letting the installed file win
+over the project one, a robot package starts shipping a Locomanip section that
+conflicts, or the FSM is built after overwrite processing.
 
-**History:** 2026-09-28 -- moved the rest of the demo out: the `MjlabCartDemo`
+**History:** 2026-10-12 -- per-robot files merge at the root, so they can set
+state configs. JVRC1's `DemoFSM` copy of the push state
+(`LMC::PushCartJvrc1_` and its own transition map) became a three-key
+`states: LMC::PushCart_:` override, and HRP5P's walking keys moved under
+`robots: hrp5_p:` to keep BWC's non-empty check satisfied. Constructing both
+robots through the Python bindings reads back HRP5P's `footstepDuration` 0.9,
+`horizonDt` 0.002, `refComZ` 0.95 and `LeftHandCloseContact`, and JVRC1's
+`HandWrenchAdaptation` on `LMC::PushCart_` with no `DemoFSM`. This is the
+`overwrite_config` patch reverted on 2026-09-18 (below), re-adopted for what
+BWC's promotion cannot do: reach `states`. Both per-robot files changed bytes,
+so checkpoints recorded before this fail the provenance check;
+`base_controller_config/` in each run directory holds the files they need.
+One `verify_locomanip.py --cycles 1` demo per robot, 10 kg, seed 42: HRP5P
+passes every gate (cart 0.1445 m, 1.204 m forward, z min 0.7226 m, 33.0 s
+bilateral contact, 2.0 s hold); JVRC1 falls in Hold at 19.12 s (z min 0.5485 m)
+against 20.08 s (0.5489 m) on the pre-change install, the knee-saturation fall of
+#jvrc1-knee-effort-limits either way.
+
+Later the same day the base `LocomanipController.yaml` lost its last
+robot-specific keys: JVRC1's `robots: jvrc1:` section moved into `jvrc1.yaml`,
+the cart's `init_pos` became per robot (#cart_init_x), and each robot's file
+ships its own `HandWrenchAdaptation` -- HRP5P `alpha: 0.06` (#HandWrenchAdaptation),
+JVRC1 `alpha: 0.008` (#jvrc1-hand-force-blend-in-mc_mjlab). JVRC1 at 0.008, one
+demo cycle as above: upright (z min 0.6914 m), completes and holds 2.0 s with
+33.0 s bilateral contact, and fails only `cart_position` -- 0.9007 m error after
+walking 1.9553 m, the overshoot every stable alpha in that section shows. HRP5P at
+0.06 is not yet measured in mc_mjlab.
+
+2026-09-28 -- moved the rest of the demo out: the `MjlabCartDemo`
 overwrite is gone, and `ManipManager.enableRos: false`, `CompletionState:
 LMC::Pause_`, the hour-long hold and HRP5P's `PreviewControlExtZmp` now sit in
 the controller's own `etc/LocomanipController.in.yaml` and
@@ -136,6 +177,8 @@ install -m 755 /tmp/locomanip-build/src/states/*State.so \
   "$HOME/workspace/install/lib/mc_controller/locomanip_controller/states/"
 install -D -m 644 etc/robots/hrp5_p.yaml \
   "$HOME/workspace/install/lib/mc_controller/LocomanipController/hrp5_p.yaml"
+install -D -m 644 etc/robots/jvrc1.yaml \
+  "$HOME/workspace/install/lib/mc_controller/LocomanipController/jvrc1.yaml"
 install -m 644 /tmp/locomanip-build/etc/LocomanipController.yaml \
   "$HOME/workspace/install/lib/mc_controller/etc/LocomanipController.yaml"
 ```
@@ -161,8 +204,10 @@ node creation, subscription setup, and spinning.
 
 **Current:** per robot, on `profiles.LocomanipProfile` -- `0.90` m for HRP5P and
 `0.75` m for JVRC1, the cart body's initial x in front of the robot's stance.
-`0.75` is Locomanip's own `robots.obj.init_pos`, which JVRC1's arms were sized
-against; HRP5P has the longer reach.
+The controller carries the same values as `robots: obj: init_pos` in each
+robot's `etc/robots/<module>.yaml`, which is where mc_mujoco spawns the cart, so
+the two places must move together. `0.75` was Locomanip's original single
+`init_pos`, which JVRC1's arms were sized against; HRP5P has the longer reach.
 
 **The number that matters is not this one.** `Cart.xml` puts the grasped handle
 bar at cart-local `x = -0.35, z = 1.0`, matching the controller's
@@ -442,9 +487,15 @@ HandWrenchAdaptation:
   momentProjection: [0, 0, 0]
 ```
 
-It lives in `LocomanipController/etc/robots/jvrc1.yaml` as a `DemoFSM` reload,
-because a per-robot file cannot reach the FSM any other way and cannot reuse
-`LMC::PushCart_`'s name. docs/locomanip.md#per-robot-controller-config
+It lives in `LocomanipController/etc/robots/jvrc1.yaml` as a `states:
+LMC::PushCart_:` override, which the per-robot file can carry since it merges at
+the configuration root (#per-robot-controller-config). Until 2026-10-12 it was a
+`DemoFSM` reload declaring `LMC::PushCartJvrc1_`.
+
+**Shipped `alpha` is `0.008`, not the recovered `0.1`** (2026-10-12): the
+original hardcoded `0.02`, tuned on JVRC1 at its 5 ms period, rescaled to
+mc_mjlab's 2 ms so `dt / alpha` stays 0.25 s. `alpha` is per period, so under a
+5 ms configuration the same value is 0.625 s.
 
 **Under mc_mujoco it works**, coarse sweep, `--ref-mass 1.0` so the controller has
 no payload knowledge, `LMC::Pause_` shortened from 3600 s to 3 s to keep each log
@@ -1029,7 +1080,12 @@ confirmed it fits.
 
 **Current:** a config block on the push state, added by the LocomanipController
 checkout, over what used to be hardcoded in
-`ConfigManipState`'s push phase. On HRP5P, in mc_mujoco:
+`ConfigManipState`'s push phase. HRP5P ships the block below in
+`etc/robots/hrp5_p.yaml` since 2026-10-12; before that it ran on the compiled
+default (`alpha: 0.02`, `forceProjection: [1, 0, 1]`, `momentProjection:
+[0, 1, 0]`), which is what every HRP5P mc_mjlab run and comparison up to and
+including run 2026-10-09_15-16-21 trained and was scored against. Tuned on
+HRP5P, in mc_mujoco:
 
 ```yaml
 HandWrenchAdaptation:

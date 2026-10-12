@@ -24,7 +24,7 @@ def controller_config_paths(controller_name: str) -> list[Path]:
   for library_dir in controller_library_dirs():
     for suffix in CONFIG_SUFFIXES:
       paths.update(library_dir.glob(f"*/etc/{controller_name}.{suffix}"))
-      # Per-robot overrides, merged at the root by BaselineWalkingController.
+      # Per-robot <module>.yaml files mc_rtc merges into the controller config.
       paths.update(library_dir.glob(f"*/{controller_name}/*.{suffix}"))
   return sorted(path.resolve() for path in paths if path.is_file())
 
