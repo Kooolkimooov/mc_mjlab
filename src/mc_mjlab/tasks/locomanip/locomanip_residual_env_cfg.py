@@ -57,9 +57,9 @@ FRAMESKIP = 2
 NUM_ENVS = 256
 NUM_WORKERS = 64
 
-# A 10 kg HRP5P cycle raises completion by 47.66 s; the cap adds 2 s for slower
+# A 10 kg HRP5P cycle raises completion by 49.66 s; the cap adds 2 s for slower
 # ones. docs/locomanip.md#EPISODE_LENGTH_S
-EPISODE_LENGTH_S = 49.66
+EPISODE_LENGTH_S = 51.66
 
 #: Authority for a joint with no hardware entry, in radians. Every residual joint
 #: has one, so this only fills the partition. docs/locomanip.md#residual_fallback_scale

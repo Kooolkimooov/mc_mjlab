@@ -1021,11 +1021,13 @@ because `task_complete` now truncates the episode on the completion step.
 
 ## EPISODE_LENGTH_S
 
-**Current:** `49.66` s (2483 policy steps): the slowest completion of a
-successful push measured on 2026-10-09 plus a 2 s margin. One-cycle
-`scripts/verify_locomanip.py` runs, HRP5P, zero action, fixed 10 kg, seed 42,
-encoder bias removed, one run each, raised `Locomanip::complete` at 47.642 s
-(demo), 47.62 s (position) and 47.66 s (feedback). Since `task_complete`
+**Current:** `51.66` s (2583 policy steps): the slowest completion of a
+successful push measured on 2026-10-13 plus a 2 s margin. One-cycle
+`scripts/verify_locomanip.py --isolation` runs (72 s cap), HRP5P feedback task,
+zero action, seed 42, encoder bias removed, one run each, on LocomanipController
+`7713446` (`reachDuration` 2.5 s): `Locomanip::complete` rose at 49.66 s at
+10 kg and 49.26 s at 500 kg. Under the previous 49.66 s cap the 10 kg completion
+landed on the cap's last step. Since `task_complete`
 truncates every completed episode, the cap only ever ends an episode that has
 not completed, which `safe_completion` then scores as a failure.
 
@@ -1033,8 +1035,9 @@ not completed, which `safe_completion` then scores as a failure.
 cart mass: over run [2026-09-24_17-38-11](#run-2026-09-24_17-38-11_hrp5p-feedback)
 the healthy phase held a mean episode length of ~2750 of a 3000-step cap against
 a then-52.2 s cycle, and `task_complete` sat at 0.85 with the missing share
-indistinguishable from "ran out of time". The spread over the mass range and the
-JVRC1 cycle, which shares this constant, have not been measured against 49.66 s.
+indistinguishable from "ran out of time". Beyond 10 and 500 kg, the spread over
+the mass range and the JVRC1 cycle, which shares this constant, have not been
+measured against 51.66 s.
 
 **It does not change the credit horizon.** `gamma = 0.997` is 6.7 s
 (docs/ppo.md#gamma), far inside the cap, so the cap changes how much of a slow
@@ -1047,7 +1050,9 @@ at cart masses far from 10 kg.
 **History:** 2026-09-25 -- widened from `60.0` to `70.0` after the first full
 feedback run could not distinguish a failed cycle from a slow one; the cycle then
 took 52.2 s. 2026-10-09 -- cut to `49.66` once completion truncated the episode
-and the installed cycle measured 47.66 s.
+and the installed cycle measured 47.66 s. 2026-10-13 -- raised to `51.66`
+after LocomanipController `7713446` slowed HRP5P's reach and release from 1.0 s
+to 2.5 s (`ManipManager.reachDuration`), which moved completion to 49.66 s.
 
 ## NUM_ENVS
 
@@ -1098,6 +1103,14 @@ HandWrenchAdaptation:
   forceProjection: [1, 1, 1]  # the whole measured force, couple dropped
   momentProjection: [0, 0, 0]
 ```
+
+LocomanipController `7713446` (2026-10-12) retuned HRP5P for light carts to
+`alpha: 0.03`, `forceProjection: [0, 0, 0.98]` -- local x dropped as noisy, local
+z the push -- with `reachDuration: 2.5` and hand offsets at -0.33 m. In mc_mjlab,
+feedback task, zero action, one `verify_locomanip.py --isolation` cycle each,
+2026-10-13: 10 kg completes with cart error 0.0944 m (0.1588 m at alpha 0.06),
+500 kg with 0.0448 m, z min 0.7252 / 0.7268 m. Push-only capped at 350 kg in the
+mc_mujoco table below; that table predates this tune.
 
 The blend is `target <- alpha * measured + (1 - alpha) * target`, so its fixed
 point is the measured wrench and `alpha` is a low-pass coefficient. The projection
