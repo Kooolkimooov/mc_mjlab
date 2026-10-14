@@ -6,8 +6,13 @@ from typing import Any
 
 import pytest
 import torch
-from evaluation.locomanip_inputs import condition_id, draw_encoder_bias
+from evaluation.locomanip_inputs import (
+  assert_payload_masses,
+  condition_id,
+  draw_encoder_bias,
+)
 from evaluation.locomanip_promotion import summarize_safety
+from evaluation.locomanip_retries import retry_cohort
 from evaluation.locomanip_schedules import ForceSchedule, reactive_conditions
 from screen_locomanip_safety import select_candidate
 
@@ -29,6 +34,15 @@ def test_pulse_uses_first_crossing_and_stops_after_one_second() -> None:
   assert not step(schedule, 2.04, 0.1)
   assert not step(schedule, 3.0, 0.2)
   assert schedule.trigger_time[0] == pytest.approx(1.04)
+
+
+def test_pulse_counts_integer_steps_near_episode_end() -> None:
+  schedule = ForceSchedule(["pulse"], "cpu")
+  assert step(schedule, 49.0, 0.051)
+  for tick in range(1, 50):
+    assert step(schedule, 49.0 + tick * 0.02, 0.0)
+  assert not step(schedule, 50.0, 0.0)
+  assert schedule.duration[0] == pytest.approx(1.0)
 
 
 def test_reactive_hysteresis_hold_and_partial_reset() -> None:
@@ -73,6 +87,9 @@ def test_condition_inputs_do_not_depend_on_order_or_global_rng() -> None:
   assert not torch.equal(draw_encoder_bias(condition_id(44, 525, 2), 12, True), a)
   assert not draw_encoder_bias(identifier, 12, False).any()
   assert torch.all(a.abs() <= 0.01)
+  assert_payload_masses(torch.tensor([525.0]), [{"mass_kg": 525.0}])
+  with pytest.raises(RuntimeError, match="cart payload differs"):
+    assert_payload_masses(torch.tensor([524.0]), [{"mass_kg": 525.0}])
 
 
 def cohorts() -> list[dict[str, Any]]:
@@ -162,3 +179,74 @@ def test_checkpoint_selection_refuses_the_safe_mass_regression() -> None:
   bad = summarize(bad_rows)
   bad["pooled"]["relative_reduction"] = 1.0
   assert select_candidate({200: bad, 400: good}) == 400
+
+
+def test_checkpoint_selection_refuses_only_negative_reductions() -> None:
+  bad = summarize(cohorts())
+  bad["pooled"]["relative_reduction"] = -0.1
+  assert select_candidate({200: bad}) is None
+
+
+def test_failure_regression_outside_transition_grid_blocks_promotion() -> None:
+  rows = cohorts()
+  for repeat in range(8):
+    for arm in ("baseline", "policy"):
+      failed = arm == "policy" and repeat < 4 or arm == "baseline" and repeat == 0
+      rows.append(
+        {
+          "condition_id": condition_id(42, 100, repeat),
+          "mass_kg": 100,
+          "arm": arm,
+          "observed": True,
+          "worker_failure": False,
+          "combined_failure": failed,
+          "complete": not failed,
+          "terminations": {"fell_over": failed},
+        }
+      )
+  report = summarize_safety(rows, [100, 525, 550], [525, 550], [42], 8)
+  assert report["pooled_improvement"]
+  assert report["per_mass_protection"]
+  assert not report["no_mass_regression"]
+  assert not report["promote"]
+
+
+@pytest.mark.parametrize("fault", ["worker", "unobserved", "incomplete", "missing"])
+def test_retry_cohort_replays_only_the_affected_pair(fault: str) -> None:
+  rows = cohorts()[:4]
+  calls = []
+
+  def run_once(pending: list[dict[str, Any]], attempt: int) -> list[dict[str, Any]]:
+    calls.append([row["condition_id"] for row in pending])
+    result = [row.copy() for row in pending]
+    if attempt == 0:
+      if fault == "missing":
+        result.pop(1)
+      elif fault == "worker":
+        result[1].update(worker_failure=True, complete=False)
+      elif fault == "unobserved":
+        result[1]["observed"] = False
+      else:
+        result[1]["complete"] = False
+    return result
+
+  result, history, unresolved = retry_cohort(rows, run_once)
+  assert len(calls) == 2
+  assert calls[1] == calls[0][:2]
+  assert history[0]["unresolved"] == [rows[0]["condition_id"]]
+  assert not unresolved
+  assert all(not row["worker_failure"] for row in result)
+
+
+def test_retry_cohort_reports_persistent_infrastructure_failure() -> None:
+  rows = cohorts()[:2]
+  result, history, unresolved = retry_cohort(
+    rows,
+    lambda pending, attempt: [
+      {**row, "worker_failure": True, "complete": False} for row in pending
+    ],
+    max_retries=1,
+  )
+  assert len(history) == 2
+  assert unresolved == [rows[0]["condition_id"]]
+  assert not summarize(result)["promote"]

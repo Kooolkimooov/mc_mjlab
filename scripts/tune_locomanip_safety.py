@@ -82,12 +82,12 @@ def main() -> None:
       all_rows.extend(result["rows"])
       result["rows"] = all_rows
       (destination / "results.json").write_text(json.dumps(result, indent=2) + "\n")
+      mass_summary = []
+      for mass in masses:
+        completed = sum(row["complete"] for row in all_rows if row["mass_kg"] == mass)
+        mass_summary.append(f"{mass:g} kg {completed}/{args.repetitions} complete")
       print(
-        f"[tuning] {tuning}: "
-        + ", ".join(
-          f"{mass:g} kg {sum(row['complete'] for row in all_rows if row['mass_kg'] == mass)}/{args.repetitions} complete"
-          for mass in masses
-        ),
+        f"[tuning] {tuning}: " + ", ".join(mass_summary),
         flush=True,
       )
       if (
@@ -98,8 +98,12 @@ def main() -> None:
         break
       masses = [max(masses) + 25]
     reports[tuning] = all_rows
-  ranking = rank_tunings(reports)
+  ranking = rank_tunings(reports, args.repetitions)
   (args.output / "selection.json").write_text(json.dumps(ranking, indent=2) + "\n")
+  if not ranking:
+    raise RuntimeError(
+      "no tuning has a complete, safely passing light-cart and transition envelope"
+    )
   print(json.dumps(ranking, indent=2))
 
 

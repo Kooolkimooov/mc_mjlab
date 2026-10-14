@@ -6,10 +6,9 @@ import hashlib
 from typing import TYPE_CHECKING, Any
 
 import torch
-from mjlab.envs.mdp import dr
 from mjlab.managers.event_manager import RecomputeLevel, requires_model_fields
 
-from mc_mjlab.tasks.locomanip.mdp.events import mass_alpha_range
+from mc_mjlab.tasks.locomanip.mdp.payload_mixture import apply_mass_ranges
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -26,6 +25,15 @@ def draw_encoder_bias(identifier: str, width: int, enabled: bool) -> torch.Tenso
   seed = int.from_bytes(hashlib.sha256(identifier.encode()).digest()[:8], "little")
   generator = torch.Generator().manual_seed(seed)
   return (torch.rand(width, generator=generator) * 0.02 - 0.01) * enabled
+
+
+def assert_payload_masses(actual: torch.Tensor, rows: list[dict[str, Any]]) -> None:
+  """Reject a condition when the applied cart mass differs from its label."""
+  requested = torch.tensor([row["mass_kg"] for row in rows], device=actual.device)
+  if torch.allclose(actual, requested, atol=0.05, rtol=1e-5):
+    return
+  error = (actual - requested).abs().max().item()
+  raise RuntimeError(f"cart payload differs from requested mass by {error:g} kg")
 
 
 def matched_encoder_bias(
@@ -60,11 +68,7 @@ def fixed_payloads(
   """Apply each condition's exact density scale, including partial resets."""
   ids = torch.arange(env.num_envs, device=env.device) if env_ids is None else env_ids
   masses = torch.tensor([row["mass_kg"] for row in rows], device=env.device)
-  for mass in masses[ids].unique().tolist():
-    selected = ids[masses[ids] == mass]
-    dr.pseudo_inertia(
-      env,
-      selected,
-      alpha_range=mass_alpha_range((mass, mass), nominal_mass),
-      asset_cfg=asset_cfg,
-    )
+  assignments = [
+    (ids[masses[ids] == mass], (mass, mass)) for mass in masses[ids].unique().tolist()
+  ]
+  apply_mass_ranges(env, assignments, nominal_mass, asset_cfg)

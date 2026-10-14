@@ -4,7 +4,3 @@ Timestep: 0.002
 GUIServer:
   Enable: false
 Log: false
-
-# The cart demo itself -- the FSM, the push waypoint, CompletionState, the cart
-# and each robot's own tasks -- is the controller's, on its mc_mjlab-setup
-# branch. docs/locomanip.md#per-robot-controller-config

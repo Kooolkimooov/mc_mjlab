@@ -9,19 +9,40 @@ import torch
 from mjlab.envs.mdp import dr
 from mjlab.managers.event_manager import RecomputeLevel, requires_model_fields
 
-from mc_mjlab.tasks.locomanip.mdp.events import mass_alpha_range
+from mc_mjlab.tasks.locomanip.mdp.events import CART_MASS_RANGE_KG, mass_alpha_range
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
   from mjlab.managers.scene_entity_config import SceneEntityCfg
 
 
-def mass_bands(midpoint_kg: float) -> tuple[tuple[float, float], ...]:
+def mass_bands(
+  midpoint_kg: float, bounds_kg: tuple[float, float] = CART_MASS_RANGE_KG
+) -> tuple[tuple[float, float], ...]:
   """Return central, lower and upper payload bands within 10–1000 kg."""
-  if not math.isfinite(midpoint_kg) or not 10 < midpoint_kg < 1000:
-    raise ValueError("transition midpoint must be finite and inside (10, 1000) kg")
-  low, high = max(10.0, midpoint_kg - 75.0), min(1000.0, midpoint_kg + 75.0)
-  return ((low, high), (10.0, low), (high, 1000.0))
+  lower, upper = bounds_kg
+  if not math.isfinite(midpoint_kg) or not lower < midpoint_kg < upper:
+    raise ValueError("transition midpoint must be finite and inside mass bounds")
+  low, high = max(lower, midpoint_kg - 75.0), min(upper, midpoint_kg + 75.0)
+  return ((low, high), (lower, low), (high, upper))
+
+
+def apply_mass_ranges(
+  env: ManagerBasedRlEnv,
+  assignments: list[tuple[torch.Tensor, tuple[float, float]]],
+  nominal_mass_kg: float,
+  asset_cfg: SceneEntityCfg,
+) -> None:
+  """Apply each nonempty mass group through pseudo-inertia once."""
+  for selected, mass_range in assignments:
+    if selected.numel() == 0:
+      continue
+    dr.pseudo_inertia(
+      env,
+      selected,
+      asset_cfg=asset_cfg,
+      alpha_range=mass_alpha_range(mass_range, nominal_mass_kg),
+    )
 
 
 @requires_model_fields(
@@ -47,15 +68,16 @@ def transition_payload(
   )
   if ids.numel() == 0:
     return
+  active = [
+    (band, weight)
+    for band, weight in zip(bands, (0.6, 0.2, 0.2), strict=True)
+    if band[0] < band[1]
+  ]
+  weights = torch.tensor([weight for _, weight in active], device=env.device)
+  boundaries = (weights / weights.sum()).cumsum(0)[:-1]
   draw = torch.rand(ids.numel(), device=env.device)
-  band_ids = torch.where(draw < 0.6, 0, torch.where(draw < 0.8, 1, 2))
-  for index, band in enumerate(bands):
-    selected = ids[band_ids == index]
-    if selected.numel() == 0:
-      continue
-    dr.pseudo_inertia(
-      env,
-      selected,
-      asset_cfg=asset_cfg,
-      alpha_range=mass_alpha_range(band, nominal_mass_kg),
-    )
+  band_ids = torch.searchsorted(boundaries, draw, right=True)
+  assignments = [
+    (ids[band_ids == index], band) for index, (band, _) in enumerate(active)
+  ]
+  apply_mass_ranges(env, assignments, nominal_mass_kg, asset_cfg)

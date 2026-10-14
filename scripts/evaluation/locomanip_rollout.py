@@ -14,7 +14,11 @@ from mjlab.rl import RslRlVecEnvWrapper
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 
 from evaluation.locomanip_authority import action_matrix
-from evaluation.locomanip_inputs import fixed_payloads, matched_encoder_bias
+from evaluation.locomanip_inputs import (
+  assert_payload_masses,
+  fixed_payloads,
+  matched_encoder_bias,
+)
 from evaluation.locomanip_schedules import ForceSchedule
 from evaluation.locomanip_trace import DispatchTrace, SafetyTrace
 from evaluation.rollout import managed_env, reset_done
@@ -94,7 +98,9 @@ def run_conditions(
       env.reset()
       provenance = collect_controller_provenance(wrapped)
       biases = env.scene["robot"].data.encoder_bias.cpu().tolist()
-      masses = accessors.object_mass_kg(env).cpu().tolist()
+      actual_masses = accessors.object_mass_kg(env)
+      assert_payload_masses(actual_masses, rows)
+      masses = actual_masses.cpu().tolist()
       base_actions = action_matrix(env, rows)
       schedules = ForceSchedule(
         [row.get("schedule", "constant") for row in rows], device

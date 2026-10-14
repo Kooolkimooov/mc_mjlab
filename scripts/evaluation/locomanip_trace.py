@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import torch
@@ -13,7 +13,9 @@ from mc_mjlab.tasks.locomanip.mdp import accessors, observations
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
-FAILURES = ("fell_over", "collapsed", "controller_failed")
+  from mc_mjlab.actions.residual_feedback_action import ResidualFeedbackActionCfg
+
+FAILURES = (*accessors.FALL_TERMINATIONS, "controller_failed")
 
 
 class DispatchTrace:
@@ -25,7 +27,15 @@ class DispatchTrace:
     self.bridge = self.term._bridge
     self.original = self.bridge.fill_controller_input
     layout = self.bridge.layout.input
-    names = ("LeftHandForceSensor", "RightHandForceSensor")
+    cfg = cast("ResidualFeedbackActionCfg", self.term.cfg)
+    names = cfg.wrench_sensor_names
+    if (
+      cfg.feedback_modalities != ("wrench",)
+      or not cfg.wrench_force_only
+      or len(names) != 2
+      or self.term.executed_physical_action.shape[1] != 6
+    ):
+      raise ValueError("dispatch trace requires two force-only hand-wrench channels")
     self.columns = [
       layout.force_sensors_offset() + layout.force_sensors.index(name) * 6 + axis
       for name in names
@@ -75,7 +85,9 @@ class SafetyTrace:
   def __init__(self, env: ManagerBasedRlEnv, rows: list[dict[str, Any]]) -> None:
     self.env, self.rows = env, rows
     self.finished = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
-    self.start_cart = env.scene["cart"].data.root_link_pos_w[:, 0].clone()
+    self.start_cart = (
+      env.scene[accessors.OBJECT_ENTITY].data.root_link_pos_w[:, 0].clone()
+    )
     self.start_root = env.scene["robot"].data.root_link_pos_w[:, 0].clone()
     self.lowest = np.full(env.num_envs, np.inf)
     self.tilt = np.zeros(env.num_envs)
@@ -101,8 +113,10 @@ class SafetyTrace:
       "root_linear_velocity_m_s": robot.root_link_lin_vel_w,
       "root_angular_velocity_rad_s": robot.root_link_ang_vel_b,
       "tilt_rad": tilt,
-      "cart_position_m": env.scene["cart"].data.root_link_pos_w - env.scene.env_origins,
-      "cart_velocity_m_s": env.scene["cart"].data.root_link_lin_vel_w,
+      "cart_position_m": (
+        env.scene[accessors.OBJECT_ENTITY].data.root_link_pos_w - env.scene.env_origins
+      ),
+      "cart_velocity_m_s": env.scene[accessors.OBJECT_ENTITY].data.root_link_lin_vel_w,
       "reference_position_m": term.datastore_vector_output(
         accessors.OBJECT_REFERENCE_POSITION
       ),
@@ -118,12 +132,16 @@ class SafetyTrace:
       dispatch.total / max(dispatch.count, 1)
     ).tolist()
     frame["dispatch_error_n"] = dispatch.error.tolist()
+    termination_names = env.termination_manager.active_terms
+    termination_values = (
+      torch.stack(
+        [env.termination_manager.get_term(name) for name in termination_names], dim=1
+      )
+      .cpu()
+      .tolist()
+    )
     frame["terminations"] = [
-      {
-        name: bool(env.termination_manager.get_term(name)[i])
-        for name in env.termination_manager.active_terms
-      }
-      for i in range(env.num_envs)
+      dict(zip(termination_names, values, strict=True)) for values in termination_values
     ]
     live = ~self.finished.cpu().numpy()
     self.lowest[live] = np.minimum(
@@ -179,7 +197,8 @@ class SafetyTrace:
           accessors.object_position_error(env)[index].norm()
         ),
         "cart_displacement_m": float(
-          env.scene["cart"].data.root_link_pos_w[index, 0] - self.start_cart[index]
+          env.scene[accessors.OBJECT_ENTITY].data.root_link_pos_w[index, 0]
+          - self.start_cart[index]
         ),
         "robot_displacement_m": float(
           env.scene["robot"].data.root_link_pos_w[index, 0] - self.start_root[index]

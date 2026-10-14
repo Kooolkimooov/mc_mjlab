@@ -8,6 +8,8 @@ from typing import Any
 
 import numpy as np
 
+from mc_mjlab.tasks.locomanip.mdp import accessors
+
 
 def measure_responses(rows: list[dict[str, Any]], trace_path: Path) -> None:
   """Compare matched Hold samples around failure against repeated-zero variability."""
@@ -66,8 +68,8 @@ def _response(
     if (
       time < start
       or other is None
-      or frame["phases"] != [4.0, 4.0]
-      or other["phases"] != [4.0, 4.0]
+      or frame["phases"] != [accessors.HOLD_PHASE] * 2
+      or other["phases"] != [accessors.HOLD_PHASE] * 2
     ):
       continue
     target.append(

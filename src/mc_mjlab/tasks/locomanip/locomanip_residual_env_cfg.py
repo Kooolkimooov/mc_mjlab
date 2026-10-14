@@ -105,7 +105,7 @@ CONTACT_ZMP_PARAMS = {
 }
 
 #: The swept range above the carts Grasp shoves away. docs/locomanip.md#cart_mass_range_kg
-CART_MASS_RANGE_KG = (10.0, 1000.0)
+CART_MASS_RANGE_KG = locomanip_mdp.events.CART_MASS_RANGE_KG
 
 FALL_LIMIT_ANGLE = math.radians(45.0)
 

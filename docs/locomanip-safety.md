@@ -2,15 +2,19 @@
 
 ## SAFETY_CONFIG
 
-**Current:** The HRP5P safety profile is
-`etc/mc_rtc_hrp5_locomanip_safety.yaml`, frozen from the native merged
-controller configuration on 2026-10-13. Its adaptation is `alpha: 0.03`,
-`forceProjection: [0, 0, 0.98]` in the hand frame, and
-`momentProjection: [0, 0, 0]`. The override reloads the effective FSM with
-fresh state names because mc_rtc's state factory rejects a duplicate name.
-The selected configuration includes the installed per-robot controller
-settings and the effective user configuration. The runner hashes this file
-and every other external controller input into checkpoints.
+**Current:** `etc/mc_rtc_hrp5_locomanip_safety.yaml` declares HRP5P and
+LocomanipController, the 2 ms control period, and disabled GUI and native
+logging. The selected hand adaptation (`alpha: 0.03`,
+`forceProjection: [0, 0, 0.98]`, `momentProjection: [0, 0, 0]`) already lives in
+the installed per-robot controller configuration. The run provenance snapshots
+the selector and installed controller files. The authority gate hashes both
+the selector and the installed/user controller inputs, so a changed native
+tuning requires a new probe. The old 666-line project snapshot and its
+authority report are
+historical artifacts under `logs/locomanip/safety-2026-10-13/`; the report's
+profile hash cannot admit another training run. A new authority probe is
+required with the compact selector. The earlier 10/100 kg smoke check used
+the removed snapshot, so it does not validate the current selector.
 
 **Re-measure if:** the controller, robot assets, native workspace files,
 user mc_rtc configuration, sensors or simulator changes.
@@ -75,6 +79,8 @@ payloads log-uniformly from 462.5–612.5 kg, 20% from 10–462.5 kg and
 20% from 612.5–1000 kg. `transition_payload` partitions reset IDs and
 calls `dr.pseudo_inertia` once per nonempty band, retaining the body mass,
 COM and inertia field declarations and `set_const` recomputation.
+An empty outer band at either 10 or 1000 kg is removed and the remaining
+mixture weights are renormalized.
 
 **Re-measure if:** either zero-action threshold changes.
 
@@ -104,6 +110,8 @@ completion and dispatched force before reset. A reactive trigger uses only
 the preceding state available before its action: pulse at the first Hold
 crossing above 0.05 m for one second, or a 0.05/0.03 m hysteresis gate.
 An untriggered action is classified as not measured.
+The pulse duration is counted in policy steps, avoiding float32 time
+subtraction at the end of the one-second window.
 
 **Re-measure if:** controller dispatch timing or object reference semantics
 change.
@@ -119,7 +127,8 @@ pose is available to the probe, not to the current actor.
 all six hand-force channels, both signs and 5/25/50 N, under each schedule
 at 525 and 550 kg. Each schedule also ran nine repeated-zero controls.
 The frozen profile hash is
-`7a48f73834636e851791e26a68d0c5119d77ad29c879c3cdc0f65fe179d954d5`;
+`7a48f73834636e851791e26a68d0c5119d77ad29c879c3cdc0f65fe179d954d5`
+for the 2026-10-13 run, before inherited path entries were removed;
 seed was 42 and encoder bias was off. Raw results and pre-reset traces are
 under `logs/locomanip/safety-2026-10-13/authority/`. A physical response
 means the last-5-s Hold cart-position RMS difference exceeded the largest
@@ -156,7 +165,12 @@ failure threshold changes.
 the frozen controller profile and requires all six channels in both
 directions to reach the controller plus a measurable controller-target and
 physical response near the first failing mass. Constant rescue is not
-required. If the force channels do not meet this gate, inspect routing,
+required. The report must state the 525/550 kg transition and explicitly
+declare whether encoder bias was used; both settings are accepted. Use
+`scripts/train_locomanip_safety.py` to check the report before building
+256 controllers. The runner checks it again, copies its exact bytes into
+the run directory and embeds its contents and SHA-256 in every checkpoint.
+If the force channels do not meet this gate, inspect routing,
 timing and coordinated force or walking/cart slowdown before spending the
 16.384-million-transition budget.
 
@@ -165,15 +179,20 @@ minibatches, two epochs, 1000 iterations, and saves every 20 iterations.
 The registered full task ID is its experiment name. Screen iterations
 200, 400, 600, 800 and final with eight pairs per mass at seed 42;
 validate the selected checkpoint with 32 pairs per mass at seeds 43 and 44.
-`scripts/screen_locomanip_safety.py` performs these five screens and the
-separate validation, selecting the largest pooled reduction among screens
-with complete pairs and no safe-mass regression.
+`scripts/screen_locomanip_safety.py` discovers the final checkpoint from
+the run and checks it before the first screen. It selects only a positive
+pooled reduction with complete pairs and no per-mass regression before
+starting separate validation.
 The fixed grid is 10, 100 and 500–650 kg in 25 kg steps. Its transition
 grid for the equal-mass pooled estimate is 500–650 kg. Promotion needs at
 least 20% relative combined-failure reduction with a paired 95% interval
 excluding zero, plus zero observed policy failures and no new incomplete
 episodes at every mass where the baseline safely completes all repetitions.
-Worker failures and missing observations cannot become successes. Zero
+Any higher failure count at another evaluated mass also blocks promotion.
+The evaluator batches up to 192 mixed-mass rows and retries both arms of
+an incomplete or infrastructure-affected pair twice with the same input
+draws. Persistent missing data remain explicit unresolved conditions and
+cannot become successes. Zero
 observed failures has finite-sample uncertainty; each mass reports its
 Wilson interval. `scripts/evaluate_locomanip_safety.py` writes every
 condition and its locked grid before stepping.

@@ -285,15 +285,16 @@ See [the feedback contract](docs/locomanip.md#residualfeedbackjointpositionactio
 units, gating, and validation results.
 
 The HRP5P safety variant uses a frozen controller profile and a distinct task
-ID. Its training runner requires a reactive authority report from the first
-failing payload before it starts. The measurements, frozen mass grid and
+ID. Its training entry point checks the authority report before allocating
+the controller pool. The measurements, frozen mass grid and
 acceptance gates are in [the safety record](docs/locomanip-safety.md#locomanip-feedback-safety).
-After the report exists, run training in tmux and screen its five scheduled
-checkpoints:
+After probing the current profile, run training in tmux and screen its
+scheduled checkpoints:
 
 ```sh
-MC_MJLAB_SAFETY_AUTHORITY_REPORT=logs/locomanip/safety-2026-10-13/authority/authority_gate.json \
-  uv run train Mc-Mjlab-Locomanip-Safety-Locomanipcontroller-Hrp5P-Position-Feedback --agent.seed 42
+MC_MJLAB_SAFETY_AUTHORITY_REPORT=path/to/fresh-authority-gate.json \
+  uv run python scripts/train_locomanip_safety.py \
+  Mc-Mjlab-Locomanip-Safety-Locomanipcontroller-Hrp5P-Position-Feedback --agent.seed 42
 uv run python scripts/screen_locomanip_safety.py --run-dir <logs/rsl_rl/.../run> \
   --output <logs/locomanip/safety-screen>
 ```

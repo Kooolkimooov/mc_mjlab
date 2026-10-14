@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 
 from mc_mjlab.tasks.locomanip.mdp.accessors import OBJECT_ENTITY, object_mass_kg
 
+CART_MASS_RANGE_KG = (10.0, 1000.0)
+
 if TYPE_CHECKING:
   import torch
   from mjlab.envs import ManagerBasedRlEnv

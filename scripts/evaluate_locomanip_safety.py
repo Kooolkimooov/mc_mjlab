@@ -9,6 +9,7 @@ from pathlib import Path
 import mjlab  # noqa: F401
 from evaluation.locomanip_inputs import condition_id
 from evaluation.locomanip_promotion import summarize_safety
+from evaluation.locomanip_retries import retry_cohort
 from evaluation.locomanip_rollout import run_conditions
 
 from mc_mjlab.tasks.locomanip_safety import TASK_ID
@@ -25,6 +26,8 @@ def main() -> None:
   parser.add_argument("--validation", action="store_true")
   parser.add_argument("--seeds", nargs="+", type=int)
   parser.add_argument("--repetitions", type=int)
+  parser.add_argument("--batch-size", type=int, default=192)
+  parser.add_argument("--max-retries", type=int, default=2)
   parser.add_argument("--masses", nargs="+", type=float, default=list(MASS_GRID_KG))
   parser.add_argument(
     "--transition-masses", nargs="+", type=float, default=list(TRANSITION_GRID_KG)
@@ -36,10 +39,22 @@ def main() -> None:
   parser.add_argument("--trace", action="store_true")
   parser.add_argument("--device", default="cuda:0")
   args = parser.parse_args()
-  seeds = args.seeds or ([43, 44] if args.validation else [42])
-  repetitions = args.repetitions or (32 if args.validation else 8)
+  seeds = (
+    args.seeds if args.seeds is not None else ([43, 44] if args.validation else [42])
+  )
+  repetitions = (
+    args.repetitions if args.repetitions is not None else 32 if args.validation else 8
+  )
   if repetitions < 2 or not set(args.transition_masses) <= set(args.masses):
     parser.error("use >=2 repetitions and include every transition mass in --masses")
+  if not seeds or len(seeds) != len(set(seeds)):
+    parser.error("--seeds must contain unique values")
+  if len(args.masses) != len(set(args.masses)) or len(args.transition_masses) != len(
+    set(args.transition_masses)
+  ):
+    parser.error("mass grids must contain unique values")
+  if args.batch_size < 2 or args.batch_size % 2 or args.max_retries < 0:
+    parser.error("--batch-size must be even and >=2; --max-retries nonnegative")
   if args.task == TASK_ID and (
     tuple(args.masses) != MASS_GRID_KG
     or tuple(args.transition_masses) != TRANSITION_GRID_KG
@@ -54,44 +69,64 @@ def main() -> None:
     "repetitions": repetitions,
     "encoder_bias": args.encoder_bias,
     "checkpoint": str(args.checkpoint) if args.checkpoint else None,
+    "batch_size": args.batch_size,
+    "max_retries": args.max_retries,
   }
   (args.output / "cohort.json").write_text(json.dumps(manifest, indent=2) + "\n")
   all_rows = []
+  retry_history = []
+  unresolved_conditions = []
   for seed in seeds:
-    for mass in args.masses:
-      rows = [
-        {
-          "seed": seed,
-          "mass_kg": mass,
-          "repeat": repeat,
-          "condition_id": condition_id(seed, mass, repeat),
-          "arm": arm,
-          "channel": "zero",
-          "level": 0.0,
-        }
-        for repeat in range(repetitions)
-        for arm in ("baseline", "policy")
-      ]
-      label = f"seed-{seed}-mass-{mass:g}"
-      result = run_conditions(
-        args.task,
-        rows,
-        config=args.config,
-        checkpoint=args.checkpoint,
-        encoder_bias=args.encoder_bias,
-        workers=args.workers,
-        device=args.device,
-        trace_path=args.output / f"{label}.jsonl" if args.trace else None,
-      )
-      all_rows.extend(result["rows"])
-      (args.output / f"{label}.json").write_text(json.dumps(result, indent=2) + "\n")
+    rows = [
+      {
+        "seed": seed,
+        "mass_kg": mass,
+        "repeat": repeat,
+        "condition_id": condition_id(seed, mass, repeat),
+        "arm": arm,
+        "channel": "zero",
+        "level": 0.0,
+      }
+      for mass in args.masses
+      for repeat in range(repetitions)
+      for arm in ("baseline", "policy")
+    ]
+    for batch, start in enumerate(range(0, len(rows), args.batch_size)):
+      cohort = rows[start : start + args.batch_size]
+      label = f"seed-{seed}-batch-{batch}"
+
+      def run_once(pending: list[dict], attempt: int, label: str = label) -> list[dict]:
+        result = run_conditions(
+          args.task,
+          pending,
+          config=args.config,
+          checkpoint=args.checkpoint,
+          encoder_bias=args.encoder_bias,
+          workers=args.workers,
+          device=args.device,
+          trace_path=(
+            args.output / f"{label}-attempt-{attempt}.jsonl" if args.trace else None
+          ),
+        )
+        path = args.output / f"{label}-attempt-{attempt}.json"
+        path.write_text(json.dumps(result, indent=2) + "\n")
+        return result["rows"]
+
+      completed, attempts, unresolved = retry_cohort(cohort, run_once, args.max_retries)
+      all_rows.extend(completed)
+      retry_history.extend({"batch": label, **attempt} for attempt in attempts)
+      unresolved_conditions.extend(unresolved)
       print(
-        f"[safety] {label}: {sum(row['combined_failure'] for row in result['rows'])} combined failures",
+        f"[safety] {label}: "
+        f"{sum(row['combined_failure'] for row in completed)} combined failures, "
+        f"{len(unresolved)} unresolved conditions",
         flush=True,
       )
   report = summarize_safety(
     all_rows, args.masses, args.transition_masses, seeds, repetitions
   )
+  report["retry_history"] = retry_history
+  report["unresolved_conditions"] = unresolved_conditions
   if args.checkpoint is None:
     report["promote"] = False
     report["purpose"] = "Repeated zero controls; no policy was evaluated."

@@ -19,7 +19,7 @@ def summarize_safety(
   repetitions: int,
   bootstrap_samples: int = 10000,
 ) -> dict[str, Any]:
-  """Require complete matched cohorts, pooled improvement and zero safe-mass regressions."""
+  """Require complete cohorts, pooled improvement and mass protection."""
   if not masses or not transition_masses or not set(transition_masses) <= set(masses):
     raise ValueError("transition grid must be a nonempty subset of the evaluation grid")
   if repetitions < 2 or not seeds or len(set(seeds)) != len(seeds):
@@ -37,6 +37,7 @@ def summarize_safety(
   per_mass = []
   pairs_by_mass = []
   protected_ok = True
+  no_mass_regression = True
   complete_data = True
   for mass in masses:
     expected = [
@@ -47,13 +48,19 @@ def summarize_safety(
     baseline = [indexed.get((identifier, "baseline")) for identifier in expected]
     policy = [indexed.get((identifier, "policy")) for identifier in expected]
     valid_pairs = [
-      (b, p) for b, p in zip(baseline, policy, strict=True) if _usable(b) and _usable(p)
+      (b, p)
+      for b, p in zip(baseline, policy, strict=True)
+      if usable_outcome(b) and usable_outcome(p)
     ]
     complete = len(valid_pairs) == len(expected)
     complete_data &= complete
     safe = all(_safe(row) for row in baseline)
     protection = not safe or all(_safe(row) for row in policy)
+    baseline_failures = sum(b["combined_failure"] for b, _ in valid_pairs)
+    policy_failures = sum(p["combined_failure"] for _, p in valid_pairs)
+    non_regression = complete and policy_failures <= baseline_failures
     protected_ok &= protection
+    no_mass_regression &= non_regression
     entry = {
       "mass_kg": mass,
       "expected_pairs": len(expected),
@@ -62,6 +69,7 @@ def summarize_safety(
       "policy": _counts(policy),
       "baseline_safe": safe,
       "protection_passed": protection,
+      "non_regression_passed": non_regression,
     }
     per_mass.append(entry)
     if mass in transition_masses:
@@ -79,9 +87,12 @@ def summarize_safety(
     and pooled["absolute_reduction_ci95"][0] > 0
   )
   return {
-    "promote": bool(complete_data and protected_ok and improvement_ok),
+    "promote": bool(
+      complete_data and protected_ok and no_mass_regression and improvement_ok
+    ),
     "complete_matched_data": complete_data,
     "per_mass_protection": protected_ok,
+    "no_mass_regression": no_mass_regression,
     "pooled_improvement": bool(improvement_ok),
     "pooled": pooled,
     "per_mass": per_mass,
@@ -89,11 +100,14 @@ def summarize_safety(
     "evaluation_grid_kg": masses,
     "seeds": seeds,
     "pairs_per_mass_per_seed": repetitions,
-    "uncertainty": "95% paired environment bootstrap, stratified by mass; equal mass weights. Zero observed failures remains a finite-sample result.",
+    "uncertainty": (
+      "95% paired environment bootstrap, stratified by mass; equal mass "
+      "weights. Zero observed failures remains a finite-sample result."
+    ),
   }
 
 
-def _usable(row: dict[str, Any] | None) -> TypeGuard[dict[str, Any]]:
+def usable_outcome(row: dict[str, Any] | None) -> TypeGuard[dict[str, Any]]:
   return (
     row is not None
     and row.get("observed", False)
@@ -104,7 +118,7 @@ def _usable(row: dict[str, Any] | None) -> TypeGuard[dict[str, Any]]:
 
 def _safe(row: dict[str, Any] | None) -> bool:
   return bool(
-    _usable(row)
+    usable_outcome(row)
     and row is not None
     and row.get("complete", False)
     and not row.get("combined_failure", True)
@@ -119,7 +133,7 @@ def _counts(rows: list[dict[str, Any] | None]) -> dict[str, Any]:
     and row.get("observed", False)
     and not row.get("worker_failure", True)
   ]
-  usable = [row for row in rows if _usable(row)]
+  usable = [row for row in rows if usable_outcome(row)]
   failures = sum(row["combined_failure"] for row in usable)
   return {
     "requested": len(rows),

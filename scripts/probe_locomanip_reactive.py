@@ -14,6 +14,13 @@ from evaluation.locomanip_rollout import run_conditions
 from evaluation.locomanip_schedules import SCHEDULES, reactive_conditions
 
 from mc_mjlab.tasks.locomanip import FEEDBACK_TASK_IDS
+from mc_mjlab.tasks.locomanip_safety.runner import controller_inputs_sha256
+
+
+def probe_paths(output: Path, mass: float, schedule: str) -> tuple[Path, Path]:
+  """Keep a decimal mass inside the filename rather than treating it as a suffix."""
+  stem = f"{mass:g}-{schedule}"
+  return output / f"{stem}.jsonl", output / f"{stem}.json"
 
 
 def main() -> None:
@@ -49,7 +56,7 @@ def main() -> None:
         for row in reactive_conditions(args.repetitions)
         if row["schedule"] == schedule
       ]
-      path = args.output / f"{mass:g}-{schedule}"
+      trace_path, result_path = probe_paths(args.output, mass, schedule)
       result = run_conditions(
         FEEDBACK_TASK_IDS["HRP5P"],
         rows,
@@ -57,15 +64,16 @@ def main() -> None:
         encoder_bias=args.encoder_bias,
         workers=args.workers,
         device=args.device,
-        trace_path=path.with_suffix(".jsonl"),
+        trace_path=trace_path,
       )
-      measure_responses(result["rows"], path.with_suffix(".jsonl"))
-      path.with_suffix(".json").write_text(json.dumps(result, indent=2) + "\n")
+      measure_responses(result["rows"], trace_path)
+      result_path.write_text(json.dumps(result, indent=2) + "\n")
       all_rows.extend(result["rows"])
+      responses = sum(row["measurable_physical_response"] for row in result["rows"])
+      rescues = sum(row["observed_safety_benefit"] for row in result["rows"])
       print(
-        f"[authority] {mass:g} kg {schedule}: "
-        f"{sum(row['measurable_physical_response'] for row in result['rows'])} physical responses, "
-        f"{sum(row['observed_safety_benefit'] for row in result['rows'])} observed rescues",
+        f"[authority] {mass:g} kg {schedule}: {responses} physical responses, "
+        f"{rescues} observed rescues",
         flush=True,
       )
   (args.output / "rows.json").write_text(json.dumps(all_rows, indent=2) + "\n")
@@ -79,6 +87,7 @@ def main() -> None:
   }
   authority = {
     "profile_sha256": hashlib.sha256(args.config.read_bytes()).hexdigest(),
+    "controller_inputs_sha256": controller_inputs_sha256(args.config),
     "encoder_bias": args.encoder_bias,
     "passing_mass_kg": args.masses[0],
     "failing_mass_kg": args.masses[1],

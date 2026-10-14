@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 from mjlab.tasks.registry import register_mjlab_task
 
+from mc_mjlab.bridge.config import get_controller_name
 from mc_mjlab.tasks.evaluation import register_evaluation
 from mc_mjlab.tasks.locomanip.evaluation import LOCOMANIP_EVALUATION
 from mc_mjlab.tasks.locomanip.locomanip_ppo_cfg import locomanip_ppo_cfg
@@ -22,7 +24,8 @@ TASK_ID = get_task_name(
   Path(__file__).resolve().parent.name, SAFETY_CONFIG, "position-feedback"
 )
 
-if controller_is_installed("LocomanipController"):
+controller_name = get_controller_name(SAFETY_CONFIG)
+if controller_is_installed(controller_name):
   register_mjlab_task(
     task_id=TASK_ID,
     env_cfg=locomanip_safety_env_cfg(),
@@ -31,3 +34,9 @@ if controller_is_installed("LocomanipController"):
     runner_cls=LocomanipSafetyRunner,
   )
   register_evaluation(TASK_ID, LOCOMANIP_EVALUATION)
+else:
+  warnings.warn(
+    f"{TASK_ID} was not registered because {controller_name} is not installed",
+    RuntimeWarning,
+    stacklevel=2,
+  )

@@ -21,7 +21,9 @@ LIGHT_GRID = (10.0, 100.0)
 
 def effective_configuration(project: Path) -> dict[str, Any]:
   """Read the native merged config after robot and user overrides have applied."""
-  controller = mc_control.MCGlobalController(str(project.resolve()))  # ty: ignore[unresolved-attribute]
+  controller = mc_control.MCGlobalController(  # ty: ignore[unresolved-attribute]
+    str(project.resolve())
+  )
   result = yaml.safe_load(controller.controller().config().dump())
   del controller
   return result
@@ -36,13 +38,17 @@ def write_variant(
 ) -> Path:
   """Freeze the effective controller and reload its FSM with one changed adaptation."""
   payload = deepcopy(effective)
-  for key in ("OverwriteConfigKeys", "OverwriteConfigList"):
+  for key in (
+    "OverwriteConfigKeys",
+    "OverwriteConfigList",
+    "StatesLibraries",
+    "StatesFiles",
+  ):
     payload.pop(key, None)
-  fsm = deepcopy(
-    payload.get(
-      "DemoFSM", {key: payload[key] for key in ("states", "transitions", "init")}
-    )
-  )
+  source_fsm = payload.get("DemoFSM")
+  if source_fsm is None:
+    source_fsm = {key: payload[key] for key in ("states", "transitions", "init")}
+  fsm = deepcopy(source_fsm)
   alpha, projection = TUNINGS[tuning]
   adaptation = fsm["states"]["LMC::PushCart_"]["configs"].setdefault(
     "HandWrenchAdaptation", {}
@@ -58,8 +64,8 @@ def write_variant(
   config = {}
   user = Path.home() / ".config/mc_rtc/mc_rtc.yaml"
   if user.exists():
-    config.update(yaml.safe_load(user.read_text()))
-  config.update(yaml.safe_load(project.read_text()))
+    config.update(yaml.safe_load(user.read_text()) or {})
+  config.update(yaml.safe_load(project.read_text()) or {})
   config["OverwriteConfigKeys"] = ["MjlabSafetyFrozen"]
   config["OverwriteConfigList"] = {"MjlabSafetyFrozen": payload}
   config["Log"] = native_logs is not None
@@ -73,25 +79,18 @@ def write_variant(
   return destination
 
 
-def _rename_states(value: Any, names: dict[str, str]) -> Any:
-  """Give reloaded states fresh names because the native factory forbids replacement."""
-  if isinstance(value, dict):
-    return {
-      names.get(key, key): _rename_states(item, names) for key, item in value.items()
-    }
-  if isinstance(value, list):
-    return [_rename_states(item, names) for item in value]
-  return names.get(value, value) if isinstance(value, str) else value
-
-
-def rank_tunings(reports: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+def rank_tunings(
+  reports: dict[str, list[dict[str, Any]]], repetitions: int
+) -> list[dict[str, Any]]:
   """Rank consistent completion, next-point failure, then placement error."""
+  if repetitions < 1:
+    raise ValueError("repetitions must be positive")
   ranked = []
   for name, rows in reports.items():
     masses = sorted({row["mass_kg"] for row in rows})
     grouped = {mass: [row for row in rows if row["mass_kg"] == mass] for mass in masses}
     safe = {
-      mass: len(group) >= 3
+      mass: len(group) == repetitions
       and all(
         row["complete"] and row["observed"] and not row["worker_failure"]
         for row in group
@@ -109,17 +108,20 @@ def rank_tunings(reports: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any
         first = mass
         break
       last = mass
-    if last is None or first is None or not passed:
+    if last is None or not passed:
       continue
-    next_rows = grouped[first]
+    next_rows = grouped[first] if first is not None else []
     ranked.append(
       {
         "tuning": name,
         "last_passing_mass_kg": last,
         "first_failing_mass_kg": first,
-        "threshold_midpoint_kg": (last + first) / 2,
-        "next_failure_rate": sum(row["combined_failure"] for row in next_rows)
-        / len(next_rows),
+        "threshold_midpoint_kg": (last + first) / 2 if first is not None else None,
+        "next_failure_rate": (
+          sum(row["combined_failure"] for row in next_rows) / len(next_rows)
+          if next_rows
+          else 0.0
+        ),
         "placement_error_m": sum(
           row["terminal_position_error_m"] for row in grouped[last]
         )
@@ -134,3 +136,14 @@ def rank_tunings(reports: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any
       row["placement_error_m"],
     ),
   )
+
+
+def _rename_states(value: Any, names: dict[str, str]) -> Any:
+  """Give reloaded states fresh names because the native factory forbids replacement."""
+  if isinstance(value, dict):
+    return {
+      names.get(key, key): _rename_states(item, names) for key, item in value.items()
+    }
+  if isinstance(value, list):
+    return [_rename_states(item, names) for item in value]
+  return names.get(value, value) if isinstance(value, str) else value

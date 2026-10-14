@@ -37,7 +37,15 @@ def test_dispatch_trace_reads_actual_input_offsets(
     block[:, 6:9] = raw[:, 3:].numpy() + offsets[:, 3:].numpy()
 
   bridge.fill_controller_input = fill_with_stride
-  term = NS(_bridge=bridge, executed_physical_action=offsets)
+  term = NS(
+    _bridge=bridge,
+    executed_physical_action=offsets,
+    cfg=NS(
+      feedback_modalities=("wrench",),
+      wrench_force_only=True,
+      wrench_sensor_names=("LeftHandForceSensor", "RightHandForceSensor"),
+    ),
+  )
   monkeypatch.setattr(accessors, "residual_action", lambda env: term)
   sensors = {
     name: NS(adr=[index])
@@ -61,6 +69,9 @@ def test_dispatch_trace_reads_actual_input_offsets(
   assert trace.active.tolist() == [1, 0]
   trace.close()
   assert bridge.fill_controller_input is fill_with_stride
+  term.cfg.wrench_force_only = False
+  with pytest.raises(ValueError, match="force-only"):
+    DispatchTrace(env)
 
 
 def test_max_lag_and_failure_snapshot_precede_reset(

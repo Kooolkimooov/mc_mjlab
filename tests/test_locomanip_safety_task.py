@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import pytest
 import torch
+import yaml
 from conftest import requires_controller
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl import RslRlOnPolicyRunnerCfg
@@ -26,12 +27,23 @@ from mc_mjlab.tasks.locomanip_safety.locomanip_safety_env_cfg import (
   SAFETY_CONFIG,
   TRANSITION_MIDPOINT_KG,
 )
-from mc_mjlab.tasks.locomanip_safety.runner import validate_authority_report
+from mc_mjlab.tasks.locomanip_safety.runner import (
+  LocomanipSafetyRunner,
+  controller_inputs_sha256,
+  validate_authority_report,
+)
 
 pytestmark = requires_controller(SAFETY_CONFIG)
 
 
 def test_registered_task_keeps_profile_and_ppo_budget() -> None:
+  assert yaml.safe_load(SAFETY_CONFIG.read_text()) == {
+    "MainRobot": "HRP5P",
+    "Enabled": "LocomanipController",
+    "Timestep": 0.002,
+    "GUIServer": {"Enable": False},
+    "Log": False,
+  }
   cfg = load_env_cfg(TASK_ID)
   action = cast(
     ResidualFeedbackJointPositionActionCfg, cfg.actions[accessors.ACTION_NAME]
@@ -95,12 +107,20 @@ def test_training_gate_rejects_stale_or_missing_authority(
   path = tmp_path / "authority.json"
   report: dict[str, Any] = {
     "profile_sha256": hashlib.sha256(SAFETY_CONFIG.read_bytes()).hexdigest(),
+    "controller_inputs_sha256": controller_inputs_sha256(SAFETY_CONFIG),
     "all_channels_delivered": True,
     "measurable_near_failure": True,
     "encoder_bias": False,
+    "passing_mass_kg": 525.0,
+    "failing_mass_kg": 550.0,
   }
   path.write_text(json.dumps(report))
   validate_authority_report(path)
+  report["controller_inputs_sha256"] = "different"
+  path.write_text(json.dumps(report))
+  with pytest.raises(RuntimeError, match="installed controller inputs"):
+    validate_authority_report(path)
+  report["controller_inputs_sha256"] = controller_inputs_sha256(SAFETY_CONFIG)
   report["profile_sha256"] = "different"
   path.write_text(json.dumps(report))
   with pytest.raises(RuntimeError, match="different controller profile"):
@@ -110,3 +130,42 @@ def test_training_gate_rejects_stale_or_missing_authority(
   path.write_text(json.dumps(report))
   with pytest.raises(RuntimeError, match="authority"):
     validate_authority_report(path)
+
+
+def test_authority_gate_checks_transition_and_records_exact_report(
+  tmp_path: Path,
+) -> None:
+  report = {
+    "profile_sha256": hashlib.sha256(SAFETY_CONFIG.read_bytes()).hexdigest(),
+    "controller_inputs_sha256": controller_inputs_sha256(SAFETY_CONFIG),
+    "all_channels_delivered": True,
+    "measurable_near_failure": True,
+    "encoder_bias": True,
+    "passing_mass_kg": 525.0,
+    "failing_mass_kg": 550.0,
+  }
+  source = tmp_path / "source.json"
+  source.write_text(json.dumps(report))
+  raw = validate_authority_report(source)
+  assert raw == source.read_bytes()
+  runner = cast(LocomanipSafetyRunner, NS(_authority_report=raw))
+  LocomanipSafetyRunner.materialize_task_inputs(runner, tmp_path)
+  assert (tmp_path / "authority_gate.json").read_bytes() == raw
+  state = LocomanipSafetyRunner.checkpoint_task_state(runner)["authority_gate_report"]
+  assert state["sha256"] == hashlib.sha256(raw).hexdigest()
+  assert state["report"] == report
+  LocomanipSafetyRunner.restore_task_state(runner, {"authority_gate_report": state})
+  with pytest.raises(RuntimeError, match="authority report differs"):
+    LocomanipSafetyRunner.restore_task_state(runner, {})
+
+  report["passing_mass_kg"] = 10
+  report["failing_mass_kg"] = 900
+  source.write_text(json.dumps(report))
+  with pytest.raises(RuntimeError, match="525/550 kg transition"):
+    validate_authority_report(source)
+  report["passing_mass_kg"] = 525
+  report["failing_mass_kg"] = 550
+  report.pop("encoder_bias")
+  source.write_text(json.dumps(report))
+  with pytest.raises(RuntimeError, match="encoder_bias"):
+    validate_authority_report(source)

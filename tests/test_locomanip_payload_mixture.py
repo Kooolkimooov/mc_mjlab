@@ -31,6 +31,7 @@ def test_mixture_keeps_model_fields_and_recompute_contract() -> None:
   assert payload_mixture.mass_bands(950)[0] == (875, 1000)
   with pytest.raises(ValueError):
     payload_mixture.mass_bands(float("nan"))
+  assert payload_mixture.mass_bands(20)[1] == (10, 10)
 
 
 def test_reset_partitions_ids_and_calls_density_randomization_once_per_band(
@@ -61,3 +62,15 @@ def test_reset_partitions_ids_and_calls_density_randomization_once_per_band(
     env, torch.tensor([], dtype=torch.long), 537.5, 10, asset
   )
   assert calls == []
+
+
+def test_degenerate_lower_band_redistributes_samples(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  calls = []
+  monkeypatch.setattr(dr, "pseudo_inertia", lambda env, ids, **kw: calls.append(ids))
+  monkeypatch.setattr(torch, "rand", lambda *a, **kw: torch.tensor([0.1, 0.9]))
+  env = cast(Any, NS(num_envs=2, device="cpu"))
+  asset = SceneEntityCfg("cart", body_names=("Body",))
+  payload_mixture.transition_payload(env, torch.tensor([0, 1]), 20, 10, asset)
+  assert [ids.tolist() for ids in calls] == [[0], [1]]
