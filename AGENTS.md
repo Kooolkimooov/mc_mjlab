@@ -278,10 +278,11 @@ From mjlab down to mc_rtc:
   sub-*packages* are walked, so a task added as a bare module never registers;
   and `register_mjlab_task` takes built cfgs, so `import mjlab` now builds this
   repo's env cfgs — without a sourced mc_rtc workspace mjlab's loader reports
-  that as a `[WARN]` plus traceback rather than failing. Seventeen ids register, and
+  that as a `[WARN]` plus traceback rather than failing. Nineteen ids register, and
   they are all of them (six residual-balance, two zero-residual, six locomanip --
   a demo, position residual and hand-force feedback for each of HRP5P/JVRC1 --
-  one each for residual_mpc and residual_feedback, and one HRP5P locomanip safety task):
+  two joint residual motion tasks, one each for residual_mpc and residual_feedback,
+  and one HRP5P locomanip safety task):
   the ten archived ablations and their
   `MC_MJLAB_REGISTER_ARCHIVED_TASKS` switch are gone. Reproducing an archived
   experiment means checking out the revision before that cleanup; every

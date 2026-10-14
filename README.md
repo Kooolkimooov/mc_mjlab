@@ -252,7 +252,7 @@ uv run play  Mc-Mjlab-Residual-Balance-Logisticcontroller-Ismpc-Hrp5P-Position \
   --checkpoint-file <path/to/model_*.pt>
 ```
 
-The mc_mjlab surface is seventeen tasks, and `uv run list-envs` shows all of them.
+The mc_mjlab surface is nineteen tasks, and `uv run list-envs` shows all of them.
 One, the achievement-gated ankle curriculum, advances only from held-out
 qualification reports — see
 [docs/difficulty.md](docs/difficulty.md#achievement_finite_impulse_curriculum)
@@ -262,6 +262,22 @@ barebones cart-pushing residual: it trains, but it carries one task reward and n
 curriculum, and every episode pushes the same waypoint until you randomize one —
 see [docs/locomanip.md](docs/locomanip.md#locomanip_residual_env_cfg) for what is
 wired and what is deliberately missing.
+
+The `locomanip_motion` variant adds a controller motion action after the joint
+residual: zero keeps normal speed, 0.5 requests half speed, and 0.95 or more
+requests hold. A later zero request resumes the remaining route with a half-speed
+cap for that episode. The controller
+coordinates cart braking with completion of the active footstep. Use
+`uv run list-envs` for its robot-specific task ID, and verify the installed
+controller callback before training:
+
+```sh
+uv run python scripts/probe_locomanip_motion.py --mass 10 \
+  --registered-cap --output logs/locomanip/motion-check/mass-10
+```
+
+See [motion authority](docs/locomanip-motion.md#locomanipmotionaction) for
+gating, timing and the difference between a safe hold and task completion.
 
 Locomanip also registers a hand-force feedback policy for HRP5P and JVRC1.
 It learns six sensor-frame force corrections, enabled while both hands hold
