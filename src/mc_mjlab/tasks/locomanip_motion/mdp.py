@@ -70,3 +70,15 @@ def braking_count(env: ManagerBasedRlEnv) -> torch.Tensor:
 def holding(env: ManagerBasedRlEnv) -> torch.Tensor:
   """Charge sustained holding separately from travelling at reduced speed."""
   return motion_holding(env) * accessors.holding(env)
+
+
+def motion_decision_state(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """Expose the pre-action decision mask, clock and latched motion request."""
+  return cast(
+    "LocomanipMotionAction", accessors.residual_action(env)
+  ).motion_decision_state
+
+
+def motion_decisions(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """Count selections of motion requests rather than repeated held actions."""
+  return cast("LocomanipMotionAction", accessors.residual_action(env)).motion_decisions

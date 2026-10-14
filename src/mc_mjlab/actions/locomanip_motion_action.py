@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -35,6 +36,7 @@ class LocomanipMotionActionCfg(McRtcResidualJointPositionActionCfg):
   motion_hold_phase: float
   hold_action_threshold: float = 0.95
   minimum_motion_scale: float = 0.1
+  motion_decision_period_s: float = 2.0
 
   def __post_init__(self) -> None:
     super().__post_init__()
@@ -60,6 +62,11 @@ class LocomanipMotionActionCfg(McRtcResidualJointPositionActionCfg):
       raise ValueError("hold_action_threshold must be in (0, 1]")
     if not 0.1 <= self.minimum_motion_scale <= 1:
       raise ValueError("minimum_motion_scale must be in [0.1, 1]")
+    if (
+      not math.isfinite(self.motion_decision_period_s)
+      or self.motion_decision_period_s <= 0
+    ):
+      raise ValueError("motion_decision_period_s must be finite and positive")
 
   def build(self, env: ManagerBasedRlEnv) -> LocomanipMotionAction:
     return LocomanipMotionAction(self, env)
@@ -73,7 +80,18 @@ class LocomanipMotionAction(McRtcResidualJointPositionAction):
   def process_actions(self, actions: torch.Tensor) -> None:
     """Keep zero action at nominal speed and map positive requests to slowdown."""
     self._motion_braking_events.zero_()
-    self._motion_raw.copy_(actions[:, -1].clamp(-1.0, 1.0))
+    enabled = self._motion_enabled()
+    due = enabled & (self._motion_steps_remaining == 0)
+    self._motion_raw.copy_(
+      torch.where(due, actions[:, -1].clamp(-1.0, 1.0), self._motion_raw)
+    )
+    self._motion_raw.masked_fill_(~enabled, 0.0)
+    self._motion_decisions.add_(due)
+    self._motion_steps_remaining.copy_(
+      torch.where(due, self._motion_decision_steps, self._motion_steps_remaining)
+    )
+    self._motion_steps_remaining.sub_(1).clamp_min_(0)
+    self._motion_steps_remaining.masked_fill_(~enabled, 0)
     slowdown = self._motion_raw.clamp_min(0.0)
     self._motion_requested.copy_(
       torch.where(
@@ -93,6 +111,16 @@ class LocomanipMotionAction(McRtcResidualJointPositionAction):
     self._motion_dispatched = torch.ones_like(self._motion_raw)
     self._motion_braking_events = torch.zeros_like(self._motion_raw)
     self._motion_count_previous = torch.zeros_like(self._motion_raw)
+    period = self.cfg.motion_decision_period_s / self._env.step_dt
+    self._motion_decision_steps = round(period)
+    if self._motion_decision_steps < 1 or not math.isclose(
+      period, self._motion_decision_steps
+    ):
+      raise ValueError(
+        "motion decision period must be an integer number of policy steps"
+      )
+    self._motion_steps_remaining = torch.zeros_like(self._motion_raw, dtype=torch.long)
+    self._motion_decisions = torch.zeros_like(self._motion_raw)
 
   def _advance_action_extensions(self) -> None:
     """Dispatch authority only with fresh bilateral Hold and a healthy controller."""
@@ -122,7 +150,20 @@ class LocomanipMotionAction(McRtcResidualJointPositionAction):
     self._motion_dispatched[env_ids] = 1.0
     self._motion_braking_events[env_ids] = 0.0
     self._motion_count_previous[env_ids] = 0.0
+    self._motion_steps_remaining[env_ids] = 0
+    self._motion_decisions[env_ids] = 0.0
     self.set_datastore_scalar_input(MOTION_SCALE_SETTER, self._motion_dispatched)
+
+  def _motion_enabled(self) -> torch.Tensor:
+    """Use collected pre-action phase and health flags for decision eligibility."""
+    enabled = (
+      self._datastore_output_fresh
+      & ~self.controller_failed
+      & ~self.controller_worker_failed
+    )
+    for getter in self.cfg.motion_phase_getters:
+      enabled &= self.datastore_scalar_output(getter) == self.cfg.motion_hold_phase
+    return enabled
 
   @property
   def motion_scale_requested(self) -> torch.Tensor:
@@ -138,6 +179,23 @@ class LocomanipMotionAction(McRtcResidualJointPositionAction):
   def motion_braking_events(self) -> torch.Tensor:
     """Native braking starts accumulated across collects in this policy step."""
     return self._motion_braking_events
+
+  @property
+  def motion_decision_state(self) -> torch.Tensor:
+    """Expose decision eligibility, normalized clock and the latched request."""
+    return torch.stack(
+      (
+        (self._motion_enabled() & (self._motion_steps_remaining == 0)).float(),
+        self._motion_steps_remaining / self._motion_decision_steps,
+        self._motion_raw,
+      ),
+      dim=-1,
+    )
+
+  @property
+  def motion_decisions(self) -> torch.Tensor:
+    """Count actual motion selections, excluding held and ineligible steps."""
+    return self._motion_decisions
 
   @property
   def raw_action(self) -> torch.Tensor:

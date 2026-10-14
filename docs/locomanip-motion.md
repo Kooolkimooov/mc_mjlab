@@ -513,13 +513,31 @@ must still be compared against a matched baseline before any promotion.
 
 ## braking-events-pilot
 
-**Current:** The revised fresh pilot uses the same 200-iteration budget,
+**Current:** The revised fresh pilot finished all 200 iterations in about
+38 minutes: 3,276,800 transitions. It used the same 200-iteration budget,
 256 environments, seed 42, 64 rollout steps, two minibatches, two epochs and
 20-iteration checkpoint interval. The payload distribution remains log-uniform
 over 10–1000 kg, with training encoder bias enabled. The run name is
 `braking-events-pilot` under the motion task's full registered ID, and output
 runs directly in the existing training tmux. It uses the final native request
 filter, event charge 0.22, slowdown rate 0.03 and held-time rate 0.05.
+
+Over iterations 150–199, 49 logged episode cohorts had mean safe-completion
+metric 0.84426, mean applied scale 0.99409, mean braking starts 0.01003,
+zero held time, zero timeouts and zero worker failures. These are unweighted
+means of cohort metrics, not a pooled episode success rate.
+
+The final deterministic checkpoint was checked at seed 42 with matched
+encoder bias and actor observation corruption, one episode per mass and arm.
+All four arms (baseline, full policy, joints only and motion only) completed
+at 100/550 kg and failed at 525/575 kg. The full policy failed at 28.84 s
+versus baseline 31.32 s at 525 kg, and 31.16 s versus 31.24 s at 575 kg.
+None applied braking. Different masses have different matched bias draws;
+the 550 kg completion does not establish a monotonic mass threshold.
+
+Artifacts are under
+`logs/rsl_rl/Mc-Mjlab-Locomanip-Motion-Locomanipcontroller-Hrp5P-Position-Residual/2026-10-14_23-59-20_braking-events-pilot/`
+and `logs/locomanip/braking-events-pilot-final-channels-2026-10-15/`.
 
 **Re-measure if:** extending this budget or changing controller/reward inputs.
 Training curves alone cannot establish improvement, and a held timeout remains
@@ -529,3 +547,94 @@ zero-action conditions before considering a larger run.
 **History:** The previous `braking-0075-pilot` stalled through repeated
 controller restarts. Its checkpoint is retained and is not resumed across
 the changed controller and observation interface.
+
+## Motion exploration audit on 2026-10-15
+
+**Current:** The actual `MotionScaleRequest.h` at native revision `fb867cb`
+was compiled into a standalone first-acceptance probe. It used 512 trials
+per condition, seeds 42–553, native period 0.002 s, policy period 0.02 s,
+the exact tanh/slowdown mapping and continuously active Hold. This checks
+input acceptance without physics or closed-loop counterfactual trajectories.
+
+At zero latent mean, independent 50 Hz noise with standard deviation
+0.1 or 0.15 produced zero accepted braking targets in 512 ten-second
+trials each. Holding the 0.1 noise sample for one second produced 310/512.
+Zero of 512 has a one-sided 95% upper bound of 0.5834%, not proof of zero
+probability. The filter requires a 0.1 target difference and the same
+0.05-wide rounded target bin for 0.5 s after its 0.25 s low-pass filter.
+
+Final-checkpoint latent standard deviation was 0.06805687. Replaying each
+of its four deterministic request traces with that noise produced one
+acceptance across 2,048 trials: 1/512 at 525 kg, 0/512 at each other mass.
+That acceptance came 16.372 s after Hold began, near the failing trace's end.
+At zero mean, a full-hold action of at least 0.95 has probability about
+2.98e-75 per draw at standard deviation 0.1. Full-hold discovery through
+that exploration is therefore impractical.
+
+`exploration-audit.json` and the C++/Python probe sources are saved beside
+the final channel report. The native header digest is included. These
+results motivate a separate motion timescale and exploration range;
+increasing the braking cost does not remove this input-acceptance barrier.
+
+**Re-measure if:** action mapping, filter, decision timing or exploration changes.
+
+**History:** Independent Gaussian noise was deliberately suppressed to fix
+repeated trajectory restarts; the same suppression blocked initial learning.
+
+## motion_decision_period_s
+
+**Current:** Motion selections are latched for 2.0 s, or 100 policy steps
+at the registered 0.02 s period. Joint residuals continue at 50 Hz. The
+period must be an integer number of policy steps. Only fresh, healthy,
+bilateral Hold permits a selection. Leaving that phase clears the latch
+and clock; reentry selects immediately. Partial resets clear selected rows.
+
+The uncorrupted `motion_decision` observation group contains eligibility,
+remaining clock divided by the interval and the latched raw request.
+Both actor and critic receive it. Clock observations keep the augmented
+environment state observable; eligibility is read before action processing.
+The native filter and restart protection are unchanged.
+
+Two seconds allows the approximately 1.25 s acceptance time measured for
+a sustained half-speed request. It also means a newly needed policy command
+can wait up to two seconds for the next decision. Native explicit hold still
+bypasses its filter when selected; it does not override the policy clock.
+This latency is a tradeoff to test near failures, not a safety guarantee.
+
+**Re-measure if:** the period, native filtering or task transition timing changes.
+
+**History:** The previous channel offered a new independent request every
+20 ms, which the controller intentionally rejected as jitter.
+
+## MotionGaussianDistribution
+
+**Current:** The motion latent standard deviation starts at 0.8 and is
+learned within 0.5–1.0, independently of joint noise, which retains its
+0.1 initial value and 0.05–0.15 bounds. The fresh deterministic mean stays
+exactly zero. At zero mean, motion exploration now reaches half-speed and
+full-hold requests, while the joint residual distribution is unchanged.
+
+The likelihood is the sum of joint log densities plus motion log density
+on decision steps only. Nondecision motion output is a zero placeholder;
+the environment retains its previous selection. Motion entropy and KL are
+also excluded on those steps. The raw eligibility flag is stored with the
+old distribution parameters and reconstructed from saved observations for
+shuffled minibatches, rollout KL and diagnostics. Held actions are not
+repeated independent samples in PPO.
+
+The registered actor input is now 891 values and critic input 1020, including
+the three clock fields. The distribution also has a separate motion noise
+parameter. Existing checkpoints are not resumed across this interface change.
+Reward costs remain 0.03 slowdown, 0.22 per native start and 0.05 held time.
+
+**Re-measure if:** the observation mask, PPO storage, likelihood reduction or
+sampling distribution changes. Costs remain calibrated on fixed diagnostic
+trajectories; a learned policy still needs matched baseline evaluation.
+
+**History:** A real CPU PPO test spans two rollouts and shuffled minibatches;
+inactive motion has zero density contribution, KL and gradient. A 16-env
+HRP5P live smoke test at 10 kg, seed 42, encoder bias enabled, ran four PPO
+updates with finite losses and gradients. Nine rows reached native braking
+starts. Stored masks matched the action term's pre-action clock, latched
+requests matched their sampled selections, and checkpoint reload was exact.
+Artifacts: `logs/locomanip/multirate-motion-smoke-2026-10-15/`.

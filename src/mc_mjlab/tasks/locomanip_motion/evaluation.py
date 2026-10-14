@@ -13,5 +13,6 @@ LOCOMANIP_MOTION_EVALUATION = replace(
     "motion_scale",
     "motion_holding",
     "braking_starts",
+    "motion_decisions",
   ),
 )

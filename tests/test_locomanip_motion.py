@@ -34,6 +34,8 @@ from mc_mjlab.tasks.locomanip_motion import TASK_IDS
 from mc_mjlab.tasks.locomanip_motion import mdp as motion_mdp
 
 if TYPE_CHECKING:
+  from mjlab.rl import RslRlOnPolicyRunnerCfg
+
   from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
     McRtcResidualJointPositionActionCfg,
   )
@@ -48,7 +50,7 @@ def motion_action() -> LocomanipMotionAction:
     load_env_cfg(TASK_IDS["HRP5P"]).actions[accessors.ACTION_NAME],
   )
   action = object.__new__(LocomanipMotionAction)
-  action._env = cast(Any, NS(num_envs=5, device="cpu"))
+  action._env = cast(Any, NS(num_envs=5, device="cpu", step_dt=0.02))
   action.cfg = cfg
   action._action_dim = action._residual_action_dim = 2
   action._raw_actions = torch.zeros(5, 2)
@@ -269,3 +271,85 @@ def test_holding_cost_excludes_slow_travel_and_inactive_hand_phases(
   torch.testing.assert_close(
     manager.compute(0.02), torch.tensor([0, 0, -0.001, 0, 0]).float()
   )
+
+
+def test_motion_latches_per_row_while_joints_keep_updating(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  action = motion_action()
+  monkeypatch.setattr(
+    McRtcResidualJointPositionAction,
+    "process_actions",
+    lambda self, requests: self._raw_actions.copy_(requests),
+  )
+  action.process_actions(torch.tensor([[0.1, 0.2, 0.5]] * 5))
+  assert action.motion_decisions.tolist() == [1] * 5
+  assert action.motion_decision_state[:, 0].tolist() == [0] * 5
+  assert action.motion_decision_state[:, 1].tolist() == pytest.approx([0.99] * 5)
+  for _ in range(99):
+    action.process_actions(torch.tensor([[0.3, 0.4, 0.0]] * 5))
+  assert action.motion_scale_requested.tolist() == [0.5] * 5
+  assert action._raw_actions.tolist() == pytest.approx(torch.tensor([[0.3, 0.4]] * 5))
+  assert action.motion_decision_state[:, 0].tolist() == [1] * 5
+  action._reset_action_extensions(torch.tensor([1]))
+  assert action.motion_decision_state[:, 2].tolist() == [0.5, 0, 0.5, 0.5, 0.5]
+  action.process_actions(torch.zeros(5, 3))
+  assert action.motion_scale_requested.tolist() == [1] * 5
+  assert action.motion_decisions.tolist() == [2, 1, 2, 2, 2]
+
+
+def test_phase_exit_clears_latch_and_reentry_selects_immediately(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  action = motion_action()
+  monkeypatch.setattr(
+    McRtcResidualJointPositionAction, "process_actions", lambda self, requests: None
+  )
+  action._datastore_scalar_outputs[accessors.LEFT_PHASE][0] = 0
+  action._datastore_output_fresh[1] = False
+  action.controller_failed[2] = True
+  action.controller_worker_failed[3] = True
+  assert action.motion_decision_state[:, 0].tolist() == [0, 0, 0, 0, 1]
+  action.process_actions(torch.ones(5, 3))
+  assert action.motion_scale_requested.tolist() == [1, 1, 1, 1, 0]
+  action._datastore_scalar_outputs[accessors.LEFT_PHASE][4] = 0
+  action.process_actions(torch.ones(5, 3))
+  assert action.motion_scale_requested.tolist() == [1] * 5
+  action._datastore_scalar_outputs[accessors.LEFT_PHASE][4] = accessors.HOLD_PHASE
+  assert action.motion_decision_state[:, 0].tolist() == [0, 0, 0, 0, 1]
+  action.process_actions(torch.tensor([[0, 0, 0.5]] * 5))
+  assert action.motion_scale_requested.tolist() == [1, 1, 1, 1, 0.5]
+
+
+def test_decision_state_is_uncorrupted_and_used_by_actor_and_critic() -> None:
+  cfg = load_env_cfg(TASK_IDS["HRP5P"])
+  group = cfg.observations["motion_decision"]
+  assert not group.enable_corruption
+  agent = cast("RslRlOnPolicyRunnerCfg", load_rl_cfg(TASK_IDS["HRP5P"]))
+  assert agent.obs_groups == {
+    "actor": ("actor", "motion_decision"),
+    "critic": ("critic", "motion_decision"),
+  }
+  assert agent.actor.distribution_cfg is not None
+  assert agent.actor.distribution_cfg["init_std"] == 0.1
+  assert agent.actor.distribution_cfg["motion_init_std"] == 0.8
+
+
+def test_partial_reset_preserves_other_rows_decision_clocks() -> None:
+  action = motion_action()
+  action._motion_steps_remaining.copy_(torch.tensor([20, 40, 60, 80, 99]))
+  action._motion_decisions.fill_(3)
+  action._reset_action_extensions(torch.tensor([1, 3]))
+  assert action._motion_steps_remaining.tolist() == [20, 0, 60, 0, 99]
+  assert action.motion_decisions.tolist() == [3, 0, 3, 0, 3]
+  assert action.motion_decision_state[:, 0].tolist() == [0, 1, 0, 1, 0]
+
+
+def test_decision_interval_respects_policy_timestep() -> None:
+  action = motion_action()
+  action._env = cast(Any, NS(num_envs=5, device="cpu", step_dt=0.01))
+  action._setup_action_extensions(action.cfg)
+  assert action._motion_decision_steps == 200
+  action.cfg.motion_decision_period_s = 0.015
+  with pytest.raises(ValueError, match="integer number"):
+    action._setup_action_extensions(action.cfg)
