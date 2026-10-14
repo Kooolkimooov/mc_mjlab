@@ -30,7 +30,9 @@ one period in exchange for overlapping the solve with the GPU sim.
   overridden — but anything it sets that the repo file does not will apply
   silently. Check it before blaming the repo config.
 - Residual-balance checkpoints embed the project/user mc_rtc YAML, the selected
-  installed controller YAML, and PD gains. The custom runner rejects a mismatch;
+  installed controller YAML, PD gains, and selected controller binary hashes.
+  Source Git commits are recorded when the build tree identifies them. The
+  custom runner rejects a mismatch;
   do not bypass that check and call the result an evaluation of the same policy.
 - The mjlab dependency source is a per-machine choice (README "mjlab
   dependency"): PyPI by default, or an editable `../mjlab` checkout via a

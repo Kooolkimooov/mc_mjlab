@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from mc_mjlab.bridge.config import get_controller_name
+from mc_mjlab.rl.controller_artifacts import controller_artifact_paths
 from mc_mjlab.rl.runner import McRtcResidualOnPolicyRunner
 from mc_mjlab.tasks.locomanip_safety.locomanip_safety_env_cfg import (
   FAILING_MASS_KG,
@@ -29,6 +30,7 @@ def controller_inputs_sha256(config: Path) -> str:
     Path.home() / ".config/mc_rtc/mc_rtc.yaml",
     *controller_config_paths(name),
     *user_controller_config_paths(name),
+    *controller_artifact_paths(name),
   ]
   digest = hashlib.sha256()
   for path in paths:

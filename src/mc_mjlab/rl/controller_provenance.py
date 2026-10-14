@@ -12,6 +12,7 @@ from mjlab.rl import RslRlVecEnvWrapper
 
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionCfg
 from mc_mjlab.bridge.config import get_controller_name
+from mc_mjlab.rl.controller_artifacts import collect_controller_artifacts
 from mc_mjlab.utils.controller_install import (
   controller_config_paths,
   user_controller_config_paths,
@@ -54,14 +55,22 @@ def collect_controller_provenance(env: RslRlVecEnvWrapper) -> dict:
     _file_record(f"user_controller_config_{index}", path)
     for index, path in enumerate(user_controller_config_paths(controller_name))
   )
-  return {"controller_name": controller_name, "files": records}
+  return {
+    "controller_name": controller_name,
+    "files": records,
+    "artifacts": collect_controller_artifacts(controller_name),
+  }
 
 
 def materialize_provenance(provenance: dict, log_dir: Path) -> None:
   """Write readable copies alongside the run's ordinary parameter dump."""
   output_dir = log_dir / "base_controller_config"
   output_dir.mkdir(parents=True, exist_ok=True)
-  manifest = {"controller_name": provenance["controller_name"], "files": []}
+  manifest = {
+    "controller_name": provenance["controller_name"],
+    "files": [],
+    "artifacts": provenance.get("artifacts", []),
+  }
   for index, record in enumerate(provenance["files"]):
     public_record = {key: value for key, value in record.items() if key != "content"}
     if record["present"]:
@@ -83,4 +92,11 @@ def provenance_signature(provenance: dict) -> tuple:
     for record in provenance["files"]
     if record["present"]
   )
-  return provenance["controller_name"], files
+  artifacts = tuple(record["sha256"] for record in provenance.get("artifacts", []))
+  return provenance["controller_name"], files, artifacts
+
+
+def provenance_matches(saved: dict, current: dict) -> bool:
+  """Compare binaries when recorded while preserving older checkpoints."""
+  width = 3 if "artifacts" in saved else 2
+  return provenance_signature(saved)[:width] == provenance_signature(current)[:width]

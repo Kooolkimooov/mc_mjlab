@@ -8,8 +8,9 @@ logging. The selected hand adaptation (`alpha: 0.03`,
 `forceProjection: [0, 0, 0.98]`, `momentProjection: [0, 0, 0]`) already lives in
 the installed per-robot controller configuration. The run provenance snapshots
 the selector and installed controller files. The authority gate hashes both
-the selector and the installed/user controller inputs, so a changed native
-tuning requires a new probe. The old 666-line project snapshot and its
+the selector, installed/user controller inputs and selected controller
+binaries, so a changed native tuning or rebuilt controller requires a new
+probe. The old 666-line project snapshot and its
 authority report are
 historical artifacts under `logs/locomanip/safety-2026-10-13/`; the report's
 profile hash cannot admit another training run. A new authority probe is

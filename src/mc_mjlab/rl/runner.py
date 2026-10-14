@@ -13,7 +13,7 @@ from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionBase
 from mc_mjlab.rl.controller_provenance import (
   collect_controller_provenance,
   materialize_provenance,
-  provenance_signature,
+  provenance_matches,
 )
 from mc_mjlab.rl.effective_training_manifest import (
   build_effective_training_manifest,
@@ -85,14 +85,14 @@ class McRtcResidualOnPolicyRunner(MjlabOnPolicyRunner):
     saved_provenance = checkpoint_infos.get(self.PROVENANCE_KEY)
     if saved_provenance is None:
       print(f"[mc_mjlab] checkpoint {path} predates base-controller provenance")
-    elif provenance_signature(saved_provenance) != provenance_signature(
-      self._controller_provenance
-    ):
+    elif not provenance_matches(saved_provenance, self._controller_provenance):
       raise RuntimeError(
-        "Checkpoint base-controller configuration differs from the active "
-        "configuration. Restore the YAML/PD files embedded under infos/"
+        "Checkpoint base-controller inputs or binary differ from the active "
+        "installation. Inspect the files and artifacts under infos/"
         f"{self.PROVENANCE_KEY} before loading {path}."
       )
+    elif "artifacts" not in saved_provenance:
+      print(f"[mc_mjlab] checkpoint {path} predates binary provenance")
 
     saved_manifest = checkpoint_infos.get(self.MANIFEST_KEY)
     if saved_manifest is None:
