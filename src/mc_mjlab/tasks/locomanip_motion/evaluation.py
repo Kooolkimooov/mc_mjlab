@@ -8,5 +8,10 @@ from mc_mjlab.tasks.locomanip.evaluation import LOCOMANIP_EVALUATION
 
 LOCOMANIP_MOTION_EVALUATION = replace(
   LOCOMANIP_EVALUATION,
-  metrics=(*LOCOMANIP_EVALUATION.metrics, "motion_scale", "motion_holding"),
+  metrics=(
+    *LOCOMANIP_EVALUATION.metrics,
+    "motion_scale",
+    "motion_holding",
+    "braking_starts",
+  ),
 )

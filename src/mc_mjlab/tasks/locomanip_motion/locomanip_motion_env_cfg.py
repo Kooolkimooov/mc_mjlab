@@ -18,7 +18,9 @@ from mc_mjlab.tasks.locomanip.profiles import HRP5P, LocomanipProfile
 from mc_mjlab.tasks.locomanip_motion import mdp
 
 MOTION_EPISODE_SCALE = 2.0
-BRAKING_COST = 0.075
+BRAKING_COST = 0.03
+BRAKING_START_COST = 0.22
+HOLDING_COST = 0.05
 
 
 def locomanip_motion_env_cfg(
@@ -37,8 +39,13 @@ def locomanip_motion_env_cfg(
   for group in cfg.observations.values():
     group.terms["motion_control"] = ObservationTermCfg(func=mdp.motion_observation)
   cfg.rewards["braking"] = RewardTermCfg(func=mdp.braking, weight=-BRAKING_COST)
+  cfg.rewards["braking_start"] = RewardTermCfg(
+    func=mdp.braking_start, weight=-BRAKING_START_COST
+  )
+  cfg.rewards["holding"] = RewardTermCfg(func=mdp.holding, weight=-HOLDING_COST)
   cfg.metrics.update(
     motion_scale=MetricsTermCfg(func=mdp.motion_scale),
     motion_holding=MetricsTermCfg(func=mdp.motion_holding),
+    braking_starts=MetricsTermCfg(func=mdp.braking_count, reduce="last"),
   )
   return cfg

@@ -21,10 +21,14 @@ from mjlab.rl import RslRlVecEnvWrapper
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 
 from mc_mjlab.actions.locomanip_motion_action import (
+  MOTION_COUNT_GETTER,
+  MOTION_DELAY_GETTER,
+  MOTION_FILTER_GETTER,
   MOTION_LIMIT_GETTER,
   MOTION_SCALE_GETTER,
   MOTION_SCALE_SETTER,
   MOTION_STATE_GETTER,
+  MOTION_TARGET_GETTER,
   LocomanipMotionAction,
 )
 from mc_mjlab.rl.controller_provenance import collect_controller_provenance
@@ -52,6 +56,8 @@ def main() -> None:
   parser.add_argument("--check-partial-reset", action="store_true")
   parser.add_argument("--registered-cap", action="store_true")
   parser.add_argument("--reward-audit", action="store_true")
+  parser.add_argument("--jitter", action="store_true")
+  parser.add_argument("--encoder-bias", action="store_true")
   parser.add_argument("--output", type=Path, required=True)
   parser.add_argument("--device", default="cuda:0")
   args = parser.parse_args()
@@ -61,6 +67,8 @@ def main() -> None:
     parser.error("resume scale must be in [0.1, 1]")
   args.output.mkdir(parents=True, exist_ok=True)
   arms = (*ARMS, "hold_forever") if args.reward_audit else ARMS
+  if args.jitter:
+    arms = (*arms, "jitter_0.1", "jitter_0.05")
   cfg = load_env_cfg(TASK_IDS[args.robot])
   cfg.scene.num_envs = len(arms)
   cfg.seed = args.seed
@@ -88,7 +96,7 @@ def main() -> None:
   cfg.events["encoder_bias"] = EventTermCfg(
     func=matched_encoder_bias,
     mode="startup",
-    params={"rows": conditions, "enabled": False},
+    params={"rows": conditions, "enabled": args.encoder_bias},
   )
   samples: list[list[dict]] = [[] for _ in arms]
   results: list[dict | None] = [None] * len(arms)
@@ -110,6 +118,7 @@ def main() -> None:
     actions = torch.zeros(
       env.num_envs, env.action_manager.total_action_dim, device=env.device
     )
+    noise_generator = torch.Generator(device=env.device).manual_seed(args.seed)
     with (args.output / "trace.jsonl").open("w") as stream:
       for step in range(env.max_episode_length):
         time = step * env.step_dt
@@ -132,6 +141,13 @@ def main() -> None:
           )
         if args.reward_audit and triggered[3] is not None:
           actions[3, -1] = 1.0
+        if args.jitter:
+          for index, std in zip(
+            range(len(arms) - 2, len(arms)), (0.1, 0.05), strict=True
+          ):
+            actions[index, -1] = (
+              torch.randn((), device=env.device, generator=noise_generator) * std
+            ).clamp(-1.0, 1.0)
         _, rewards, terminated, truncated, _ = env.step(actions)
         frames = _frames(env, term, time + env.step_dt)
         rates = env.reward_manager._step_reward.cpu().tolist()
@@ -164,7 +180,7 @@ def main() -> None:
   report = {
     "mass_kg": args.mass,
     "seed": args.seed,
-    "encoder_bias": False,
+    "encoder_bias": args.encoder_bias,
     "resume_scale": args.resume_scale,
     "episode_cap_s": cfg.episode_length_s,
     "step_dt": env.step_dt,
@@ -172,6 +188,7 @@ def main() -> None:
       "RslRlOnPolicyRunnerCfg", load_rl_cfg(TASK_IDS[args.robot])
     ).algorithm.gamma,
     "reward_weights": reward_weights,
+    "jitter": args.jitter,
     "results": results,
     "provenance": provenance,
     "checks": _checks(samples[: len(ARMS)], args.hold_seconds),
@@ -181,6 +198,32 @@ def main() -> None:
     report["checks"]["other_row_reset_preserves_hold"] = bool(held) and (
       held[0]["time_s"] < samples[0][-1]["time_s"] < held[-1]["time_s"]
     )
+  if args.jitter:
+    report["checks"]["jitter_completed"] = all(
+      bool(arm[-1]["complete"])
+      and not any(
+        f[key]
+        for f in arm
+        for key in (*accessors.FALL_TERMINATIONS, "controller_failed", "worker_failed")
+      )
+      for arm in samples[-2:]
+    )
+    report["checks"]["jitter_no_braking"] = all(
+      arm[-1]["braking_count"] == 0.0 for arm in samples[-2:]
+    )
+  report["checks"]["native_event_accounting"] = all(
+    abs(sum(f["braking_events"] for f in arm) - arm[-1]["braking_count"]) < 1e-6
+    for arm in samples
+  )
+  held_frames = [f for f in samples[2] if f["motion_state"] == 2.0]
+  if held_frames:
+    first_feet = held_frames[0]["feet_position"]
+    report["hold_foot_drift_m"] = max(
+      math.dist(foot, first)
+      for frame in held_frames
+      for foot, first in zip(frame["feet_position"], first_feet, strict=True)
+    )
+    report["checks"]["feet_stationary_during_hold"] = report["hold_foot_drift_m"] < 0.01
   (args.output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
   print(json.dumps({"results": results, "checks": report["checks"]}, indent=2))
   if not all(report["checks"].values()):
@@ -192,7 +235,8 @@ def _frames(
 ) -> list[dict]:
   """Capture controller and physical measurements before any row resets."""
   reference = term.datastore_vector_output(accessors.OBJECT_REFERENCE_POSITION)
-  root = env.scene[accessors.ROBOT_ENTITY].data
+  robot = env.scene[accessors.ROBOT_ENTITY]
+  root = robot.data
   tilt = torch.acos((-root.projected_gravity_b[:, 2]).clamp(-1.0, 1.0))
   values = (
     torch.stack(
@@ -213,6 +257,11 @@ def _frames(
         env.termination_manager.get_term("fell_over").to(torch.float32),
         env.termination_manager.get_term("collapsed").to(torch.float32),
         accessors.holding(env),
+        term.datastore_scalar_output(MOTION_COUNT_GETTER),
+        term.datastore_scalar_output(MOTION_TARGET_GETTER),
+        term.datastore_scalar_output(MOTION_FILTER_GETTER),
+        term.datastore_scalar_output(MOTION_DELAY_GETTER),
+        term.motion_braking_events,
       ),
       dim=1,
     )
@@ -235,14 +284,24 @@ def _frames(
     "fell_over",
     "collapsed",
     "holding",
+    "braking_count",
+    "target_scale",
+    "filtered_scale",
+    "request_delay_s",
+    "braking_events",
   )
   column = term._datastore_scalar_input_columns[MOTION_SCALE_SETTER]
   assert term._in_np is not None
   native_inputs = term._in_np[:, column].tolist()
+  foot_ids = [robot.site_names.index(name) for name in ("lf_force", "rf_force")]
+  feet = (
+    (root.site_pos_w[:, foot_ids] - env.scene.env_origins[:, None, :]).cpu().tolist()
+  )
   return [
     {
       "time_s": time,
       "native_input_scale": native_inputs[index],
+      "feet_position": feet[index],
       **dict(zip(keys, row, strict=True)),
     }
     for index, row in enumerate(values)

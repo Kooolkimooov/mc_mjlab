@@ -21,6 +21,10 @@ MOTION_SCALE_SETTER = "Locomanip::setMotionScale"
 MOTION_SCALE_GETTER = "Locomanip::motionScale"
 MOTION_STATE_GETTER = "Locomanip::motionState"
 MOTION_LIMIT_GETTER = "Locomanip::motionScaleLimit"
+MOTION_TARGET_GETTER = "Locomanip::motionRequestScale"
+MOTION_FILTER_GETTER = "Locomanip::motionFilteredScale"
+MOTION_DELAY_GETTER = "Locomanip::motionRequestDelay"
+MOTION_COUNT_GETTER = "Locomanip::motionStopCount"
 
 
 @dataclass(kw_only=True)
@@ -45,6 +49,10 @@ class LocomanipMotionActionCfg(McRtcResidualJointPositionActionCfg):
           MOTION_SCALE_GETTER,
           MOTION_STATE_GETTER,
           MOTION_LIMIT_GETTER,
+          MOTION_TARGET_GETTER,
+          MOTION_FILTER_GETTER,
+          MOTION_DELAY_GETTER,
+          MOTION_COUNT_GETTER,
         )
       )
     )
@@ -64,6 +72,7 @@ class LocomanipMotionAction(McRtcResidualJointPositionAction):
 
   def process_actions(self, actions: torch.Tensor) -> None:
     """Keep zero action at nominal speed and map positive requests to slowdown."""
+    self._motion_braking_events.zero_()
     self._motion_raw.copy_(actions[:, -1].clamp(-1.0, 1.0))
     slowdown = self._motion_raw.clamp_min(0.0)
     self._motion_requested.copy_(
@@ -82,6 +91,8 @@ class LocomanipMotionAction(McRtcResidualJointPositionAction):
     self._motion_raw = torch.zeros(self.num_envs, device=self.device)
     self._motion_requested = torch.ones_like(self._motion_raw)
     self._motion_dispatched = torch.ones_like(self._motion_raw)
+    self._motion_braking_events = torch.zeros_like(self._motion_raw)
+    self._motion_count_previous = torch.zeros_like(self._motion_raw)
 
   def _advance_action_extensions(self) -> None:
     """Dispatch authority only with fresh bilateral Hold and a healthy controller."""
@@ -90,6 +101,13 @@ class LocomanipMotionAction(McRtcResidualJointPositionAction):
       self._datastore_output_fresh
       & ~self.controller_failed
       & ~self.controller_worker_failed
+    )
+    count = self.datastore_scalar_output(MOTION_COUNT_GETTER)
+    self._motion_braking_events.add_(
+      torch.where(enabled, (count - self._motion_count_previous).clamp_min(0.0), 0.0)
+    )
+    self._motion_count_previous.copy_(
+      torch.where(enabled, count, self._motion_count_previous)
     )
     for getter in self.cfg.motion_phase_getters:
       enabled &= self.datastore_scalar_output(getter) == self.cfg.motion_hold_phase
@@ -102,6 +120,8 @@ class LocomanipMotionAction(McRtcResidualJointPositionAction):
     self._motion_raw[env_ids] = 0.0
     self._motion_requested[env_ids] = 1.0
     self._motion_dispatched[env_ids] = 1.0
+    self._motion_braking_events[env_ids] = 0.0
+    self._motion_count_previous[env_ids] = 0.0
     self.set_datastore_scalar_input(MOTION_SCALE_SETTER, self._motion_dispatched)
 
   @property
@@ -113,6 +133,11 @@ class LocomanipMotionAction(McRtcResidualJointPositionAction):
   def motion_scale_dispatched(self) -> torch.Tensor:
     """Scale sent to the controller on the latest native dispatch."""
     return self._motion_dispatched
+
+  @property
+  def motion_braking_events(self) -> torch.Tensor:
+    """Native braking starts accumulated across collects in this policy step."""
+    return self._motion_braking_events
 
   @property
   def raw_action(self) -> torch.Tensor:

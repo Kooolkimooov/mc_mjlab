@@ -66,6 +66,41 @@ def test_discounting_can_prefer_late_failure_to_successful_braking() -> None:
   )
 
 
+def test_native_event_cost_is_once_per_start_without_double_charging() -> None:
+  samples = frames("baseline", [1.0, 1.0])
+  held = frames("hold", [1.0, 1.0], 0.0)
+  for index, frame in enumerate(held):
+    frame["braking_events"] = 2.0 if index else 0.0
+    frame["reward_rates"].update(
+      braking=-0.03, braking_start=-0.22 * frame["braking_events"] / 0.02
+    )
+    frame["reward"] = sum(frame["reward_rates"].values()) * 0.02
+  report = score_braking(
+    samples + held, step_dt=0.02, gamma=1.0, costs=[0.03], event_costs=[0.22]
+  )
+  result = report["arms"]["hold"]
+  assert result["braking_events"] == 2.0
+  assert result["event_count_source"] == "native"
+  assert result["discounted_original"] == pytest.approx(0.04)
+  assert result["event_returns"]["0.03"]["0.22"] == pytest.approx(
+    sum(f["reward"] for f in held)
+  )
+
+
+def test_holding_duration_cost_uses_phase_and_removes_captured_charge() -> None:
+  baseline = frames("baseline", [1.0, 1.0])
+  held = frames("hold", [1.0, 1.0], 0.0)
+  held[0]["holding"] = 0.0
+  held[1]["reward_rates"]["holding"] = -0.05
+  held[1]["reward"] -= 0.001
+  result = score_braking(
+    baseline + held, step_dt=0.02, gamma=1.0, costs=[0.0], holding_costs=[0.05]
+  )["arms"]["hold"]
+  assert result["discounted_holding_seconds"] == 0.02
+  assert result["discounted_original"] == pytest.approx(0.04)
+  assert result["holding_returns"]["0.0"]["0.0"]["0.05"] == pytest.approx(0.039)
+
+
 @pytest.mark.parametrize(
   "fault", ["gap", "reward", "worker", "incomplete", "untriggered"]
 )

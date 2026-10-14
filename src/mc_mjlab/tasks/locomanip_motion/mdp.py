@@ -7,9 +7,13 @@ from typing import TYPE_CHECKING, cast
 import torch
 
 from mc_mjlab.actions.locomanip_motion_action import (
+  MOTION_COUNT_GETTER,
+  MOTION_DELAY_GETTER,
+  MOTION_FILTER_GETTER,
   MOTION_LIMIT_GETTER,
   MOTION_SCALE_GETTER,
   MOTION_STATE_GETTER,
+  MOTION_TARGET_GETTER,
 )
 from mc_mjlab.tasks.locomanip.mdp import accessors
 
@@ -20,7 +24,7 @@ if TYPE_CHECKING:
 
 
 def motion_observation(env: ManagerBasedRlEnv) -> torch.Tensor:
-  """Report dispatched/applied scale, transition state and the resume limit."""
+  """Expose motion execution, filtered intent, accepted target and request delay."""
   term = cast("LocomanipMotionAction", accessors.residual_action(env))
   return torch.stack(
     (
@@ -28,6 +32,9 @@ def motion_observation(env: ManagerBasedRlEnv) -> torch.Tensor:
       term.datastore_scalar_output(MOTION_SCALE_GETTER),
       term.datastore_scalar_output(MOTION_STATE_GETTER) / 2.0,
       term.datastore_scalar_output(MOTION_LIMIT_GETTER),
+      term.datastore_scalar_output(MOTION_TARGET_GETTER),
+      term.datastore_scalar_output(MOTION_FILTER_GETTER),
+      (term.datastore_scalar_output(MOTION_DELAY_GETTER) / 3.0).clamp(0.0, 1.0),
     ),
     dim=1,
   )
@@ -47,3 +54,19 @@ def motion_holding(env: ManagerBasedRlEnv) -> torch.Tensor:
 def braking(env: ManagerBasedRlEnv) -> torch.Tensor:
   """Charge applied slowdown during bilateral Hold, including a capped resume."""
   return (1.0 - motion_scale(env).clamp(0.0, 1.0)) * accessors.holding(env)
+
+
+def braking_start(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """Return an event rate so the timestep-scaled reward charges once per start."""
+  term = cast("LocomanipMotionAction", accessors.residual_action(env))
+  return term.motion_braking_events / env.step_dt
+
+
+def braking_count(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """Report the controller's exact episode count of braking starts."""
+  return accessors.residual_action(env).datastore_scalar_output(MOTION_COUNT_GETTER)
+
+
+def holding(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """Charge sustained holding separately from travelling at reduced speed."""
+  return motion_holding(env) * accessors.holding(env)

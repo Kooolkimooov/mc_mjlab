@@ -17,6 +17,8 @@ def main() -> None:
     "--costs", type=float, nargs="+", default=[0.0, 0.1, 0.25, 0.5, 1.0, 1.1]
   )
   parser.add_argument("--output", type=Path, required=True)
+  parser.add_argument("--event-costs", type=float, nargs="+", default=[0.0])
+  parser.add_argument("--holding-costs", type=float, nargs="+", default=[0.0])
   args = parser.parse_args()
   reports = []
   for run in args.runs:
@@ -25,7 +27,12 @@ def main() -> None:
       json.loads(line) for line in (run / "trace.jsonl").read_text().splitlines()
     ]
     scored = score_braking(
-      frames, step_dt=manifest["step_dt"], gamma=manifest["gamma"], costs=args.costs
+      frames,
+      step_dt=manifest["step_dt"],
+      gamma=manifest["gamma"],
+      costs=args.costs,
+      event_costs=args.event_costs,
+      holding_costs=args.holding_costs,
     )
     scored.update(
       run=str(run.resolve()),
@@ -47,6 +54,16 @@ def main() -> None:
         print(
           f"    baseline break-even cost: {values['cost_at_equal_baseline_return']}"
         )
+      if args.event_costs != [0.0]:
+        print(
+          f"    discounted braking events: {values['discounted_braking_events']:.4f}"
+        )
+        print(f"    returns with event costs: {values['event_returns']}")
+      if args.holding_costs != [0.0]:
+        print(
+          f"    discounted held seconds: {values['discounted_holding_seconds']:.4f}"
+        )
+        print(f"    returns with holding costs: {values['holding_returns']}")
   args.output.parent.mkdir(parents=True, exist_ok=True)
   args.output.write_text(json.dumps(reports, indent=2, allow_nan=False) + "\n")
 

@@ -7,6 +7,8 @@ from collections import defaultdict
 from collections.abc import Sequence
 from typing import Any
 
+_MOTION_COST_TERMS = ("braking", "braking_start", "holding")
+
 
 def score_braking(
   frames: Sequence[dict[str, Any]],
@@ -14,12 +16,18 @@ def score_braking(
   step_dt: float,
   gamma: float,
   costs: Sequence[float],
+  event_costs: Sequence[float] = (0.0,),
+  holding_costs: Sequence[float] = (0.0,),
 ) -> dict[str, Any]:
   """Compare first-episode returns from the shared intervention decision time."""
   if not step_dt > 0 or not 0 < gamma <= 1:
     raise ValueError("positive timestep and gamma in (0, 1] required")
   if not costs or any(not math.isfinite(c) or c < 0 for c in costs):
     raise ValueError("finite nonnegative braking costs required")
+  if not event_costs or any(not math.isfinite(c) or c < 0 for c in event_costs):
+    raise ValueError("finite nonnegative event costs required")
+  if not holding_costs or any(not math.isfinite(c) or c < 0 for c in holding_costs):
+    raise ValueError("finite nonnegative holding costs required")
   groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
   for frame in frames:
     groups[frame["arm"]].append(frame)
@@ -40,14 +48,31 @@ def score_braking(
         gamma**i * f["reward_rates"][name] * step_dt for i, f in enumerate(after)
       )
       for name in after[0]["reward_rates"]
+      if name not in _MOTION_COST_TERMS
     }
-    original = math.fsum(gamma**i * f["reward"] for i, f in enumerate(after))
+    original = math.fsum(
+      gamma**i * _base_reward(f, step_dt) for i, f in enumerate(after)
+    )
     braking = math.fsum(gamma**i * _braking(f) * step_dt for i, f in enumerate(after))
+    events = []
+    previous_state = 0.0
+    for frame in samples:
+      count = frame.get(
+        "braking_events", float(frame["motion_state"] == 1 and previous_state != 1)
+      )
+      if frame["time_s"] > decision_time + step_dt * 1e-6:
+        events.append(count)
+      previous_state = frame["motion_state"]
+    discounted_events = math.fsum(gamma**i * count for i, count in enumerate(events))
     final = samples[-1]
     failed = any(
       bool(final[k]) for k in ("fell_over", "collapsed", "controller_failed")
     )
     held = [f for f in after if f["motion_state"] == 2 and f["holding"]]
+    holding_seconds = math.fsum(
+      gamma**i * step_dt * (f["motion_state"] == 2 and bool(f["holding"]))
+      for i, f in enumerate(after)
+    )
     output[arm] = {
       "completion_time_s": final["time_s"],
       "complete": bool(final["complete"]),
@@ -64,7 +89,11 @@ def score_braking(
       "discounted_original": original,
       "discounted_terms": terms,
       "discounted_braking_seconds": braking,
-      "undiscounted_original": math.fsum(f["reward"] for f in after),
+      "discounted_braking_events": discounted_events,
+      "discounted_holding_seconds": holding_seconds,
+      "braking_events": sum(events),
+      "event_count_source": "native" if "braking_events" in final else "sampled_edges",
+      "undiscounted_original": math.fsum(_base_reward(f, step_dt) for f in after),
       "braking_seconds": math.fsum(_braking(f) * step_dt for f in after),
       "mean_held_reward_rate": (
         math.fsum(sum(f["reward_rates"].values()) for f in held) / len(held)
@@ -75,8 +104,28 @@ def score_braking(
         str(c): {
           "discounted": original - c * braking,
           "undiscounted": math.fsum(
-            f["reward"] - c * _braking(f) * step_dt for f in after
+            _base_reward(f, step_dt) - c * _braking(f) * step_dt for f in after
           ),
+        }
+        for c in costs
+      },
+      "event_returns": {
+        str(c): {
+          str(event_cost): original - c * braking - event_cost * discounted_events
+          for event_cost in event_costs
+        }
+        for c in costs
+      },
+      "holding_returns": {
+        str(c): {
+          str(event_cost): {
+            str(hold_cost): original
+            - c * braking
+            - event_cost * discounted_events
+            - hold_cost * holding_seconds
+            for hold_cost in holding_costs
+          }
+          for event_cost in event_costs
         }
         for c in costs
       },
@@ -98,6 +147,7 @@ def score_braking(
     "step_dt": step_dt,
     "gamma": gamma,
     "truncation_bootstrap_included": False,
+    "registered_motion_costs_removed": True,
     "arms": output,
   }
 
@@ -130,3 +180,11 @@ def _validate_samples(samples: Sequence[dict[str, Any]], step_dt: float) -> None
 def _braking(frame: dict[str, Any]) -> float:
   """Charge applied slowdown during bilateral Hold, including a capped resume."""
   return 1.0 - min(max(frame["applied_scale"], 0.0), 1.0) if frame["holding"] else 0.0
+
+
+def _base_reward(frame: dict[str, Any], step_dt: float) -> float:
+  """Remove captured motion penalties before applying counterfactual costs."""
+  rates = frame["reward_rates"]
+  return frame["reward"] - step_dt * sum(
+    rates.get(key, 0.0) for key in _MOTION_COST_TERMS
+  )

@@ -13,10 +13,14 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 from probe_locomanip_motion import _checks
 
 from mc_mjlab.actions.locomanip_motion_action import (
+  MOTION_COUNT_GETTER,
+  MOTION_DELAY_GETTER,
+  MOTION_FILTER_GETTER,
   MOTION_LIMIT_GETTER,
   MOTION_SCALE_GETTER,
   MOTION_SCALE_SETTER,
   MOTION_STATE_GETTER,
+  MOTION_TARGET_GETTER,
   LocomanipMotionAction,
   LocomanipMotionActionCfg,
 )
@@ -52,9 +56,10 @@ def motion_action() -> LocomanipMotionAction:
   action._datastore_scalar_input_columns = {MOTION_SCALE_SETTER: 0}
   action._datastore_scalar_input_feed = torch.ones(5, 1)
   action._datastore_scalar_outputs = {
-    getter: torch.full((5,), accessors.HOLD_PHASE)
-    for getter in cfg.motion_phase_getters
+    getter: torch.zeros(5) for getter in cfg.datastore_scalar_outputs
   }
+  for getter in cfg.motion_phase_getters:
+    action._datastore_scalar_outputs[getter].fill_(accessors.HOLD_PHASE)
   action._datastore_output_fresh = torch.ones(5, dtype=torch.bool)
   action.controller_failed = torch.zeros(5, dtype=torch.bool)
   action.controller_worker_failed = torch.zeros(5, dtype=torch.bool)
@@ -181,11 +186,16 @@ def test_motion_observation_exposes_controller_resume_limit(
       MOTION_SCALE_GETTER: torch.full((5,), 0.5),
       MOTION_STATE_GETTER: torch.zeros(5),
       MOTION_LIMIT_GETTER: torch.full((5,), 0.5),
+      MOTION_TARGET_GETTER: torch.full((5,), 0.5),
+      MOTION_FILTER_GETTER: torch.full((5,), 0.6),
+      MOTION_DELAY_GETTER: torch.full((5,), 1.5),
     }
   )
   monkeypatch.setattr(accessors, "residual_action", lambda env: action)
   observed = motion_mdp.motion_observation(cast(Any, NS()))
-  torch.testing.assert_close(observed, torch.tensor([[1, 0.5, 0, 0.5]] * 5))
+  torch.testing.assert_close(
+    observed, torch.tensor([[1, 0.5, 0, 0.5, 0.5, 0.6, 0.5]] * 5)
+  )
 
 
 def test_braking_reward_charges_applied_scale_only_during_bilateral_hold(
@@ -204,7 +214,58 @@ def test_braking_reward_charges_applied_scale_only_during_bilateral_hold(
   env = cast(Any, NS(num_envs=5, device="cpu"))
   manager = RewardManager({"braking": cfg.rewards["braking"]}, env)
   torch.testing.assert_close(
-    manager.compute(0.02), torch.tensor([0.0, -0.00075, -0.0015, 0.0, 0.0])
+    manager.compute(0.02), torch.tensor([0.0, -0.0003, -0.0006, 0.0, 0.0])
   )
   assert action.motion_scale_dispatched.tolist() == [1.0] * 5
   assert "braking" not in load_env_cfg(RESIDUAL_TASK_IDS["HRP5P"]).rewards
+
+
+def test_native_braking_events_accumulate_once_and_reset_per_row(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  action = motion_action()
+  count = action._datastore_scalar_outputs[MOTION_COUNT_GETTER]
+  count.fill_(1.0)
+  action._advance_action_extensions()
+  action._advance_action_extensions()
+  torch.testing.assert_close(action.motion_braking_events, torch.ones(5))
+  action._datastore_output_fresh[1] = False
+  count.fill_(2.0)
+  action._advance_action_extensions()
+  torch.testing.assert_close(
+    action.motion_braking_events, torch.tensor([2, 1, 2, 2, 2]).float()
+  )
+  action._reset_action_extensions(torch.tensor([0, 3]))
+  torch.testing.assert_close(
+    action.motion_braking_events, torch.tensor([0, 1, 2, 0, 2]).float()
+  )
+  torch.testing.assert_close(
+    action._motion_count_previous, torch.tensor([0, 1, 2, 0, 2]).float()
+  )
+  monkeypatch.setattr(accessors, "residual_action", lambda env: action)
+  reward = load_env_cfg(TASK_IDS["HRP5P"]).rewards["braking_start"]
+  env = cast(Any, NS(num_envs=5, device="cpu", step_dt=0.02))
+  manager = RewardManager({"braking_start": reward}, env)
+  expected = torch.tensor([0.0, -0.22, -0.44, 0.0, -0.44])
+  torch.testing.assert_close(manager.compute(env.step_dt), expected)
+  env.step_dt = 0.01
+  torch.testing.assert_close(manager.compute(env.step_dt), expected)
+
+
+def test_holding_cost_excludes_slow_travel_and_inactive_hand_phases(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  action = motion_action()
+  action._datastore_scalar_outputs[MOTION_STATE_GETTER] = torch.tensor(
+    [0, 1, 2, 2, 0]
+  ).float()
+  action._datastore_scalar_outputs[accessors.LEFT_PHASE][3] = 3.0
+  monkeypatch.setattr(
+    accessors, "residual_action", lambda env, action_name=accessors.ACTION_NAME: action
+  )
+  env = cast(Any, NS(num_envs=5, device="cpu"))
+  reward = load_env_cfg(TASK_IDS["HRP5P"]).rewards["holding"]
+  manager = RewardManager({"holding": reward}, env)
+  torch.testing.assert_close(
+    manager.compute(0.02), torch.tensor([0, 0, -0.001, 0, 0]).float()
+  )
