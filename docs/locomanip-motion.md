@@ -284,3 +284,85 @@ payload distribution, observation/action interface or encoder bias.
 encoder bias off; it is an experimental coefficient, not a qualified safety
 result. The real reward-manager test checks timestep scaling, bilateral
 phase gating and charging a half-speed resume despite a nominal request.
+
+## probe_locomanip_policy_channels.py
+
+**Current:** The checkpoint diagnostic compares zero actions, the full policy,
+joint residuals with the motion channel forced to zero, and the motion channel
+with all joint residuals forced to zero. Each arm runs its own first episode
+with identical requested mass and condition-specific encoder bias. Observations
+retain the registered training corruption; the policy uses deterministic
+inference actions. The actor-only load still enforces checkpoint controller
+provenance and the observation/action interface.
+
+The diagnostic records normalized requests, actual dispatched input, applied
+motion scale/state, reference/cart/root progress and terminal flags before
+resets. It counts entries into the braking state separately from completed
+holds and explicit hold requests. Unfinished observations cannot supply a
+terminal report. The surviving rows retain their own observation histories
+when another row resets.
+
+```sh
+uv run python scripts/probe_locomanip_policy_channels.py \
+  --checkpoint <model.pt> --masses 100 550 --output logs/locomanip/channels
+```
+
+**Re-measure if:** the checkpoint, controller speed-request handling,
+observation noise, encoder bias, residual mapping or payload changes.
+
+**History:** Added after the 200-iteration pilot logged no safe completions.
+The native controller compares requested and applied scale with a 0.1
+deadband. Crossing it starts a complete stop/replan; restarting adds one
+second before the remaining trajectory begins. Frequent changes can therefore
+cancel motion repeatedly before that restart delay elapses. Constant-speed
+and four-second hold probes did not exercise this request pattern. The
+applied scale readout alone does not measure forward walking speed during
+the restart delay.
+
+## Policy channel ablation on 2026-10-14
+
+**Current:** The checkpoint's motion channel causes the measured stall.
+Disabling it restores completion with the learned joint residuals retained;
+retaining only the motion channel reproduces the stall. Small varying speed
+requests repeatedly initiate the controller's stop/replan sequence and
+restart delay. This is an interface failure missed by constant-request probes,
+and must be addressed before continuing training with this motion action.
+
+The completed test used `model_199.pt` from `braking-0075-pilot`, HRP5P,
+seed 42, matched encoder bias enabled, training observation corruption, and
+one first episode per arm and mass. Controller provenance passed unchanged.
+All eight episodes had finite physical observations, verified input delivery
+and no fall, collapse, controller failure or worker failure. The two 550 kg
+completion arms do not establish safety across that transition mass.
+
+| mass | active policy channels | outcome | reference progress | braking starts |
+| --- | --- | --- | ---: | ---: |
+| 100 kg | none, baseline | completed 49.34 s | 1.0000 m | 0 |
+| 100 kg | joints and motion | timeout 103.32 s | 0.0145 m | 81 |
+| 100 kg | joints only | completed 49.34 s | 1.0000 m | 0 |
+| 100 kg | motion only | timeout 103.32 s | 0.0138 m | 79 |
+| 550 kg | none, baseline | completed 49.32 s | 1.0000 m | 0 |
+| 550 kg | joints and motion | timeout 103.32 s | 0.0181 m | 73 |
+| 550 kg | joints only | completed 49.32 s | 1.0000 m | 0 |
+| 550 kg | motion only | timeout 103.32 s | 0.0181 m | 72 |
+
+There were zero explicit hold requests in every arm. Full-policy mean raw
+motion requests were only 0.0233 at 100 kg and -0.0033 at 550 kg, but their
+positive excursions repeatedly triggered braking. The corresponding mean
+applied scales were 0.7881 and 0.8190 while reference progress remained under
+two centimetres. Mean scale therefore cannot substitute for physical progress.
+Counts are observed transitions at the policy sampling rate.
+
+The four completed arms displaced the robot by 1.17–1.22 m. The four stalled
+arms displaced it by -0.050–-0.062 m. Complete terminal traces and the report
+are under `logs/locomanip/policy-channels-2026-10-14-terminal/`.
+
+**Re-measure if:** changing speed-request filtering, latching, deadband,
+restart delay, controller scheduling or action mapping. Test varying requests
+and PPO-style exploration as well as constant speed and deliberate hold/resume.
+
+**History:** The first attempt under `policy-channels-2026-10-14/` was
+interrupted at 49.30 seconds by a diagnostic inference-buffer mutation after
+another row completed. Its partial traces were excluded from this table. The
+diagnostic was fixed, its channel selection tested with real inference
+tensors, and all eight episodes rerun through their terminal observations.
