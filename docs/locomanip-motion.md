@@ -196,7 +196,8 @@ becomes a single -4 reward at the 0.02-second policy timestep.
 **Current:** Do not use the proposed linear coefficient 1.1 for training.
 It reverses the desired ordering in both batches with a falling baseline:
 falling earns more discounted reward than either successful intervention.
-The task's training rewards have not been changed by this diagnostic.
+The diagnostic initially left the training rewards unchanged; the following
+pilot section records the subsequently authorized training coefficient.
 
 HRP5P, seed 42, encoder bias off, zero joint residuals, one first episode per
 arm and batch, 19 episodes total. Four-arm batches at 100, 525, 550 and
@@ -257,3 +258,29 @@ three-arm layout and a 575 kg batch were added to obtain actual falling
 comparators. Both fall-containing probes exit nonzero because the original
 plumbing checks require a safe, completed baseline; their terminal traces
 remain valid measured failure cases for the reward audit.
+
+## BRAKING_COST
+
+**Current:** The joint-plus-motion task charges `0.075 * (1 - applied_scale)`
+per second during bilateral Hold, including controller braking and capped
+resumed motion. Zero joint residual and nominal speed incur no braking cost.
+The DCM reward and existing safety and joint-action penalties are retained.
+The original joint and feedback tasks are unchanged. The user authorized a
+pilot with this fitted coefficient despite its narrow measured margin.
+
+The fresh HRP5P pilot uses seed 42, 256 environments, 200 iterations, 64
+rollout steps, two minibatches and two epochs: 3,276,800 transitions. It
+saves every 20 iterations and retains the registered 103.32-second cap,
+10–1000 kg log-uniform payload distribution and training encoder bias.
+Its run name is `braking-0075-pilot` under the full registered motion-task ID.
+The command runs directly in `mc_mjlab_training:train`, without output
+redirection. Controller binary/config and source revision are captured by
+the shared runner in the run directory and checkpoints.
+
+**Re-measure if:** promoting beyond this pilot, changing rewards, controller,
+payload distribution, observation/action interface or encoder bias.
+
+**History:** The reward audit fitted 0.075 on diagnostic schedules with
+encoder bias off; it is an experimental coefficient, not a qualified safety
+result. The real reward-manager test checks timestep scaling, bilateral
+phase gating and charging a half-speed resume despite a nominal request.

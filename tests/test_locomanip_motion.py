@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 import torch
 from conftest import requires_controller
+from mjlab.managers.reward_manager import RewardManager
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 from probe_locomanip_motion import _checks
 
@@ -185,3 +186,25 @@ def test_motion_observation_exposes_controller_resume_limit(
   monkeypatch.setattr(accessors, "residual_action", lambda env: action)
   observed = motion_mdp.motion_observation(cast(Any, NS()))
   torch.testing.assert_close(observed, torch.tensor([[1, 0.5, 0, 0.5]] * 5))
+
+
+def test_braking_reward_charges_applied_scale_only_during_bilateral_hold(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  action = motion_action()
+  action._datastore_scalar_outputs[MOTION_SCALE_GETTER] = torch.tensor(
+    [1.0, 0.5, 0.0, 0.0, 0.5]
+  )
+  action._datastore_scalar_outputs[accessors.RIGHT_PHASE][3] = 3.0
+  action._datastore_scalar_outputs[accessors.LEFT_PHASE][4] = 3.0
+  monkeypatch.setattr(
+    accessors, "residual_action", lambda env, action_name=accessors.ACTION_NAME: action
+  )
+  cfg = load_env_cfg(TASK_IDS["HRP5P"])
+  env = cast(Any, NS(num_envs=5, device="cpu"))
+  manager = RewardManager({"braking": cfg.rewards["braking"]}, env)
+  torch.testing.assert_close(
+    manager.compute(0.02), torch.tensor([0.0, -0.00075, -0.0015, 0.0, 0.0])
+  )
+  assert action.motion_scale_dispatched.tolist() == [1.0] * 5
+  assert "braking" not in load_env_cfg(RESIDUAL_TASK_IDS["HRP5P"]).rewards

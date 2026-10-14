@@ -42,3 +42,8 @@ def motion_holding(env: ManagerBasedRlEnv) -> torch.Tensor:
   """Whether the controller has completed braking and is holding the cart."""
   state = accessors.residual_action(env).datastore_scalar_output(MOTION_STATE_GETTER)
   return (state == 2.0).to(torch.float32)
+
+
+def braking(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """Charge applied slowdown during bilateral Hold, including a capped resume."""
+  return (1.0 - motion_scale(env).clamp(0.0, 1.0)) * accessors.holding(env)

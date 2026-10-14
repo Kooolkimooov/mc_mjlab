@@ -7,6 +7,7 @@ from dataclasses import fields
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.managers.metrics_manager import MetricsTermCfg
 from mjlab.managers.observation_manager import ObservationTermCfg
+from mjlab.managers.reward_manager import RewardTermCfg
 
 from mc_mjlab.actions.locomanip_motion_action import LocomanipMotionActionCfg
 from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
@@ -17,6 +18,7 @@ from mc_mjlab.tasks.locomanip.profiles import HRP5P, LocomanipProfile
 from mc_mjlab.tasks.locomanip_motion import mdp
 
 MOTION_EPISODE_SCALE = 2.0
+BRAKING_COST = 0.075
 
 
 def locomanip_motion_env_cfg(
@@ -34,6 +36,7 @@ def locomanip_motion_env_cfg(
   )
   for group in cfg.observations.values():
     group.terms["motion_control"] = ObservationTermCfg(func=mdp.motion_observation)
+  cfg.rewards["braking"] = RewardTermCfg(func=mdp.braking, weight=-BRAKING_COST)
   cfg.metrics.update(
     motion_scale=MetricsTermCfg(func=mdp.motion_scale),
     motion_holding=MetricsTermCfg(func=mdp.motion_holding),
