@@ -149,3 +149,111 @@ are required before treating the 550 kg result as a policy qualification.
 collapsed at 35.50 and 38.56 seconds, although Hold itself stayed upright.
 The second already included restart interpolation bounds. This motivated the
 post-hold half-speed limit; the final conservative trial completed at 86.40 s.
+
+## score_braking
+
+**Current:** `scripts/probe_locomanip_motion.py --reward-audit --registered-cap`
+adds a fourth arm that holds until timeout. Every trace includes the actual
+timestep reward, its already evaluated weighted reward rates, bilateral Hold,
+and termination/truncation flags before reset. No reward callable is evaluated
+twice. `scripts/audit_locomanip_braking.py` scores the counterfactual reward
+`reward - cost * (1 - applied_scale) * step_dt` during bilateral Hold. The
+controller's applied scale includes the half-speed limit after a hold even
+when the policy requests normal speed.
+
+Returns start at the earliest measured intervention decision in the matched
+batch and use the task's `gamma=0.997`, `step_dt=0.02`. They include terminal
+failure rewards. Each trace must contain consecutive policy steps from reset
+through a terminal observation, and each timestep reward must agree with its
+captured terms. Untriggered interventions and worker failures are rejected.
+Both discounted and undiscounted returns and the coefficient that makes each
+arm equal the baseline are saved, with the source run's controller provenance.
+
+These are measured finite-episode rewards under fixed actions, not learned
+PPO values. The task marks completion and timeout as truncations; their
+unknown critic bootstrap values are explicitly excluded. Indefinite holding
+at timeout remains incomplete regardless of return. A coefficient above 1
+makes the maximum full-hold reward rate negative, but that bound alone does
+not establish that successful braking outscores a delayed fall.
+
+```sh
+uv run python scripts/probe_locomanip_motion.py --mass 550 --registered-cap \
+  --reward-audit --output logs/locomanip/braking-test/mass-550
+uv run python scripts/audit_locomanip_braking.py \
+  logs/locomanip/braking-test/mass-550 \
+  --output logs/locomanip/braking-test/audit.json
+```
+
+**Re-measure if:** the reward weights, action mapping, phase gate, discount,
+timestep, controller, mass, bias setting or episode cap changes.
+
+**History:** The initial proposed coefficient was 1.1, compared with the
+maximum positive DCM reward rate of 1. The configured fall weight of -200
+becomes a single -4 reward at the 0.02-second policy timestep.
+
+## Braking reward audit on 2026-10-14
+
+**Current:** Do not use the proposed linear coefficient 1.1 for training.
+It reverses the desired ordering in both batches with a falling baseline:
+falling earns more discounted reward than either successful intervention.
+The task's training rewards have not been changed by this diagnostic.
+
+HRP5P, seed 42, encoder bias off, zero joint residuals, one first episode per
+arm and batch, 19 episodes total. Four-arm batches at 100, 525, 550 and
+575 kg include indefinite Hold; another 550 kg batch uses the original
+three-arm layout. The installed controller is commit
+`91570d618902930d78671d607a58f912b427933a`, companion hash
+`a621349832ab9f9d2bb5c160f68cad1fcb86d2ff0992343296f88dc4c3820915`.
+Reports, complete terminal traces and scored returns are under
+`logs/locomanip/braking-reward-2026-10-14/`; `audit.json` combines all batches.
+
+| batch | baseline | half speed | hold then half-speed resume |
+| --- | --- | --- | --- |
+| 100 kg, four arms | completed 49.28 s | completed 82.44 s | completed 86.42 s |
+| 525 kg, four arms | completed 49.28 s | completed 82.38 s | completed 86.42 s |
+| 550 kg, four arms | completed 49.26 s | completed 82.38 s | completed 86.38 s |
+| 550 kg, three arms | fell 36.16 s | completed 82.40 s | completed 86.42 s |
+| 575 kg, four arms | fell 29.24 s | completed 82.38 s | completed 86.38 s |
+
+All ten moving interventions completed safely. All four indefinite Holds
+remained physically safe but incomplete at the 103.32-second cap. The two
+550 kg baselines demonstrate that matched seed and payload do not imply
+the same simulated trajectory, including across batch layouts.
+
+Returns below start at the intervention decision around 20 seconds, with
+the task's actual discount and timestep. Bootstrap values are excluded.
+
+| batch and arm | no cost | coefficient 0.075 | coefficient 1.1 |
+| --- | ---: | ---: | ---: |
+| 550 kg, three-arm baseline fall | 1.3478 | 1.3478 | 1.3478 |
+| 550 kg, three-arm half speed | 1.7642 | 1.5140 | -1.9049 |
+| 550 kg, three-arm hold/resume | 1.7263 | 1.3710 | -3.4850 |
+| 575 kg, baseline fall | 0.1935 | 0.1935 | 0.1935 |
+| 575 kg, half speed | 1.9648 | 1.7154 | -1.6933 |
+| 575 kg, hold/resume | 1.9194 | 1.5641 | -3.2919 |
+
+For these measured schedules, preferring normal completion whenever the
+baseline is safe and both successful interventions whenever it falls
+requires approximately `0.07272 < cost < 0.07989`. The lower bound comes
+from normal completion versus unnecessary hold/resume at 100 kg. The
+upper bound comes from successful hold/resume versus falling in the
+three-arm 550 kg batch. At 0.075 the respective return margins are only
+0.0108 and 0.0232. This coefficient was fitted on these same observations;
+the narrow interval is not a validated training setting.
+
+A coefficient above 1 guarantees a negative full-hold reward rate but is
+incompatible with the measured rescue upper bound. A smaller coefficient
+can offset the observed extra return from unnecessary braking without
+making every held timestep negative. Neither comparison proves that a
+policy cannot exploit a different trigger or prolonged partial slowdown.
+
+**Re-measure if:** selecting a training coefficient, changing the reward
+shape, or changing any input listed under `score_braking`. Repeat near the
+transition with training encoder bias enabled before accepting a fitted
+coefficient; these are diagnostic schedules, not policy qualification.
+
+**History:** The four-arm 550 kg baseline completed, so the original
+three-arm layout and a 575 kg batch were added to obtain actual falling
+comparators. Both fall-containing probes exit nonzero because the original
+plumbing checks require a safe, completed baseline; their terminal traces
+remain valid measured failure cases for the reward audit.

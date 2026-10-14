@@ -18,7 +18,7 @@ from evaluation.locomanip_inputs import (
 from evaluation.rollout import managed_env, reset_done
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.rl import RslRlVecEnvWrapper
-from mjlab.tasks.registry import load_env_cfg
+from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 
 from mc_mjlab.actions.locomanip_motion_action import (
   MOTION_LIMIT_GETTER,
@@ -34,6 +34,7 @@ from mc_mjlab.tasks.locomanip_motion import TASK_IDS
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
+  from mjlab.rl import RslRlOnPolicyRunnerCfg
 
   from mc_mjlab.actions.locomanip_motion_action import LocomanipMotionActionCfg
 
@@ -50,6 +51,7 @@ def main() -> None:
   parser.add_argument("--resume-scale", type=float, default=1.0)
   parser.add_argument("--check-partial-reset", action="store_true")
   parser.add_argument("--registered-cap", action="store_true")
+  parser.add_argument("--reward-audit", action="store_true")
   parser.add_argument("--output", type=Path, required=True)
   parser.add_argument("--device", default="cuda:0")
   args = parser.parse_args()
@@ -58,8 +60,9 @@ def main() -> None:
   if not 0.1 <= args.resume_scale <= 1:
     parser.error("resume scale must be in [0.1, 1]")
   args.output.mkdir(parents=True, exist_ok=True)
+  arms = (*ARMS, "hold_forever") if args.reward_audit else ARMS
   cfg = load_env_cfg(TASK_IDS[args.robot])
-  cfg.scene.num_envs = len(ARMS)
+  cfg.scene.num_envs = len(arms)
   cfg.seed = args.seed
   cfg.auto_reset = False
   if not args.registered_cap:
@@ -67,10 +70,10 @@ def main() -> None:
       cfg.episode_length_s / min(0.5, args.resume_scale) + args.hold_seconds + 10.0
     )
   action_cfg = cast("LocomanipMotionActionCfg", cfg.actions[accessors.ACTION_NAME])
-  action_cfg.num_workers = len(ARMS)
+  action_cfg.num_workers = len(arms)
   conditions = [
     {"mass_kg": args.mass, "condition_id": f"motion/{args.seed}/{args.mass:g}"}
-    for _ in ARMS
+    for _ in arms
   ]
   payload = cfg.events["cart_payload"]
   cfg.events["cart_payload"] = EventTermCfg(
@@ -87,15 +90,19 @@ def main() -> None:
     mode="startup",
     params={"rows": conditions, "enabled": False},
   )
-  samples: list[list[dict]] = [[] for _ in ARMS]
-  results: list[dict | None] = [None] * len(ARMS)
-  triggered: list[float | None] = [None] * len(ARMS)
+  samples: list[list[dict]] = [[] for _ in arms]
+  results: list[dict | None] = [None] * len(arms)
+  triggered: list[float | None] = [None] * len(arms)
   held_since: float | None = None
   with managed_env(cfg, args.device) as env:
     env.reset()
     assert_payload_masses(accessors.object_mass_kg(env), conditions)
     term = cast(LocomanipMotionAction, accessors.residual_action(env))
     provenance = collect_controller_provenance(RslRlVecEnvWrapper(env))
+    reward_weights = {
+      name: env.reward_manager.get_term_cfg(name).weight
+      for name in env.reward_manager.active_terms
+    }
     start = (
       env.scene[accessors.OBJECT_ENTITY].data.root_link_pos_w[:, 0]
       - env.scene.env_origins[:, 0]
@@ -110,7 +117,7 @@ def main() -> None:
         reference = term.datastore_vector_output(accessors.OBJECT_REFERENCE_POSITION)
         progress = (reference[:, 0] - start).cpu().tolist()
         states = term.datastore_scalar_output(MOTION_STATE_GETTER).cpu().tolist()
-        for index in (1, 2):
+        for index in range(1, len(arms)):
           if triggered[index] is None and holding[index] and progress[index] >= 0.15:
             triggered[index] = time
         if triggered[1] is not None:
@@ -123,13 +130,26 @@ def main() -> None:
             if held_since is None or time - held_since < args.hold_seconds
             else 1.0 - args.resume_scale
           )
-        _, _, terminated, truncated, _ = env.step(actions)
+        if args.reward_audit and triggered[3] is not None:
+          actions[3, -1] = 1.0
+        _, rewards, terminated, truncated, _ = env.step(actions)
         frames = _frames(env, term, time + env.step_dt)
+        rates = env.reward_manager._step_reward.cpu().tolist()
+        reward_values = rewards.cpu().tolist()
+        terminated_values = terminated.cpu().tolist()
+        truncated_values = truncated.cpu().tolist()
         done = (terminated | truncated).cpu().tolist()
         for index, frame in enumerate(frames):
           if results[index] is not None:
             continue
-          frame.update(arm=ARMS[index], trigger_time_s=triggered[index])
+          frame.update(
+            arm=arms[index],
+            trigger_time_s=triggered[index],
+            reward=reward_values[index],
+            reward_rates=dict(zip(reward_weights, rates[index], strict=True)),
+            terminated=terminated_values[index],
+            truncated=truncated_values[index],
+          )
           samples[index].append(frame)
           stream.write(json.dumps(frame) + "\n")
           if done[index]:
@@ -147,9 +167,14 @@ def main() -> None:
     "encoder_bias": False,
     "resume_scale": args.resume_scale,
     "episode_cap_s": cfg.episode_length_s,
+    "step_dt": env.step_dt,
+    "gamma": cast(
+      "RslRlOnPolicyRunnerCfg", load_rl_cfg(TASK_IDS[args.robot])
+    ).algorithm.gamma,
+    "reward_weights": reward_weights,
     "results": results,
     "provenance": provenance,
-    "checks": _checks(samples, args.hold_seconds),
+    "checks": _checks(samples[: len(ARMS)], args.hold_seconds),
   }
   if args.check_partial_reset:
     held = [f for f in samples[2] if f["motion_state"] == 2.0]
@@ -187,6 +212,7 @@ def _frames(
         term.controller_worker_failed.to(torch.float32),
         env.termination_manager.get_term("fell_over").to(torch.float32),
         env.termination_manager.get_term("collapsed").to(torch.float32),
+        accessors.holding(env),
       ),
       dim=1,
     )
@@ -208,6 +234,7 @@ def _frames(
     "worker_failed",
     "fell_over",
     "collapsed",
+    "holding",
   )
   column = term._datastore_scalar_input_columns[MOTION_SCALE_SETTER]
   assert term._in_np is not None
