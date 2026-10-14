@@ -42,6 +42,7 @@ are *deciding* something, not when you are reading the line that implements it.
 | [process-workers.md](process-workers.md) | native process backend, IPC ownership and worker recovery contract |
 | [robots.md](robots.md) | collision geoms, PD gains, extra sensors, refJointOrder, assets |
 | [locomanip.md](locomanip.md) | HRP5P/JVRC1 cart tasks, hand-force feedback, controller dependency, contact tuning, acceptance results |
+| [locomanip-safety.md](locomanip-safety.md) | frozen HRP5P tuning, reactive force authority, payload mixture and per-mass acceptance |
 | [build.md](build.md) | scikit-build-core settings: the editable rebuild and why it is quiet |
 | [coupling-history.md](coupling-history.md) | retired coupling designs and the measurements that retired them |
 

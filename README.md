@@ -252,7 +252,7 @@ uv run play  Mc-Mjlab-Residual-Balance-Logisticcontroller-Ismpc-Hrp5P-Position \
   --checkpoint-file <path/to/model_*.pt>
 ```
 
-The mc_mjlab surface is sixteen tasks, and `uv run list-envs` shows all of them.
+The mc_mjlab surface is seventeen tasks, and `uv run list-envs` shows all of them.
 One, the achievement-gated ankle curriculum, advances only from held-out
 qualification reports — see
 [docs/difficulty.md](docs/difficulty.md#achievement_finite_impulse_curriculum)
@@ -283,6 +283,20 @@ with `compare_to_baseline.py --task <feedback-task-id> --checkpoint <model.pt>`;
 the report uses physical cart success and separates payload strata.
 See [the feedback contract](docs/locomanip.md#residualfeedbackjointpositionaction) for
 units, gating, and validation results.
+
+The HRP5P safety variant uses a frozen controller profile and a distinct task
+ID. Its training runner requires a reactive authority report from the first
+failing payload before it starts. The measurements, frozen mass grid and
+acceptance gates are in [the safety record](docs/locomanip-safety.md#locomanip-feedback-safety).
+After the report exists, run training in tmux and screen its five scheduled
+checkpoints:
+
+```sh
+MC_MJLAB_SAFETY_AUTHORITY_REPORT=logs/locomanip/safety-2026-10-13/authority/authority_gate.json \
+  uv run train Mc-Mjlab-Locomanip-Safety-Locomanipcontroller-Hrp5P-Position-Feedback --agent.seed 42
+uv run python scripts/screen_locomanip_safety.py --run-dir <logs/rsl_rl/.../run> \
+  --output <logs/locomanip/safety-screen>
+```
 
 Ten completed ablations used to register behind an environment variable, for
 replaying their checkpoints under their original ids. They are gone, along with

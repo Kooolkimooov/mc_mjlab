@@ -11,6 +11,8 @@ CART_MASS_STRATA = (10.0, 30.0, 100.0, 300.0)
 
 LOCOMANIP_EVALUATION = TaskEvaluation(
   metrics=(
+    "contact_dcm_stability",
+    "forward_cart_lag",
     "object_position_error",
     "object_yaw_error",
     "zmp_error",

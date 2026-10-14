@@ -19,6 +19,13 @@ def object_position_error(
   return accessors.object_position_error(env, action_name).norm(dim=-1)
 
 
+def forward_cart_lag(
+  env: ManagerBasedRlEnv, action_name: str = accessors.ACTION_NAME
+) -> torch.Tensor:
+  """Positive reference-minus-cart displacement along local x, in metres."""
+  return accessors.object_position_error(env, action_name)[:, 0].clamp(min=0.0)
+
+
 def object_yaw_error(
   env: ManagerBasedRlEnv, action_name: str = accessors.ACTION_NAME
 ) -> torch.Tensor:

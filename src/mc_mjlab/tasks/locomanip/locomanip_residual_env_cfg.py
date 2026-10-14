@@ -486,6 +486,14 @@ def _events(
 def _metrics() -> dict[str, MetricsTermCfg]:
   """Length-independent readouts; episode reward sums cannot replace these."""
   return {
+    "contact_dcm_stability": MetricsTermCfg(
+      func=locomanip_mdp.rewards.contact_dcm_stability,
+      params={**CONTACT_ZMP_PARAMS, "std": CONTACT_DCM_STD},
+      reduce="mean",
+    ),
+    "forward_cart_lag": MetricsTermCfg(
+      func=locomanip_mdp.metrics.forward_cart_lag, reduce="max"
+    ),
     "object_position_error": MetricsTermCfg(
       func=locomanip_mdp.metrics.object_position_error
     ),

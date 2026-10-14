@@ -170,7 +170,7 @@ write it to be read top to bottom.
   publics call into it, so the file still reads as one pass. A helper called
   from several places sits below the first of them.
 - **One job per module.** When a module grows a second job, split it rather
-  than sectioning it with comments — that is why `mdp/` is seven submodules and
+  than sectioning it with comments — that is why `mdp/` is split into submodules and
   why the PPO config sits beside the env cfg rather than inside it. The 10%
   comment budget is the tripwire for this, not a separate rule.
 - **Types are part of the signature.** Every module opens with
@@ -276,10 +276,11 @@ From mjlab down to mc_rtc:
   sub-*packages* are walked, so a task added as a bare module never registers;
   and `register_mjlab_task` takes built cfgs, so `import mjlab` now builds this
   repo's env cfgs — without a sourced mc_rtc workspace mjlab's loader reports
-  that as a `[WARN]` plus traceback rather than failing. Sixteen ids register, and
+  that as a `[WARN]` plus traceback rather than failing. Seventeen ids register, and
   they are all of them (six residual-balance, two zero-residual, six locomanip --
   a demo, position residual and hand-force feedback for each of HRP5P/JVRC1 --
-  one each for residual_mpc and residual_feedback): the ten archived ablations and their
+  one each for residual_mpc and residual_feedback, and one HRP5P locomanip safety task):
+  the ten archived ablations and their
   `MC_MJLAB_REGISTER_ARCHIVED_TASKS` switch are gone. Reproducing an archived
   experiment means checking out the revision before that cleanup; every
   *supported* checkpoint still loads.
@@ -328,7 +329,7 @@ From mjlab down to mc_rtc:
   responsibility: `sensors` (the `_ZmpSensors` plumbing and the action-term
   accessors the rest read through), then `observations`, `rewards`, `metrics`,
   `terminations`, `disturbances` (the push and impulse events) and `curricula`.
-  `mdp/__init__.py` binds those seven submodules and nothing else: no star
+  `mdp/__init__.py` binds those submodules and nothing else: no star
   imports anywhere in this repo, so every call site reads
   `mdp.<submodule>.<term>` and says which file defines the term.
 - `robots/<ROBOT>/<robot>_constants.py` — per-robot constants: spec loading
