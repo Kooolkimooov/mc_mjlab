@@ -184,3 +184,29 @@ changes.
 **History:** The prior run improved cart placement while reducing
 survival; this gate explicitly prevents a 550 kg improvement from paying
 for a new 525 kg failure.
+
+The gated seed-42 run completed 1000 iterations, or 16.384 million
+transitions, at
+`logs/rsl_rl/Mc-Mjlab-Locomanip-Safety-Locomanipcontroller-Hrp5P-Position-Feedback/2026-10-14_00-14-27`.
+The scheduled screens used eight matched pairs per mass, with encoder bias
+enabled. The 500 kg baseline had 0/8 combined failures at every screen;
+the policy failed there at 3/8, 6/8, 7/8, 8/8 and 8/8 respectively.
+At 525 kg the baseline failed 2/8, versus policy failures of 7/8 at
+iteration 200 and 8/8 at every later screen. At 550 kg the baseline
+failed 4/8, versus 8/8 at every policy screen. The 10 and 100 kg cohorts
+remained failure-free; baseline and policy both failed 8/8 at each mass
+from 575 to 650 kg. Pooled transition-grid failure was 38/56 for the
+baseline. Every checkpoint made it worse:
+
+| iteration | policy failures / 56 | relative reduction | paired 95% interval for absolute reduction |
+| ---: | ---: | ---: | ---: |
+| 200 | 50 | -31.6% | -30.4 to -12.5 percentage points |
+| 400 | 54 | -42.1% | -35.7 to -19.6 percentage points |
+| 600 | 55 | -44.7% | -37.5 to -23.2 percentage points |
+| 800 | 56 | -47.4% | -39.3 to -25.0 percentage points |
+| 999 | 56 | -47.4% | -39.3 to -25.0 percentage points |
+
+All cohorts were complete. No checkpoint passed the safe-mass screen or
+the pooled improvement gate, so no off-seed 32-pair validation was run
+and no policy was promoted. The reports are under
+`logs/locomanip/safety-2026-10-13/screen/`.
