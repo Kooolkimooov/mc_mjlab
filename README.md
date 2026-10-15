@@ -252,7 +252,7 @@ uv run play  Mc-Mjlab-Residual-Balance-Logisticcontroller-Ismpc-Hrp5P-Position \
   --checkpoint-file <path/to/model_*.pt>
 ```
 
-The mc_mjlab surface is nineteen tasks, and `uv run list-envs` shows all of them.
+`uv run list-envs` shows the supported mc_mjlab tasks alongside mjlab's tasks.
 One, the achievement-gated ankle curriculum, advances only from held-out
 qualification reports — see
 [docs/difficulty.md](docs/difficulty.md#achievement_finite_impulse_curriculum)
@@ -265,8 +265,8 @@ wired and what is deliberately missing.
 
 The `locomanip_motion` variant adds a controller motion action after the joint
 residual: zero keeps normal speed, 0.5 requests half speed, and 0.95 or more
-requests hold. A later zero request resumes the remaining route with a half-speed
-cap for that episode. The controller
+requests hold. A later zero request resumes the remaining route at nominal
+speed; the policy can request a slower release instead. The controller
 coordinates cart braking with completion of the active footstep. Use
 `uv run list-envs` for its robot-specific task ID, and verify the installed
 controller callback before training:
@@ -278,6 +278,22 @@ uv run python scripts/probe_locomanip_motion.py --mass 10 \
 
 See [motion authority](docs/locomanip-motion.md#locomanipmotionaction) for
 gating, timing and the difference between a safe hold and task completion.
+
+The `locomanip_braking` variant has just that one braking output, with every
+joint tracking mc_rtc and no hand-force residual. It retains balance rewards,
+fall penalties and costs for slowdown, braking starts and sustained holding.
+Cart position and placement are diagnostics, with no reward attached. Both
+motion variants select braking every two seconds while both hands hold the cart.
+Use `uv run list-envs` to select the robot, and check the braking-only task with:
+
+```sh
+uv run python scripts/smoke_locomanip_motion.py \
+  --task Mc-Mjlab-Locomanip-Braking-Locomanipcontroller-Hrp5P \
+  --output logs/locomanip/braking-smoke
+```
+
+See [the braking-only task](docs/locomanip-motion.md#locomanip_braking_env_cfg)
+for its objective and action contract.
 
 Locomanip also registers a hand-force feedback policy for HRP5P and JVRC1.
 It learns six sensor-frame force corrections, enabled while both hands hold

@@ -653,6 +653,52 @@ requests matched their sampled selections, and checkpoint reload was exact.
 Artifacts: `logs/locomanip/multirate-motion-smoke-2026-10-15/`. That smoke test
 used revision `fb867cb` and 891/1020 inputs, including the now-removed cap field.
 
+## locomanip_braking_env_cfg
+
+**Current:** A separate HRP5P/JVRC1 task has exactly one policy output, the
+existing controller-side braking request. Its joint residual actuator set is
+empty, so all joints track mc_rtc. There are no hand-force feedback outputs.
+Zero or negative requests select nominal speed, positive requests below 0.95
+select reduced speed (minimum 0.1), and requests at least 0.95 select full hold.
+The policy selects a new request every two seconds during fresh bilateral Hold;
+the existing phase and controller-health gates remain active.
+
+The objective retains DCM stability, uprightness, collapse risk, tilt rate,
+foot slip and physical-failure costs, plus the retuned slowdown, braking-start
+and held-time costs. There is no cart position, yaw, placement or progress
+reward. The parent motion task already had no such rewards. Joint magnitude
+and rate penalties and the empty joint-action observation are removed. The
+clock observation includes the latched braking request. Cart measurements
+remain diagnostics; evaluation uses safe completion without a placement
+tolerance. The base-controller completion flag still ends the episode.
+
+The motion Gaussian supports one output and freezes its unused joint-noise
+parameter. Between decisions, the entire policy likelihood, entropy and KL
+contribution is zero. Tests cover shuffled PPO batches, all-inactive rollouts
+that leave actor parameters unchanged while the critic learns, partial resets
+and the zero-width joint slice.
+
+The native smoke check used controller revision `2a6fec7`, seed 42, 16
+environments, fixed 10 kg payload and training encoder bias. Four PPO updates
+had finite losses and gradients, including one rollout without a decision.
+Fourteen environments registered native braking starts. The actor had 715
+inputs and one output; the critic had 844 inputs. Full-width joint residuals
+remained zero, and checkpoint reload was exact. Artifacts:
+`logs/locomanip/braking-only-smoke-2026-10-15/`.
+
+The fresh training budget is 1,000 iterations, 256 environments and seed 42:
+16,384,000 transitions with 64 rollout steps, two minibatches, two epochs and
+checkpoints every 20 iterations. The inherited 103.32-second cap, encoder bias
+and 10–1000 kg log-uniform cart payloads remain. Controller configurations,
+source revision and installed binary hashes are captured by the shared runner.
+
+**Re-measure if:** controller, braking timing, costs, observations or sampling
+changes. A smoke check establishes delivery and training mechanics, not an
+improvement over the baseline.
+
+**History:** Added to isolate braking decisions from joint residual learning.
+The parent joint-plus-motion task remains independently registered.
+
 ## multirate-motion-pilot
 
 **Current:** The seed-42, 256-env pilot finished 200 iterations and

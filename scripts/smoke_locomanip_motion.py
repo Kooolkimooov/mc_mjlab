@@ -37,10 +37,9 @@ def finite_gradient(gradient: torch.Tensor) -> torch.Tensor:
   return gradient
 
 
-def run(output: Path, device: str) -> None:
+def run(output: Path, device: str, task: str) -> None:
   """Exercise decisions during Hold with real controllers and actual PPO storage."""
   torch.manual_seed(42)
-  task = TASK_IDS["HRP5P"]
   cfg = load_env_cfg(task)
   cfg.scene.num_envs = 16
   cfg.seed = 42
@@ -60,6 +59,9 @@ def run(output: Path, device: str) -> None:
   with managed_env(cfg, device) as env:
     wrapped = RslRlVecEnvWrapper(env)
     term = cast(LocomanipMotionAction, accessors.residual_action(env))
+    if action_cfg.residual_actuator_names == ():
+      assert env.action_manager.total_action_dim == 1
+      assert term.requested_physical_action.shape == (16, 0)
     zeros = torch.zeros(16, env.action_manager.total_action_dim, device=device)
     for _ in range(math.ceil(20 / env.step_dt)):
       if accessors.holding(env).bool().all():
@@ -95,6 +97,9 @@ def run(output: Path, device: str) -> None:
       obs: Any, rewards: torch.Tensor, dones: torch.Tensor, extras: dict
     ) -> None:
       """Check actual latched requests while collecting native braking starts."""
+      if action_cfg.residual_actuator_names == ():
+        assert term.executed_physical_action.shape == (16, 0)
+        assert term._residual_full.count_nonzero() == 0
       torch.testing.assert_close(
         term.motion_decision_state[~dones.bool(), 2], pending["expected"][~dones.bool()]
       )
@@ -136,6 +141,9 @@ def run(output: Path, device: str) -> None:
       actual = restored.get_inference_policy(device=device)(obs)
     torch.testing.assert_close(actual, expected, rtol=0, atol=0)
     result = {
+      "task_id": task,
+      "action_dim": env.action_manager.total_action_dim,
+      "joint_residual_dim": term.requested_physical_action.shape[-1],
       "seed": 42,
       "num_envs": 16,
       "mass_kg": 10.0,
@@ -157,8 +165,9 @@ def main() -> None:
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("--output", type=Path, required=True)
   parser.add_argument("--device", default="cuda:0")
+  parser.add_argument("--task", default=TASK_IDS["HRP5P"])
   args = parser.parse_args()
-  run(args.output, args.device)
+  run(args.output, args.device, args.task)
 
 
 if __name__ == "__main__":

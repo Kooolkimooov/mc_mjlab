@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 pytestmark = requires_controller(HRP5P.mc_rtc_yaml)
 
 
-def motion_action() -> LocomanipMotionAction:
+def motion_action(residual_dim: int = 2) -> LocomanipMotionAction:
   """Build only the CPU action buffers needed to exercise dispatch contracts."""
   cfg = cast(
     LocomanipMotionActionCfg,
@@ -51,8 +51,8 @@ def motion_action() -> LocomanipMotionAction:
   action = object.__new__(LocomanipMotionAction)
   action._env = cast(Any, NS(num_envs=5, device="cpu", step_dt=0.02))
   action.cfg = cfg
-  action._action_dim = action._residual_action_dim = 2
-  action._raw_actions = torch.zeros(5, 2)
+  action._action_dim = action._residual_action_dim = residual_dim
+  action._raw_actions = torch.zeros(5, residual_dim)
   action._setup_action_extensions(cfg)
   action._datastore_scalar_input_columns = {MOTION_SCALE_SETTER: 0}
   action._datastore_scalar_input_feed = torch.ones(5, 1)
@@ -87,10 +87,11 @@ def test_new_task_keeps_joint_task_independent() -> None:
   assert load_rl_cfg(TASK_IDS["HRP5P"]).experiment_name == TASK_IDS["HRP5P"]
 
 
+@pytest.mark.parametrize("residual_dim", [0, 2])
 def test_zero_action_is_nominal_and_positive_action_slows_or_holds(
-  monkeypatch: pytest.MonkeyPatch,
+  monkeypatch: pytest.MonkeyPatch, residual_dim: int
 ) -> None:
-  action = motion_action()
+  action = motion_action(residual_dim)
   monkeypatch.setattr(
     McRtcResidualJointPositionAction,
     "process_actions",
@@ -99,11 +100,13 @@ def test_zero_action_is_nominal_and_positive_action_slows_or_holds(
   requests = torch.tensor(
     [[0.1, 0.2, 0.0], [0.2, 0.1, 0.5], [0, 0, 0.96], [0, 0, -1], [0, 0, 0.91]]
   )
+  if residual_dim == 0:
+    requests = requests[:, -1:]
   action.process_actions(requests)
-  assert action.action_dim == 3
+  assert action.action_dim == residual_dim + 1
   assert action.motion_scale_requested.tolist() == pytest.approx([1, 0.5, 0, 1, 0.1])
   torch.testing.assert_close(action.raw_action, requests)
-  torch.testing.assert_close(action._raw_actions, requests[:, :2])
+  torch.testing.assert_close(action._raw_actions, requests[:, :residual_dim])
 
 
 def test_dispatch_requires_fresh_bilateral_hold_and_healthy_worker() -> None:

@@ -22,8 +22,10 @@ class MotionGaussianDistribution(SquashedGaussianDistribution):
     motion_std_range: tuple[float, float] = (0.5, 1.0),
   ) -> None:
     super().__init__(output_dim, init_std, std_range, learn_std)
-    if output_dim < 2:
-      raise ValueError("motion distribution requires joints followed by motion")
+    if output_dim < 1:
+      raise ValueError("motion distribution requires at least one output")
+    if output_dim == 1:
+      self.std_param.requires_grad_(False)
     if not 0 < motion_std_range[0] <= motion_init_std <= motion_std_range[1]:
       raise ValueError("motion standard deviation must lie within positive bounds")
     self.motion_std_range = motion_std_range

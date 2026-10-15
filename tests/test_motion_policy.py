@@ -81,9 +81,11 @@ def test_independent_exploration_reaches_slowdown_and_hold_without_large_joint_n
     distribution.update(torch.zeros(3, 36))
 
 
-def test_real_ppo_replays_decision_masks_in_shuffled_batches_and_across_rollouts() -> (
-  None
-):
+@pytest.mark.parametrize("action_dim", [1, 3])
+@pytest.mark.parametrize("make_decisions", [False, True])
+def test_real_ppo_replays_decision_masks_in_shuffled_batches_and_across_rollouts(
+  action_dim: int, make_decisions: bool
+) -> None:
   torch.manual_seed(42)
   obs = TensorDict(
     {
@@ -101,7 +103,7 @@ def test_real_ppo_replays_decision_masks_in_shuffled_batches_and_across_rollouts
     obs,
     groups,
     "actor",
-    3,
+    action_dim,
     hidden_dims=(8,),
     obs_normalization=True,
     distribution_cfg={
@@ -109,16 +111,18 @@ def test_real_ppo_replays_decision_masks_in_shuffled_batches_and_across_rollouts
     },
   )
   critic = MLPModel(obs, groups, "critic", 1, hidden_dims=(8,))
-  storage = RolloutStorage("rl", 4, 5, obs, [3])
+  storage = RolloutStorage("rl", 4, 5, obs, [action_dim])
   alg = RolloutAdaptivePPO(
     actor, critic, storage, num_learning_epochs=2, num_mini_batches=2
   )
-  assert torch.equal(actor(obs), torch.zeros(4, 3))
+  assert torch.equal(actor(obs), torch.zeros(4, action_dim))
+  initial_actor = [p.detach().clone() for p in actor.parameters()]
+  initial_critic = [p.detach().clone() for p in critic.parameters()]
   for rollout in range(2):
     for step in range(5):
       obs = obs.clone()
       obs["motion_decision"][:, 0] = (
-        (torch.arange(4) + step + rollout) % 3 == 0
+        ((torch.arange(4) + step + rollout) % 3 == 0) & make_decisions
       ).float()
       with torch.inference_mode():
         actions = alg.act(obs)
@@ -146,3 +150,35 @@ def test_real_ppo_replays_decision_masks_in_shuffled_batches_and_across_rollouts
     assert all(math.isfinite(value) for value in losses.values())
     assert storage.step == 0
     assert all(torch.isfinite(p).all() for p in actor.parameters())
+  if action_dim == 1 and not make_decisions:
+    for initial, parameter in zip(initial_actor, actor.parameters(), strict=True):
+      torch.testing.assert_close(initial, parameter, rtol=0, atol=0)
+    assert any(
+      not torch.equal(initial, parameter)
+      for initial, parameter in zip(initial_critic, critic.parameters(), strict=True)
+    )
+
+
+def test_braking_only_distribution_masks_entire_inactive_action() -> None:
+  torch.manual_seed(42)
+  distribution = MotionGaussianDistribution(1)
+  assert not distribution.std_param.requires_grad
+  distribution.set_motion_active(torch.tensor([False, True]))
+  means = torch.zeros(2, 1, requires_grad=True)
+  distribution.update(means)
+  actions = distribution.sample().detach()
+  assert actions.shape == (2, 1) and actions[0, 0] == 0
+  torch.testing.assert_close(distribution.std, torch.full((2, 1), 0.8))
+  assert distribution.log_prob(actions)[0] == 0
+  assert distribution.entropy[0] == 0
+  old = tuple(value.detach().clone() for value in distribution.params)
+  shifted = (old[0] + 0.5, old[1], old[2])
+  assert distribution.kl_divergence(old, shifted)[0] == 0
+  objective = distribution.log_prob(actions) + 0.01 * distribution.entropy
+  objective[0].backward(retain_graph=True)
+  assert means.grad is not None and means.grad.count_nonzero() == 0
+  assert distribution.motion_std_param.grad is not None
+  assert distribution.motion_std_param.grad.item() == 0
+  objective[1].backward()
+  assert means.grad[1, 0] != 0
+  assert distribution.motion_std_param.grad.item() != 0
