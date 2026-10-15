@@ -270,9 +270,10 @@ remain valid measured failure cases for the reward audit.
 ## BRAKING_COST
 
 **Current:** The joint-plus-motion task charges `0.03 * (1 - applied_scale)`
-per second during bilateral Hold, including controller braking and capped
-resumed motion. Zero joint residual and nominal speed incur no braking cost.
-The DCM reward and existing safety and joint-action penalties are retained.
+per second during bilateral Hold, including braking and policy-selected
+reduced-speed travel. Zero joint residual and nominal speed incur no braking cost.
+The DCM reward and existing safety and joint-action terms are retained; the
+new weights are documented under `DCM_REWARD_WEIGHT` and `FAILURE_COST` below.
 The original joint and feedback tasks are unchanged. A separate event cost
 charges each actual braking start; see `BRAKING_START_COST` below.
 
@@ -454,17 +455,15 @@ and extended the requested four seconds to about 5.42 seconds. Revision
 
 ## HOLDING_COST
 
-**Current:** Actual held time during bilateral Hold costs an additional 0.05
-reward per second. Together with the slowdown rate, a full hold pays 0.08
+**Current:** Actual held time during bilateral Hold costs an additional 0.10
+reward per second. Together with the slowdown rate, a full hold pays 0.13
 per second after its startup cost; travelling at half speed pays 0.015 per
 second. The term reads the controller's held state, not an action threshold,
 and excludes inactive hand phases. Normal travel incurs neither cost.
 
-On the final recorded 550 kg trajectories, startup cost 0.22 plus slowdown
-rate 0.03 gave hold/resume 1.3025 reward and indefinite holding 1.4153. Adding
-the held-time cost changes those to 1.1623 and 1.1070 respectively, while
-the failing baseline earns -0.2955. Costs are fitted on these diagnostic
-observations; they do not qualify a learned policy.
+The held-time rate was retuned together with DCM and failure weights against
+the uncapped controller. These are diagnostic reward-ordering checks, not
+qualification of a learned policy.
 
 **Re-measure if:** the held-state definition, timing, controller or rewards
 change. A derivative penalty remains deferred; an emergency stop should
@@ -473,6 +472,12 @@ remain available without a large squared request-rate charge.
 **History:** The event cost targets repeated startup but is already paid
 when deciding whether to remain held. A separate duration cost addresses
 that later decision without increasing the cost of a legitimate slow route.
+The initial held-time cost was 0.05, giving total full-hold cost 0.08/s.
+On the final recorded 550 kg trajectories, startup cost 0.22 plus slowdown
+rate 0.03 gave hold/resume 1.3025 reward and indefinite holding 1.4153. Adding
+that 0.05 held-time cost changed those to 1.1623 and 1.1070 respectively,
+while the failing baseline earned -0.2955. Those measurements used `fb867cb`;
+the same profile did not preserve the ordering with the later uncapped controller.
 
 ## Braking event verification
 
@@ -633,7 +638,7 @@ repeated independent samples in PPO.
 The registered actor input is now 890 values and critic input 1019, including
 the three clock fields. The distribution also has a separate motion noise
 parameter. Existing checkpoints are not resumed across this interface change.
-Reward costs remain 0.03 slowdown, 0.22 per native start and 0.05 held time.
+Reward costs are 0.03 slowdown, 0.22 per native start and 0.10 held time.
 
 **Re-measure if:** the observation mask, PPO storage, likelihood reduction or
 sampling distribution changes. Costs remain calibrated on fixed diagnostic
@@ -724,3 +729,102 @@ evaluate combined failure and safe completion with the subsequent release.
 **History:** Removing the automatic half-speed cap makes the resumed speed
 a policy choice. The loaded full-speed failures explain why that choice
 must be measured alongside holding, rather than counted as an improvement.
+
+## DCM_REWARD_WEIGHT
+
+**Current:** The joint-plus-motion task uses DCM reward weight 0.25, reduced
+from 1.0. Its callable and parameters are unchanged. The independently
+registered `contact_dcm_stability` metric still reports the raw dimensionless
+score, with no reward weight or timestep factor. Original joint-residual and
+feedback tasks retain their own configurations.
+
+Reducing this weight limits the benefit of remaining in a favorable static
+contact state. The paired retune also doubles the held-time cost and failure
+penalty. Holding alone could not fix every observed ranking: raising its cost
+enough to remove the light-cart stall preference could make a later loaded
+fall score above remaining safely held.
+
+**Re-measure if:** DCM parameters, physical controller, timing, other safety
+weights or actor action penalties change.
+
+**History:** Both completed pilots used DCM weight 1.0. Their training curves
+do not evaluate this reward profile.
+
+## FAILURE_COST
+
+**Current:** The motion task's existing termination reward has weight -400,
+changed from -200. At the registered 0.02 s timestep, a combined physical
+failure incurs -8 rather than -4. Braking starts still cost 0.22 each;
+full holding costs 0.13/s and half-speed travel 0.015/s. The failure term and
+termination flags are unchanged. Worker failures remain infrastructure
+truncations and do not receive this physical-failure charge.
+
+**Re-measure if:** the policy timestep, failure labels or truncation semantics
+change. This coefficient is timestep-scaled, unlike the native-start event cost.
+
+**History:** The stronger failure charge preserves preference for a safe,
+incomplete fallback over the observed failures after full-speed release,
+despite the higher held-time charge.
+
+## check_motion_preferences
+
+**Current:** The frozen candidate is DCM 0.25, failure -400, slowdown -0.03,
+startup -0.22 and holding -0.10. Speed remains a policy choice; no automatic
+resume-speed cap or mass-to-speed rule was added. Native controller revision
+and binary hashes remain `2a6fec7` throughout calibration and validation.
+
+Calibration used the 20 existing seed-42 episodes under the uncapped controller.
+The 43 checked preferences all passed, with minimum discounted-return margin
+0.160902. The checks require safe normal completion to beat unnecessary
+interventions, completed interventions to beat failures and incomplete holds,
+and safe incomplete outcomes to beat failures. Comparisons between two held
+trajectories also start at native holding and release, so a sunk startup cost
+cannot hide a later incentive to stall.
+
+The candidate was frozen before 50 new validation episodes: five arms for
+each of 10/100/525/550/575 kg and encoder-condition seeds 43/44. All 142
+observed preference comparisons passed a predeclared 0.05 minimum margin.
+The smallest margin was 0.050572, safe indefinite hold versus failed full-speed
+release at 550 kg with condition seed 43. This modest gap warrants monitoring;
+it is not an uncertainty interval or a learned-policy safety result.
+
+Each condition used baseline, sustained half speed, hold/full-speed release,
+hold/half-speed release and indefinite hold. The global simulator seed was 42;
+condition seeds 43/44 selected explicit, matched encoder-bias draws. One
+batched environment held all 50 episodes, with fixed verified actual masses,
+encoder bias enabled and zero joint residuals. All ten slow and ten half-speed
+release cases completed safely; four light full-speed releases completed and
+six loaded full-speed releases failed. Eight baselines completed and two failed.
+All ten indefinite holds stayed safe but incomplete. No worker failed.
+
+Native delivery and event accounting are checked before scoring. Reports
+with missing terminal observations, untriggered interventions, worker failures,
+wrong payloads or mixed controller/timing provenance cannot pass. Candidate
+weights rescale captured reward terms and remove captured motion costs before
+applying new costs. Unknown truncation bootstrap values are excluded.
+
+Reproduce the validation and preference report:
+
+```sh
+uv run python scripts/probe_locomanip_motion_rewards.py \
+  --masses 10 100 525 550 575 --seeds 43 44 \
+  --output logs/locomanip/motion-weights-validation-2026-10-15
+uv run python scripts/check_locomanip_motion_rewards.py \
+  logs/locomanip/motion-weights-validation-2026-10-15/seed-*/ \
+  --output logs/locomanip/motion-weights-validation-2026-10-15/preferences.json
+```
+
+`scripts/audit_locomanip_braking.py --reward-weight NAME=WEIGHT` also rescales
+individual captured terms. The selected runtime weights are read directly
+from the registered task by the preference checker. Calibration artifacts are
+in `logs/locomanip/uncapped-resume-2026-10-15/retuned-preferences.json`.
+
+**Re-measure if:** controller, task, speed timing, reward profile or payload
+distribution changes. This validates ordering on the measured trajectories;
+the policy must still learn appropriate speed choices and be compared with
+the baseline using failures and safe completion.
+
+**History:** The preceding 0.05 holding rate left the light-cart stall
+preference in the uncapped-controller audit. This retune changes reward
+weights only; motion timing, exploration and controller speed selection remain
+as before. Full resumes and their measured failures are retained in validation.

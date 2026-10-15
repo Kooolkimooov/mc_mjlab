@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 from evaluation.motion_reward import score_braking
@@ -19,6 +20,9 @@ def main() -> None:
   parser.add_argument("--output", type=Path, required=True)
   parser.add_argument("--event-costs", type=float, nargs="+", default=[0.0])
   parser.add_argument("--holding-costs", type=float, nargs="+", default=[0.0])
+  parser.add_argument(
+    "--reward-weight", type=_parse_weight, action="append", default=[]
+  )
   args = parser.parse_args()
   reports = []
   for run in args.runs:
@@ -26,6 +30,14 @@ def main() -> None:
     frames = [
       json.loads(line) for line in (run / "trace.jsonl").read_text().splitlines()
     ]
+    scales = {}
+    for name, value in args.reward_weight:
+      captured = manifest["reward_weights"].get(name)
+      if captured is None:
+        parser.error(f"reward term {name} was not captured")
+      if captured == 0:
+        parser.error(f"cannot rescale zero-weight term {name}")
+      scales[name] = value / captured
     scored = score_braking(
       frames,
       step_dt=manifest["step_dt"],
@@ -33,6 +45,7 @@ def main() -> None:
       costs=args.costs,
       event_costs=args.event_costs,
       holding_costs=args.holding_costs,
+      reward_scales=scales,
     )
     scored.update(
       run=str(run.resolve()),
@@ -66,6 +79,18 @@ def main() -> None:
         print(f"    returns with holding costs: {values['holding_returns']}")
   args.output.parent.mkdir(parents=True, exist_ok=True)
   args.output.write_text(json.dumps(reports, indent=2, allow_nan=False) + "\n")
+
+
+def _parse_weight(value: str) -> tuple[str, float]:
+  """Parse an absolute recorded reward weight without silently ignoring typos."""
+  try:
+    name, text = value.split("=", 1)
+    weight = float(text)
+  except ValueError as exc:
+    raise argparse.ArgumentTypeError("use NAME=WEIGHT") from exc
+  if not name or not math.isfinite(weight):
+    raise argparse.ArgumentTypeError("a name and finite weight are required")
+  return name, weight
 
 
 if __name__ == "__main__":

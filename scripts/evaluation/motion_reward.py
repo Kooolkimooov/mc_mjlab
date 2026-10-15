@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 _MOTION_COST_TERMS = ("braking", "braking_start", "holding")
@@ -18,6 +18,8 @@ def score_braking(
   costs: Sequence[float],
   event_costs: Sequence[float] = (0.0,),
   holding_costs: Sequence[float] = (0.0,),
+  reward_scales: Mapping[str, float] | None = None,
+  decision_time_s: float | None = None,
 ) -> dict[str, Any]:
   """Compare first-episode returns from the shared intervention decision time."""
   if not step_dt > 0 or not 0 < gamma <= 1:
@@ -28,16 +30,26 @@ def score_braking(
     raise ValueError("finite nonnegative event costs required")
   if not holding_costs or any(not math.isfinite(c) or c < 0 for c in holding_costs):
     raise ValueError("finite nonnegative holding costs required")
+  reward_scales = dict(reward_scales or {})
+  if any(
+    name in _MOTION_COST_TERMS or not math.isfinite(scale) or scale < 0
+    for name, scale in reward_scales.items()
+  ):
+    raise ValueError("finite nonnegative scales for non-motion rewards required")
   groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
   for frame in frames:
     groups[frame["arm"]].append(frame)
   triggers = [f["trigger_time_s"] for f in frames if f["trigger_time_s"] is not None]
-  if not triggers:
+  if not triggers and decision_time_s is None:
     raise ValueError("braking was never triggered")
-  decision_time = min(triggers)
+  decision_time = min(triggers) if decision_time_s is None else decision_time_s
+  if not math.isfinite(decision_time) or decision_time < 0:
+    raise ValueError("decision time must be finite and nonnegative")
   output: dict[str, Any] = {}
   for arm, samples in groups.items():
     _validate_samples(samples, step_dt)
+    if any(not reward_scales.keys() <= f["reward_rates"].keys() for f in samples):
+      raise ValueError("cannot rescale an uncaptured reward term")
     if arm != "baseline" and all(f["trigger_time_s"] is None for f in samples):
       raise ValueError(f"{arm}: braking was never triggered")
     after = [f for f in samples if f["time_s"] > decision_time + step_dt * 1e-6]
@@ -45,13 +57,14 @@ def score_braking(
       raise ValueError(f"{arm}: no measured rewards after the decision")
     terms = {
       name: math.fsum(
-        gamma**i * f["reward_rates"][name] * step_dt for i, f in enumerate(after)
+        gamma**i * f["reward_rates"][name] * reward_scales.get(name, 1.0) * step_dt
+        for i, f in enumerate(after)
       )
       for name in after[0]["reward_rates"]
       if name not in _MOTION_COST_TERMS
     }
     original = math.fsum(
-      gamma**i * _base_reward(f, step_dt) for i, f in enumerate(after)
+      gamma**i * _base_reward(f, step_dt, reward_scales) for i, f in enumerate(after)
     )
     braking = math.fsum(gamma**i * _braking(f) * step_dt for i, f in enumerate(after))
     events = []
@@ -93,7 +106,9 @@ def score_braking(
       "discounted_holding_seconds": holding_seconds,
       "braking_events": sum(events),
       "event_count_source": "native" if "braking_events" in final else "sampled_edges",
-      "undiscounted_original": math.fsum(_base_reward(f, step_dt) for f in after),
+      "undiscounted_original": math.fsum(
+        _base_reward(f, step_dt, reward_scales) for f in after
+      ),
       "braking_seconds": math.fsum(_braking(f) * step_dt for f in after),
       "mean_held_reward_rate": (
         math.fsum(sum(f["reward_rates"].values()) for f in held) / len(held)
@@ -104,7 +119,8 @@ def score_braking(
         str(c): {
           "discounted": original - c * braking,
           "undiscounted": math.fsum(
-            _base_reward(f, step_dt) - c * _braking(f) * step_dt for f in after
+            _base_reward(f, step_dt, reward_scales) - c * _braking(f) * step_dt
+            for f in after
           ),
         }
         for c in costs
@@ -130,9 +146,9 @@ def score_braking(
         for c in costs
       },
     }
-  baseline = output["baseline"]
+  baseline = output.get("baseline")
   for arm, values in output.items():
-    if arm == "baseline":
+    if arm == "baseline" or baseline is None:
       continue
     difference = (
       values["discounted_braking_seconds"] - baseline["discounted_braking_seconds"]
@@ -148,6 +164,7 @@ def score_braking(
     "gamma": gamma,
     "truncation_bootstrap_included": False,
     "registered_motion_costs_removed": True,
+    "reward_scales": reward_scales,
     "arms": output,
   }
 
@@ -182,9 +199,14 @@ def _braking(frame: dict[str, Any]) -> float:
   return 1.0 - min(max(frame["applied_scale"], 0.0), 1.0) if frame["holding"] else 0.0
 
 
-def _base_reward(frame: dict[str, Any], step_dt: float) -> float:
+def _base_reward(
+  frame: dict[str, Any], step_dt: float, reward_scales: Mapping[str, float]
+) -> float:
   """Remove captured motion penalties before applying counterfactual costs."""
   rates = frame["reward_rates"]
-  return frame["reward"] - step_dt * sum(
+  original = frame["reward"] - step_dt * sum(
     rates.get(key, 0.0) for key in _MOTION_COST_TERMS
+  )
+  return original + step_dt * sum(
+    (scale - 1.0) * rates[name] for name, scale in reward_scales.items()
   )

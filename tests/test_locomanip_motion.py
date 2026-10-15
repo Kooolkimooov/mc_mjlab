@@ -268,7 +268,7 @@ def test_holding_cost_excludes_slow_travel_and_inactive_hand_phases(
   reward = load_env_cfg(TASK_IDS["HRP5P"]).rewards["holding"]
   manager = RewardManager({"holding": reward}, env)
   torch.testing.assert_close(
-    manager.compute(0.02), torch.tensor([0, 0, -0.001, 0, 0]).float()
+    manager.compute(0.02), torch.tensor([0, 0, -0.002, 0, 0]).float()
   )
 
 
@@ -352,3 +352,23 @@ def test_decision_interval_respects_policy_timestep() -> None:
   action.cfg.motion_decision_period_s = 0.015
   with pytest.raises(ValueError, match="integer number"):
     action._setup_action_extensions(action.cfg)
+
+
+def test_retuned_rewards_leave_raw_dcm_metric_and_other_task_weights_independent() -> (
+  None
+):
+  cfg = load_env_cfg(TASK_IDS["HRP5P"])
+  original = load_env_cfg(RESIDUAL_TASK_IDS["HRP5P"])
+  assert cfg.rewards["contact_dcm_stability"].weight == 0.25
+  assert cfg.rewards["termination_penalty"].weight == -400
+  assert cfg.rewards["holding"].weight == -0.1
+  assert original.rewards["contact_dcm_stability"].weight == 1
+  assert original.rewards["termination_penalty"].weight == -200
+  assert (
+    cfg.metrics["contact_dcm_stability"] == original.metrics["contact_dcm_stability"]
+  )
+  assert cfg.terminations["controller_worker_failed"].time_out
+  assert (
+    cfg.rewards["termination_penalty"].func
+    is original.rewards["termination_penalty"].func
+  )

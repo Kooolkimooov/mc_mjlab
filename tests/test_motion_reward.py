@@ -101,6 +101,66 @@ def test_holding_duration_cost_uses_phase_and_removes_captured_charge() -> None:
   assert result["holding_returns"]["0.0"]["0.0"]["0.05"] == pytest.approx(0.039)
 
 
+def test_rescaled_safety_rewards_match_independent_reward_calculation() -> None:
+  samples = frames("baseline", [0.0])
+  samples[0]["reward_rates"] = {
+    "contact_dcm_stability": 1.0,
+    "termination_penalty": -200.0,
+  }
+  samples[0]["reward"] = -199.0 * 0.02
+  samples[0]["collapsed"] = 1
+  result = score_braking(
+    samples,
+    step_dt=0.02,
+    gamma=0.997,
+    costs=[0.03],
+    reward_scales={"contact_dcm_stability": 0.25, "termination_penalty": 2.0},
+    decision_time_s=0.0,
+  )["arms"]["baseline"]
+  assert result["discounted_original"] == pytest.approx((0.25 - 400) * 0.02)
+  assert result["discounted_terms"] == pytest.approx(
+    {
+      "contact_dcm_stability": 0.005,
+      "termination_penalty": -8.0,
+    }
+  )
+
+
+def test_post_hold_audit_excludes_sunk_start_cost_and_keeps_future_duration_cost() -> (
+  None
+):
+  samples = frames("hold", [1, 1, 1], 0.0)
+  for i, sample in enumerate(samples):
+    sample["braking_events"] = float(i == 0)
+  result = score_braking(
+    samples,
+    step_dt=0.02,
+    gamma=1,
+    costs=[0.03],
+    event_costs=[0.22],
+    holding_costs=[0.1],
+    decision_time_s=0.02,
+  )["arms"]["hold"]
+  assert result["discounted_braking_events"] == 0
+  assert result["holding_returns"]["0.03"]["0.22"]["0.1"] == pytest.approx(
+    0.04 * (1 - 0.03 - 0.1)
+  )
+  with pytest.raises(ValueError, match="no measured rewards"):
+    score_braking(samples, step_dt=0.02, gamma=1, costs=[0], decision_time_s=0.06)
+
+
+@pytest.mark.parametrize(
+  "scales", [{"braking": 2}, {"test": -1}, {"test": float("nan")}, {"absent": 1}]
+)
+def test_invalid_or_uncaptured_reward_scales_are_rejected(
+  scales: dict[str, float],
+) -> None:
+  with pytest.raises(ValueError):
+    score_braking(
+      frames("hold", [1]), step_dt=0.02, gamma=1, costs=[0], reward_scales=scales
+    )
+
+
 @pytest.mark.parametrize(
   "fault", ["gap", "reward", "worker", "incomplete", "untriggered"]
 )

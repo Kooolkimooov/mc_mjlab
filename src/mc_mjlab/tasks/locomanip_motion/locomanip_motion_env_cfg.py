@@ -21,7 +21,9 @@ from mc_mjlab.tasks.locomanip_motion import mdp
 MOTION_EPISODE_SCALE = 2.0
 BRAKING_COST = 0.03
 BRAKING_START_COST = 0.22
-HOLDING_COST = 0.05
+HOLDING_COST = 0.10
+DCM_REWARD_WEIGHT = 0.25
+FAILURE_COST = 400.0
 
 
 def locomanip_motion_env_cfg(
@@ -43,6 +45,8 @@ def locomanip_motion_env_cfg(
     terms={"state": ObservationTermCfg(func=mdp.motion_decision_state)},
     enable_corruption=False,
   )
+  cfg.rewards["contact_dcm_stability"].weight = DCM_REWARD_WEIGHT
+  cfg.rewards["termination_penalty"].weight = -FAILURE_COST
   cfg.rewards["braking"] = RewardTermCfg(func=mdp.braking, weight=-BRAKING_COST)
   cfg.rewards["braking_start"] = RewardTermCfg(
     func=mdp.braking_start, weight=-BRAKING_START_COST
