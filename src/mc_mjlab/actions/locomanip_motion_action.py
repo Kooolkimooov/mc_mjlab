@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 MOTION_SCALE_SETTER = "Locomanip::setMotionScale"
 MOTION_SCALE_GETTER = "Locomanip::motionScale"
 MOTION_STATE_GETTER = "Locomanip::motionState"
-MOTION_LIMIT_GETTER = "Locomanip::motionScaleLimit"
 MOTION_TARGET_GETTER = "Locomanip::motionRequestScale"
 MOTION_FILTER_GETTER = "Locomanip::motionFilteredScale"
 MOTION_DELAY_GETTER = "Locomanip::motionRequestDelay"
@@ -50,7 +49,6 @@ class LocomanipMotionActionCfg(McRtcResidualJointPositionActionCfg):
           *self.motion_phase_getters,
           MOTION_SCALE_GETTER,
           MOTION_STATE_GETTER,
-          MOTION_LIMIT_GETTER,
           MOTION_TARGET_GETTER,
           MOTION_FILTER_GETTER,
           MOTION_DELAY_GETTER,

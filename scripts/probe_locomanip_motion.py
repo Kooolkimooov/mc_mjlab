@@ -24,7 +24,6 @@ from mc_mjlab.actions.locomanip_motion_action import (
   MOTION_COUNT_GETTER,
   MOTION_DELAY_GETTER,
   MOTION_FILTER_GETTER,
-  MOTION_LIMIT_GETTER,
   MOTION_SCALE_GETTER,
   MOTION_SCALE_SETTER,
   MOTION_STATE_GETTER,
@@ -191,7 +190,9 @@ def main() -> None:
     "jitter": args.jitter,
     "results": results,
     "provenance": provenance,
-    "checks": _checks(samples[: len(ARMS)], args.hold_seconds),
+    "motion_decision_period_s": action_cfg.motion_decision_period_s,
+    "requested_hold_s": args.hold_seconds,
+    "checks": _checks(samples[: len(ARMS)], args.hold_seconds, args.resume_scale),
   }
   if args.check_partial_reset:
     held = [f for f in samples[2] if f["motion_state"] == 2.0]
@@ -217,6 +218,7 @@ def main() -> None:
   )
   held_frames = [f for f in samples[2] if f["motion_state"] == 2.0]
   if held_frames:
+    report["observed_hold_s"] = len(held_frames) * env.step_dt
     first_feet = held_frames[0]["feet_position"]
     report["hold_foot_drift_m"] = max(
       math.dist(foot, first)
@@ -250,7 +252,6 @@ def _frames(
         term.motion_scale_dispatched,
         term.datastore_scalar_output(MOTION_SCALE_GETTER),
         term.datastore_scalar_output(MOTION_STATE_GETTER),
-        term.datastore_scalar_output(MOTION_LIMIT_GETTER),
         term.datastore_scalar_output(accessors.COMPLETE),
         term.controller_failed.to(torch.float32),
         term.controller_worker_failed.to(torch.float32),
@@ -277,7 +278,6 @@ def _frames(
     "dispatched_scale",
     "applied_scale",
     "motion_state",
-    "resume_limit",
     "complete",
     "controller_failed",
     "worker_failed",
@@ -308,7 +308,9 @@ def _frames(
   ]
 
 
-def _checks(samples: list[list[dict]], hold_seconds: float) -> dict[str, bool]:
+def _checks(
+  samples: list[list[dict]], hold_seconds: float, resume_scale: float = 1.0
+) -> dict[str, bool]:
   """Require observed reference hold, slow motion, preserved goal and completion."""
   finals = [arm[-1] for arm in samples]
   held = [frame for frame in samples[2] if frame["motion_state"] == 2.0]
@@ -336,11 +338,8 @@ def _checks(samples: list[list[dict]], hold_seconds: float) -> dict[str, bool]:
       for frame in arm
     ),
     "half_speed_observed": bool(slow),
-    "post_hold_resume_limited": bool(resumed)
-    and all(
-      frame["resume_limit"] == 0.5 and frame["applied_scale"] <= 0.5
-      for frame in resumed
-    ),
+    "post_hold_requested_scale_observed": bool(resumed)
+    and all(abs(frame["applied_scale"] - resume_scale) < 1e-6 for frame in resumed),
     "slow_completion_later": finals[1]["time_s"] > finals[0]["time_s"] + 5.0,
     "hold_duration_observed": bool(held)
     and held[-1]["time_s"] - held[0]["time_s"] >= hold_seconds - 0.05,

@@ -26,7 +26,8 @@ explicit command for reducing the controller's walking/cart motion demand.
 ## setMotionScale
 
 **Current:** The callback lives in the external LocomanipController source,
-alongside its `ManipManager` implementation, in controller commit `91570d6`.
+alongside its `ManipManager` implementation. Installed controller revision
+`2a6fec7` removes the post-hold speed cap; the callback began in `91570d6`.
 `motionScale` reports the
 controller's scale and `motionState` reports 0 for following the route, 1 for
 braking and 2 for holding. Normal speed does not change the original trajectory.
@@ -44,10 +45,11 @@ with longer durations and footsteps are regenerated to follow them. Partial
 segments use a duration bound that preserves peak velocity and acceleration
 when the interpolation restarts from rest. A one-second
 lead-in lets the controller prepare the next step. The final cart goal is retained.
-After an explicit hold, resumed motion is capped at half speed until episode reset;
-`motionScaleLimit` exposes that cap. This is a conservative restriction following
-an observed loaded failure when resuming at full speed. Normal speed remains
-available before the first hold.
+After an explicit hold, the positive request selects the resumed speed, including
+full speed. The `motionScaleLimit` callback has been removed. The mjlab action,
+observations and probe use the remaining callbacks and check that the actual
+resumed scale equals the request. GUI controls and log entries added in `c7c9682`
+remain disabled by the training YAML's GUI/log settings.
 
 A held episode still ends at the configured wall-clock cap. Holding does not
 set `Locomanip::complete`, and an incomplete episode is not a safe completion.
@@ -58,7 +60,12 @@ surviving by remaining stationary is not evidence of finishing the task.
 FSM completion guard or timing changes. The controller module and companion
 library hashes bind new checkpoints and authority reports to this implementation.
 
-**History:** The previous `clearWaypointQueue()` utility noted a discontinuous
+**History:** Revisions through `fb867cb` capped resumed motion at half speed until
+episode reset after an observed loaded failure on full-speed resume. Those
+measurements and both 200-iteration pilots used that older behavior. Their saved
+controller hashes differ from the current installed binaries; they cannot be
+resumed or evaluated as the same controller under the new installation.
+The previous `clearWaypointQueue()` utility noted a discontinuous
 object-velocity change. This control path retains the incoming reference velocity
 and applies the chain rule while braking, rather than replacing a moving reference
 with a zero-velocity interpolation in one step.
@@ -410,12 +417,13 @@ emergency request.
 
 ## MOTION_FILTER_GETTER
 
-**Current:** Controller revision `fb867cb` filters ordinary speed requests with
+**Current:** Controller revision `2a6fec7` retains the `fb867cb` request filter with
 a 0.25-second time constant, a 0.1 deadband, 0.05 target bins and 0.5 seconds
 of stable intent. A restarted route is protected through its one-second
 lead-in and two subsequent seconds of motion before accepting another ordinary
 change. Explicit zero requests bypass filtering and protection immediately;
-the existing continuous stop and post-hold half-speed cap remain in place.
+the existing continuous stop remains in place. The post-hold half-speed cap
+was removed in `2a6fec7`.
 Release from an explicit hold bypasses the ordinary filter delay, then resumes
 with the same protected lead-in and motion interval.
 
@@ -622,7 +630,7 @@ old distribution parameters and reconstructed from saved observations for
 shuffled minibatches, rollout KL and diagnostics. Held actions are not
 repeated independent samples in PPO.
 
-The registered actor input is now 891 values and critic input 1020, including
+The registered actor input is now 890 values and critic input 1019, including
 the three clock fields. The distribution also has a separate motion noise
 parameter. Existing checkpoints are not resumed across this interface change.
 Reward costs remain 0.03 slowdown, 0.22 per native start and 0.05 held time.
@@ -637,4 +645,82 @@ HRP5P live smoke test at 10 kg, seed 42, encoder bias enabled, ran four PPO
 updates with finite losses and gradients. Nine rows reached native braking
 starts. Stored masks matched the action term's pre-action clock, latched
 requests matched their sampled selections, and checkpoint reload was exact.
-Artifacts: `logs/locomanip/multirate-motion-smoke-2026-10-15/`.
+Artifacts: `logs/locomanip/multirate-motion-smoke-2026-10-15/`. That smoke test
+used revision `fb867cb` and 891/1020 inputs, including the now-removed cap field.
+
+## multirate-motion-pilot
+
+**Current:** The seed-42, 256-env pilot finished 200 iterations and
+3,276,800 transitions in about 39 minutes under native revision `fb867cb`.
+Over iterations 170–199, the unweighted mean of 30 logged cohort metrics was
+0.84817 safe completion, 0.30831 braking starts, 0.98425 applied scale and
+0.00001 holding fraction. Timeouts and worker failures were zero. These are
+cohort means, not pooled episode rates. Earlier cohorts averaged 6–9 braking
+starts per episode before the policy reduced braking.
+
+The final checkpoint's seed-42 matched channel check used one episode per
+mass and arm, encoder bias and actor observation corruption enabled. All
+four arms completed at 100/550 kg and failed at 525/575 kg. The full policy
+failed at 33.02 s versus baseline 28.22 s at 525 kg, and 34.36 s versus
+31.46 s at 575 kg. No arm applied braking. This did not demonstrate a gain
+in safe completions or combined failures. Artifacts are under
+`logs/locomanip/multirate-motion-pilot-final-channels-2026-10-15/`.
+
+**Re-measure if:** selecting an earlier checkpoint or changing controller inputs.
+
+**History:** The separate motion exploration reached native braking during
+training, but the final deterministic checkpoint avoided it in these probes.
+
+## Uncapped resume verification
+
+**Current:** Installed native revision `2a6fec7`, seed 42, encoder bias enabled,
+zero joint residual, registered 103.32 s cap and 2.0 s motion decision period.
+Twenty first episodes cover six cohorts, with one episode per arm per cohort.
+Payload and bias inputs match within cohorts. The two heavy masses each have
+separate full-speed and half-speed release cohorts; matched inputs do not
+guarantee identical simulated trajectories.
+
+| mass and release | zero action | half-speed comparator | hold/resume |
+| --- | --- | --- | --- |
+| 10 kg, full release | completed 49.66 s | completed 82.64 s | completed 61.62 s |
+| 100 kg, full release | completed 49.34 s | completed 82.34 s | completed 61.32 s |
+| 550 kg, full release | failed 27.38 s | completed 82.28 s | failed 40.20 s |
+| 575 kg, full release | failed 27.24 s | completed 82.32 s | failed 39.36 s |
+| 550 kg, half release | failed 27.42 s | completed 82.32 s | completed 88.28 s |
+| 575 kg, half release | failed 27.12 s | completed 82.28 s | completed 88.32 s |
+
+The two indefinite-hold arms at 10/550 kg remained safe but incomplete at
+103.32 s. No workers failed. Input delivery, native event accumulation and
+requested resume-scale checks passed in all six cohorts. Every intervention
+started braking once. Heavy-cohort aggregate safety/completion checks fail
+because their baselines fall; full-speed release also fails at those masses.
+These are controlled diagnostic observations, not repeated-trial qualification.
+
+Four seconds of requested holding produced 5.50 s of actual native holding:
+the policy clock can delay release until its next decision. The reports record
+requested and observed durations separately. Reference motion stopped during
+Hold; root drift stayed below the original 0.05 m limit in these six probes.
+Maximum foot drift during Hold was 1.4–5.9 mm.
+
+`reward-audit.json` scores costs 0.03/0.22/0.05 with gamma 0.997 on complete
+terminal traces. At 10 kg, normal completion scores 1.5219, completed
+hold/full-speed resume 1.1656 and indefinite holding 1.4224. Thus this
+controller/timing profile does not preserve the earlier ordering of every
+completed intervention above indefinite holding. At 550 kg, the completed
+half-speed release scores 1.4267; the separate indefinite-hold cohort scores
+1.3735. Unknown truncation bootstrap values are excluded. Costs need renewed
+validation before another training run; these comparisons do not qualify
+the rewards or learned policy.
+
+Artifacts: `logs/locomanip/uncapped-resume-2026-10-15/`. Each report contains
+the new installed binary digests and source revision. The actor/critic inputs
+have dropped the removed `motionScaleLimit` field, and older checkpoints
+remain bound to their saved controller and observation interface.
+
+**Re-measure if:** release speed, controller, decision period, masses, bias or
+costs change. Full hold usage alone does not measure safety improvement;
+evaluate combined failure and safe completion with the subsequent release.
+
+**History:** Removing the automatic half-speed cap makes the resumed speed
+a policy choice. The loaded full-speed failures explain why that choice
+must be measured alongside holding, rather than counted as an improvement.

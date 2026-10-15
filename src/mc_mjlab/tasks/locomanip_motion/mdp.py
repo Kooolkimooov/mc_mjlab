@@ -10,7 +10,6 @@ from mc_mjlab.actions.locomanip_motion_action import (
   MOTION_COUNT_GETTER,
   MOTION_DELAY_GETTER,
   MOTION_FILTER_GETTER,
-  MOTION_LIMIT_GETTER,
   MOTION_SCALE_GETTER,
   MOTION_STATE_GETTER,
   MOTION_TARGET_GETTER,
@@ -31,7 +30,6 @@ def motion_observation(env: ManagerBasedRlEnv) -> torch.Tensor:
       term.motion_scale_dispatched,
       term.datastore_scalar_output(MOTION_SCALE_GETTER),
       term.datastore_scalar_output(MOTION_STATE_GETTER) / 2.0,
-      term.datastore_scalar_output(MOTION_LIMIT_GETTER),
       term.datastore_scalar_output(MOTION_TARGET_GETTER),
       term.datastore_scalar_output(MOTION_FILTER_GETTER),
       (term.datastore_scalar_output(MOTION_DELAY_GETTER) / 3.0).clamp(0.0, 1.0),
@@ -52,7 +50,7 @@ def motion_holding(env: ManagerBasedRlEnv) -> torch.Tensor:
 
 
 def braking(env: ManagerBasedRlEnv) -> torch.Tensor:
-  """Charge applied slowdown during bilateral Hold, including a capped resume."""
+  """Charge actual applied slowdown during bilateral Hold."""
   return (1.0 - motion_scale(env).clamp(0.0, 1.0)) * accessors.holding(env)
 
 

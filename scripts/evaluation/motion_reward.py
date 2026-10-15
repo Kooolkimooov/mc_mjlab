@@ -178,7 +178,7 @@ def _validate_samples(samples: Sequence[dict[str, Any]], step_dt: float) -> None
 
 
 def _braking(frame: dict[str, Any]) -> float:
-  """Charge applied slowdown during bilateral Hold, including a capped resume."""
+  """Charge actual applied slowdown during bilateral Hold."""
   return 1.0 - min(max(frame["applied_scale"], 0.0), 1.0) if frame["holding"] else 0.0
 
 

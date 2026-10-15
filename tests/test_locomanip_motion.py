@@ -16,7 +16,6 @@ from mc_mjlab.actions.locomanip_motion_action import (
   MOTION_COUNT_GETTER,
   MOTION_DELAY_GETTER,
   MOTION_FILTER_GETTER,
-  MOTION_LIMIT_GETTER,
   MOTION_SCALE_GETTER,
   MOTION_SCALE_SETTER,
   MOTION_STATE_GETTER,
@@ -74,9 +73,10 @@ def test_new_task_keeps_joint_task_independent() -> None:
   action = cfg.actions[accessors.ACTION_NAME]
   assert isinstance(action, LocomanipMotionActionCfg)
   assert MOTION_SCALE_SETTER in action.datastore_scalar_inputs
-  assert {MOTION_SCALE_GETTER, MOTION_STATE_GETTER, MOTION_LIMIT_GETTER} <= set(
+  assert {MOTION_SCALE_GETTER, MOTION_STATE_GETTER} <= set(
     action.datastore_scalar_outputs
   )
+  assert "Locomanip::motionScaleLimit" not in action.datastore_scalar_outputs
   original_action = cast(
     "McRtcResidualJointPositionActionCfg", original.actions[accessors.ACTION_NAME]
   )
@@ -151,7 +151,6 @@ def test_probe_rejects_an_incomplete_hold_and_incorrect_native_delivery() -> Non
     "collapsed": 0.0,
     "native_input_scale": 1.0,
     "dispatched_scale": 1.0,
-    "resume_limit": 1.0,
   }
   held = {
     **frame,
@@ -161,7 +160,6 @@ def test_probe_rejects_an_incomplete_hold_and_incorrect_native_delivery() -> Non
     "applied_scale": 0.0,
     "native_input_scale": 0.0,
     "dispatched_scale": 0.0,
-    "resume_limit": 0.5,
   }
   samples = [
     [{**frame, "time_s": 49.0}],
@@ -169,17 +167,21 @@ def test_probe_rejects_an_incomplete_hold_and_incorrect_native_delivery() -> Non
     [
       {**held, "time_s": 20.0},
       {**held, "time_s": 24.02},
-      {**frame, "time_s": 80.0, "resume_limit": 0.5, "applied_scale": 0.5},
+      {**frame, "time_s": 80.0, "applied_scale": 1.0},
     ],
   ]
   assert all(_checks(samples, 4.0).values())
+  samples[2][-1]["applied_scale"] = 0.5
+  assert not _checks(samples, 4.0)["post_hold_requested_scale_observed"]
+  assert all(_checks(samples, 4.0, resume_scale=0.5).values())
+  samples[2][-1]["applied_scale"] = 1.0
   samples[2][-1]["complete"] = 0.0
   assert not _checks(samples, 4.0)["all_completed"]
   samples[1][-1]["native_input_scale"] = 0.0
   assert not _checks(samples, 4.0)["actual_native_delivery"]
 
 
-def test_motion_observation_exposes_controller_resume_limit(
+def test_motion_observation_exposes_native_intent_and_execution(
   monkeypatch: pytest.MonkeyPatch,
 ) -> None:
   action = motion_action()
@@ -187,7 +189,6 @@ def test_motion_observation_exposes_controller_resume_limit(
     {
       MOTION_SCALE_GETTER: torch.full((5,), 0.5),
       MOTION_STATE_GETTER: torch.zeros(5),
-      MOTION_LIMIT_GETTER: torch.full((5,), 0.5),
       MOTION_TARGET_GETTER: torch.full((5,), 0.5),
       MOTION_FILTER_GETTER: torch.full((5,), 0.6),
       MOTION_DELAY_GETTER: torch.full((5,), 1.5),
@@ -195,9 +196,7 @@ def test_motion_observation_exposes_controller_resume_limit(
   )
   monkeypatch.setattr(accessors, "residual_action", lambda env: action)
   observed = motion_mdp.motion_observation(cast(Any, NS()))
-  torch.testing.assert_close(
-    observed, torch.tensor([[1, 0.5, 0, 0.5, 0.5, 0.6, 0.5]] * 5)
-  )
+  torch.testing.assert_close(observed, torch.tensor([[1, 0.5, 0, 0.5, 0.6, 0.5]] * 5))
 
 
 def test_braking_reward_charges_applied_scale_only_during_bilateral_hold(
