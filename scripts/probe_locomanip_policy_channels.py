@@ -35,12 +35,18 @@ if TYPE_CHECKING:
 ARMS = ("baseline", "policy", "joints_only", "motion_only")
 
 
-def select_channels(actions: torch.Tensor) -> torch.Tensor:
-  """Keep each four-row cohort's baseline, full policy and two channel ablations."""
+def select_channels(
+  actions: torch.Tensor, arms: tuple[str, ...] = ARMS
+) -> torch.Tensor:
+  """Keep each cohort's baseline, full policy and optional channel ablations."""
   selected = actions.clone()
-  selected[0::4] = 0.0
-  selected[2::4, -1] = 0.0
-  selected[3::4, :-1] = 0.0
+  for index, arm in enumerate(arms):
+    if arm == "baseline":
+      selected[index :: len(arms)] = 0.0
+    elif arm == "joints_only":
+      selected[index :: len(arms), -1] = 0.0
+    elif arm == "motion_only":
+      selected[index :: len(arms), :-1] = 0.0
   return selected
 
 
@@ -48,6 +54,8 @@ def main() -> None:
   """Compare first episodes using matched payloads and explicit encoder draws."""
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("--checkpoint", type=Path, required=True)
+  parser.add_argument("--task", default=TASK_IDS["HRP5P"])
+  parser.add_argument("--paired-only", action="store_true")
   parser.add_argument("--masses", type=float, nargs="+", default=[100.0, 550.0])
   parser.add_argument("--seed", type=int, default=42)
   parser.add_argument("--no-encoder-bias", action="store_true")
@@ -59,11 +67,12 @@ def main() -> None:
   ):
     parser.error("an existing checkpoint and positive masses are required")
   args.output.mkdir(parents=True, exist_ok=True)
-  task = TASK_IDS["HRP5P"]
+  task = args.task
+  arms = ("baseline", "policy") if args.paired_only else ARMS
   rows = [
     {"mass_kg": mass, "arm": arm, "condition_id": condition_id(args.seed, mass, 0)}
     for mass in args.masses
-    for arm in ARMS
+    for arm in arms
   ]
   cfg = load_env_cfg(task)
   cfg.seed = args.seed
@@ -113,7 +122,7 @@ def main() -> None:
       for step in range(env.max_episode_length):
         with torch.inference_mode():
           proposed = policy(wrapped.get_observations())
-        actions = select_channels(proposed)
+        actions = select_channels(proposed, arms)
         for index, result in enumerate(results):
           if result is not None:
             actions[index] = 0.0
@@ -181,6 +190,7 @@ def summarize(samples: list[dict], step_dt: float) -> dict:
     "reference_displacement_m": final["reference_x"] - first["reference_x"],
     "min_height_m": min(f["root_z"] for f in samples),
     "max_tilt_rad": max(f["tilt_rad"] for f in samples),
+    "max_forward_lag_m": max(max(f["reference_x"] - f["cart_x"], 0.0) for f in samples),
     "braking_seconds": sum(f["motion_state"] == 1 for f in samples) * step_dt,
     "holding_seconds": sum(f["motion_state"] == 2 for f in samples) * step_dt,
     "braking_starts": sum(

@@ -305,6 +305,10 @@ retain the registered training corruption; the policy uses deterministic
 inference actions. The actor-only load still enforces checkpoint controller
 provenance and the observation/action interface.
 
+`--task` selects another registered motion or braking-only variant.
+`--paired-only` runs just baseline and policy for each mass, including the
+single-output braking task. Reports also retain maximum forward cart lag.
+
 The diagnostic records normalized requests, actual dispatched input, applied
 motion scale/state, reference/cart/root progress and terminal flags before
 resets. It counts entries into the braking state separately from completed
@@ -698,6 +702,47 @@ improvement over the baseline.
 
 **History:** Added to isolate braking decisions from joint residual learning.
 The parent joint-plus-motion task remains independently registered.
+
+## Braking-only checkpoint 500 comparison
+
+**Current:** A quick comparison used checkpoint `model_500.pt` from
+`2026-10-15_15-11-28_braking-only`, one baseline/policy pair at each of
+10/100/525/550/575 kg, seed 43 and the registered 103.32-second cap.
+The policy used deterministic inference with training observation corruption.
+Encoder-bias vectors matched within each pair, actual payloads matched the
+requested masses, dispatched inputs were verified and no worker failed.
+The provenance check passed against controller revision `2a6fec7` and its
+installed binary hashes. Training continued during this comparison.
+
+| Mass (kg) | Baseline outcome | Policy outcome |
+| --- | --- | --- |
+| 10 | Safe completion at 49.60 s | Safe hold, timeout at 103.32 s |
+| 100 | Safe completion at 49.26 s | Safe hold, timeout at 103.32 s |
+| 525 | Safe completion at 49.26 s | Safe hold, timeout at 103.32 s |
+| 550 | Safe completion at 49.24 s | Safe hold, timeout at 103.32 s |
+| 575 | Physical failure at 29.44 s | Safe hold, timeout at 103.32 s |
+
+All five policy episodes entered braking once, then held for 89.22–89.40 s
+without release. Their minimum heights were 0.7275–0.7300 m and maximum tilts
+0.0300–0.0513 rad. The policy prevented the one observed baseline failure but
+also stopped in all four conditions the baseline completed safely. This is
+blanket stopping rather than selective braking. Zero observed policy failures
+across five episodes is a small-sample observation, not a safety qualification.
+
+Artifacts: `logs/locomanip/braking-only-model-500-quick-baseline-seed-43/`.
+Reproduce using the paired diagnostic's registered-task option:
+
+```sh
+uv run python scripts/probe_locomanip_policy_channels.py \
+  --task Mc-Mjlab-Locomanip-Braking-Locomanipcontroller-Hrp5P --paired-only \
+  --checkpoint <braking-only-model-500.pt> --masses 10 100 525 550 575 \
+  --seed 43 --output logs/locomanip/braking-only-model-500-quick-baseline-seed-43
+```
+
+**Re-measure if:** selecting another checkpoint, controller revision, encoder
+draw, observation corruption or braking-cost profile.
+
+**History:** Requested as an interim baseline comparison around iteration 500.
 
 ## multirate-motion-pilot
 

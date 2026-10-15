@@ -58,3 +58,12 @@ def test_braking_cycles_are_counted_separately_from_explicit_holds() -> None:
   assert result["input_delivery_verified"]
   assert not result["complete"]
   assert not result["failed"]
+
+
+def test_braking_only_pairs_keep_every_policy_row_and_zero_every_baseline() -> None:
+  original = torch.linspace(-1, 1, 10).reshape(10, 1)
+  untouched = original.clone()
+  selected = select_channels(original, ("baseline", "policy"))
+  torch.testing.assert_close(selected[0::2], torch.zeros(5, 1))
+  torch.testing.assert_close(selected[1::2], original[1::2])
+  torch.testing.assert_close(original, untouched)
