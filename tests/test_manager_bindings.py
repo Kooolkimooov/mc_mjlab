@@ -117,6 +117,27 @@ def test_manager_steps_python_owned_rows(tmp_path: Path, shared_io: SharedIo) ->
   assert (outputs.arr == 42.0).all()
 
 
+def test_manager_routes_single_controller_logs(
+  tmp_path: Path, shared_io: SharedIo, capfd: pytest.CaptureFixture[str]
+) -> None:
+  configuration, _, _ = shared_io
+  with native.ControllersManager(
+    make_configuration(tmp_path),
+    3,
+    2,
+    configuration,
+    timeout_ms=5000,
+    console_output="single",
+  ):
+    pass
+
+  output = capfd.readouterr().out
+  assert output.count("controllers with logging true") == 1
+  assert output.count("controllers with logging false") == 1
+  assert "on 1 controllers with logging true" in output
+  assert "on 2 controllers with logging false" in output
+
+
 def test_uninitialized_step_only_writes_row_status(
   tmp_path: Path, shared_io: SharedIo
 ) -> None:

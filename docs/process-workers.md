@@ -157,11 +157,18 @@ shutdown scheduling changes.
 
 ## OutputGuard
 
-**Current:** a scoped RAII `dup2` of fds 1 and 2 to `/dev/null`, constructed
-from the row's `log_offset` flag at the three `ControllerInstance` entry points
-(`initialize`, `reset`, `step`). It does **not** reliably silence mc_rtc, and
-cannot: mc_rtc's loggers are asynchronous, so a scoped redirect races the
-drain. Two leak paths remain open, and `console_output="none"` closes neither.
+**Current:** the worker constructs one process-wide RAII `dup2` guard of fds 1
+and 2 to `/dev/null` before controller configuration loads. The native manager
+passes `--logging true` for workers selected by `console_output`, so enabled
+workers keep their terminal output throughout startup, steps and resets.
+
+**Re-measure if:** mc_rtc stops constructing its loggers with
+`create_async_nb`, or worker-level output routing changes.
+
+**History:** the prior scoped row guard did **not** reliably silence mc_rtc:
+its asynchronous log drain raced restoration, and startup ran before any row.
+The native manager also failed to pass `--logging`, leaving every worker silent
+under the process-wide guard.
 
 `mc_rtc/src/mc_rtc/logging.cpp:39,56,73` builds all three loggers with
 `spdlog::create_async_nb<...>`. `mc_rtc::log::error(...)` enqueues and returns;
@@ -171,24 +178,19 @@ messages are suppressed, a minority escape — the signature of a race, not of a
 broken flag.
 
 `GlobalConfiguration` is built in `ControllersHost`'s constructor
-(`controllers_host.cpp:10-11`) from `worker.cpp:38`, before any row exists, so
-no guard covers the config-parse burst at worker startup. It repeats per worker
-and again on every respawn.
+(`controllers_host.cpp:10-11`) from `worker.cpp:38`, before any row existed, so
+the old row guard did not cover the config-parse burst at worker startup. It
+repeated per worker and again on every respawn.
 
 The removed Python implementation had neither leak, by construction: its worker
 redirected once at startup and never restored (a `tempfile.TemporaryFile`, not
 `/dev/null`, so error replies could attach mc_rtc's own text), and `"single"`
 gave environment zero a dedicated worker so every other worker could be
-silenced wholesale. Restoring that shape — decide silence once per worker
-process, from a spawn argument — removes the race rather than narrowing it, and
-covers the startup burst in the same move. `MC_MJLAB_WORKER_LOG_DIR`
+silenced wholesale. The native worker-level routing now makes that choice once
+at spawn and covers the startup burst. `MC_MJLAB_WORKER_LOG_DIR`
 (per-worker `worker-<pid>.log` plus `faulthandler.enable()`) was lost in the
 port and has no native equivalent.
 
-**Re-measure if:** mc_rtc stops constructing its loggers with
-`create_async_nb`, or worker silencing moves out of the per-row flag.
-
-**History:**
 - 2026-09-11 — reproduced against real `LogisticController_ismpc`, 2 workers,
   6000 steps (12 s controller time), log flag asserted `0` on every row at every
   500-step checkpoint. One line escaped, between checkpoints 4000 and 4500:

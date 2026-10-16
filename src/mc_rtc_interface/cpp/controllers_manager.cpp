@@ -55,18 +55,22 @@ ControllersManager::ControllersManager(
     size_t             num_controllers,
     size_t             num_workers,
     WorkerStartMessage configuration,
-    int                timeout_ms)
+    int                timeout_ms,
+    std::string        console_output)
     : m_mc_rtc_configuration_path(std::move(mc_rtc_configuration_path)),
       m_num_controllers(num_controllers),
       m_num_workers(num_workers),
       m_configuration(std::move(configuration)),
-      m_timeout_ms(timeout_ms)
+      m_timeout_ms(timeout_ms),
+      m_console_output(std::move(console_output))
 {
     if (m_num_workers == 0 || m_num_workers > m_num_controllers)
     {
         throw std::runtime_error("num_workers must lie in [1, num_controllers]");
     }
     if (m_timeout_ms < 0) throw std::invalid_argument("timeout_ms must be nonnegative");
+    if (m_console_output != "none" && m_console_output != "single" && m_console_output != "all")
+        throw std::invalid_argument("console_output must be none, single, or all");
 
     m_workers.reserve(m_num_workers);
 
@@ -82,9 +86,20 @@ ControllersManager::ControllersManager(
 
         for (size_t index = 0, first_controller_index = 0; index < m_num_workers; ++index)
         {
-            // Remainder spread over the leading workers, so shares differ by at most one row.
-            const size_t num_controllers_per_worker =
-                m_num_controllers / m_num_workers + (index < m_num_controllers % m_num_workers);
+            size_t num_controllers_per_worker;
+            if (m_console_output == "single" && m_num_workers > 1)
+            {
+                const size_t remaining_rows    = m_num_controllers - 1;
+                const size_t remaining_workers = m_num_workers - 1;
+                num_controllers_per_worker =
+                    index == 0 ? 1
+                               : remaining_rows / remaining_workers + (index - 1 < remaining_rows % remaining_workers);
+            }
+            else
+            {
+                num_controllers_per_worker =
+                    m_num_controllers / m_num_workers + (index < m_num_controllers % m_num_workers);
+            }
 
             m_workers.push_back(spawn_worker(first_controller_index, num_controllers_per_worker, 0));
 
@@ -325,16 +340,19 @@ ControllersManager::Worker
     auto socket = std::make_unique<IPCSocket>(endpoint, IPCSocket::Mode::Bind);
 
     // worker path defined by cmake.
-    const auto worker_path   = worker_executable_path();
-    auto       child_process = boost::process::process(
-        m_io_context,
-        worker_path.string(),
-        {"--endpoint",
-         endpoint,
-         "--config",
-         m_mc_rtc_configuration_path,
-         "--num-controllers",
-         std::to_string(num_controllers)});
+    const auto               worker_path = worker_executable_path();
+    std::vector<std::string> arguments{
+        "--endpoint",
+        endpoint,
+        "--config",
+        m_mc_rtc_configuration_path,
+        "--num-controllers",
+        std::to_string(num_controllers)};
+    if (m_console_output == "all" || (m_console_output == "single" && first_controller_index == 0))
+    {
+        arguments.insert(arguments.end(), {"--logging", "true"});
+    }
+    auto child_process = boost::process::process(m_io_context, worker_path.string(), arguments);
 
     Worker worker{
         std::move(socket),

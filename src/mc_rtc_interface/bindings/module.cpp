@@ -82,12 +82,13 @@ NB_MODULE(mc_rtc_interface, m)
     nb::class_<ControllersManager> manager(m, "ControllersManager");
     manager
         .def(
-            nb::init<std::string, size_t, size_t, WorkerStartMessage, int>(),
+            nb::init<std::string, size_t, size_t, WorkerStartMessage, int, std::string>(),
             "configuration_path"_a,
             "num_controllers"_a,
             "num_workers"_a,
             "configuration"_a,
-            "timeout_ms"_a = 5,
+            "timeout_ms"_a     = 5,
+            "console_output"_a = "none",
             nb::call_guard<nb::gil_scoped_release>())
         .def("dispatch", &ControllersManager::dispatch, "command"_a, nb::call_guard<nb::gil_scoped_release>())
         .def("collect", &ControllersManager::collect, nb::call_guard<nb::gil_scoped_release>())

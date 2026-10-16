@@ -12,7 +12,8 @@ class ControllersManager
             size_t             num_controllers,
             size_t             num_workers,
             WorkerStartMessage configuration,
-            int                timeout_ms = 5);
+            int                timeout_ms     = 5,
+            std::string        console_output = "none");
 
         ControllersManager(const ControllersManager &)            = delete;
         ControllersManager &operator=(const ControllersManager &) = delete;
@@ -42,6 +43,7 @@ class ControllersManager
         size_t                  m_num_controllers, m_num_workers;
         WorkerStartMessage      m_configuration;
         int                     m_timeout_ms;
+        std::string             m_console_output;
         bool                    m_closed = false;
 
         WorkerStartMessage build_worker_configuration(size_t first_controller_index, size_t num_controllers) const;

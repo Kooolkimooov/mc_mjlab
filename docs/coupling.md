@@ -406,20 +406,21 @@ Checkpoint validation remains intact and must reject changed effective contracts
 
 ## Console output
 
-**Current:** `controller_timeout_ms=60000` retains the old operational collection
-timeout. `console_output` writes native row log flags: none, environment zero
-(`single`), or all. Python worker-file logging and in-process execution switches
-have been removed. `MC_MJLAB_PRINT_RESIDUAL` still controls the Python residual
-print interval.
+**Current:** `controller_timeout_ms=60000` retains the operational collection
+timeout. `console_output` now reaches worker startup: `none` silences every
+worker, `all` shows every worker, and `single` reserves environment zero's own
+worker when the pool has at least two workers. With one worker and multiple
+environments, `single` shows that worker's whole batch. The process-wide fd
+guard covers startup and asynchronous mc_rtc messages. `Log: false` in the
+controller YAML disables binary logs, not console messages.
+`MC_MJLAB_PRINT_RESIDUAL` separately controls Python residual printouts.
 
-Native fd guards do **not** silence C++ spdlog, and cannot — mc_rtc's loggers
-are asynchronous, so the scoped guard races the drain, and worker startup logs
-before any row exists. `console_output="none"` leaks on both paths. See
-[OutputGuard](process-workers.md#outputguard).
-
-**Re-measure if:** timeout semantics or native row logging changes.
+**Re-measure if:** timeout semantics or native worker output routing changes.
 
 **History:**
+- 2026-10-16 — play selected `single` in Python but native manager never passed
+  `--logging` to the worker; its false default redirected all mc_rtc messages
+  to `/dev/null`. Worker-level routing now carries the mode across the boundary.
 - the native binding's standalone timeout default is 5 ms; the action passes its
   explicit 60000 ms default.
 - 2026-09-11 — "Native fd guards silence C++ spdlog" was wrong; corrected with

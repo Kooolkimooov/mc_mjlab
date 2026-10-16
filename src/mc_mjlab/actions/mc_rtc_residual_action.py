@@ -548,6 +548,7 @@ class McRtcResidualActionBase(BaseAction):
       workers,
       configuration,
       cfg.controller_timeout_ms,
+      cfg.console_output,
     )
 
     self._finalizer = weakref.finalize(
