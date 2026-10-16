@@ -253,7 +253,34 @@ uv run play  Mc-Mjlab-Residual-Balance-Logisticcontroller-Ismpc-Hrp5P-Position \
 ```
 
 `uv run list-envs` shows the supported mc_mjlab tasks alongside mjlab's tasks.
-One, the achievement-gated ankle curriculum, advances only from held-out
+Inspect any registered task before launching it:
+
+```sh
+uv run describe <TaskID>                         # training configuration summary
+uv run describe <TaskID> --play                  # registered play configuration
+uv run describe <TaskID> --full                  # every environment and agent field
+uv run describe <TaskID> --full --format json > task.json
+uv run describe <TaskID> --color always          # force colors when piping text
+uv run describe <TaskID> --env.scene.num-envs 8 --agent.algorithm.learning-rate 0.0003
+uv run describe --help                          # command help without task loading
+uv run describe <TaskID> --help                  # includes Tyro configuration overrides
+```
+
+This is configuration inspection: it creates no environment, runner, or controller
+workers. Normal registration prerequisites still apply, including the sourced
+mc_rtc workspace and robot assets; first-use asset linking remains possible.
+The summary preserves configured term order, disabled entries, and zero weights.
+JSON uses the same summary/full selection, and loading chatter goes to stderr.
+Text colors turn on automatically in terminals, respect `NO_COLOR`, and can be
+set with `--color auto|always|never`. Controller file status uses blue and yellow
+background badges with explicit `[present]` and `[missing]` labels. JSON never
+contains color codes.
+Full output includes qualified callable names and declared `parameter_defaults`,
+separate from explicit term `params` and partial arguments. Dimensions, resolved
+entity indices, live curriculum state, merged controller YAML, and sensors added
+by entity spec factories require runtime resolution and are outside this command.
+
+The achievement-gated ankle curriculum advances only from held-out
 qualification reports — see
 [docs/difficulty.md](docs/difficulty.md#achievement_finite_impulse_curriculum)
 for how to drive it. Another,

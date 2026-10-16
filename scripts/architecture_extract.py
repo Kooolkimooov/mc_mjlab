@@ -438,6 +438,7 @@ def entry_points() -> dict[str, str]:
   """The entry points this package declares."""
   data = tomllib.loads((ROOT / "pyproject.toml").read_text())
   groups = data["project"].get("entry-points", {})
+  groups["console_scripts"] = data["project"].get("scripts", {})
   return {f"{g}:{k}": v for g, items in groups.items() for k, v in items.items()}
 
 

@@ -245,7 +245,7 @@ def context_diagram() -> str:
   lines += [f'    {node_id(name)}["{name}"]' for name in bindings]
   for name, _, _ in ex.path_constants(PATH_MODULES):
     lines.append(f'    {node_id(name)}[("{name}")]')
-  lines += ["  end", '  subgraph mjlab["mjlab"]']
+  lines += ["  end", '  subgraph entry_points["entry points"]']
   for group in sorted(ex.entry_points()):
     lines.append(f'    {node_id(group)}["{group}"]')
   lines += ["  end", '  subgraph repo["mc_mjlab"]']
@@ -253,7 +253,8 @@ def context_diagram() -> str:
   lines += [f'    {node_id(name)}["{name}"]' for name in packages]
   lines.append("  end")
   for group, target in sorted(ex.entry_points().items()):
-    lines.append(f"  {node_id(group)} --> {node_id(target)}")
+    owner = ex.bucket(target.partition(":")[0])
+    lines.append(f"  {node_id(group)} --> {node_id(owner)}")
   for module, names in sorted(ex.binding_importers().items()):
     for name in names:
       lines.append(f"  {node_id(name)} ==> {node_id(ex.bucket(module))}")

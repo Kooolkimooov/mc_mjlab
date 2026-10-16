@@ -53,6 +53,9 @@ a training process owned only by an agent exec session.
 uv sync                                          # after choosing the mjlab source
 scripts/demos/run_test_mc_rtc.sh                 # viser viewer (1 env)
 uv run list-envs                                 # task ids (ours + mjlab's)
+uv run describe <TaskID>                         # configuration only; no env/workers
+uv run describe <TaskID> --play --full --format json > task.json
+uv run describe <TaskID> --env.scene.num-envs 8 --agent.algorithm.learning-rate 0.0003
 # Ids are Mc-Mjlab-<task dir>-<Enabled>-<MainRobot>-<control suffix>,
 # built by tasks/naming.py, which reads Enabled/MainRobot from
 # etc/mc_rtc.yaml and then `.title().replace("_", "-")`s the whole string -- so
@@ -86,6 +89,14 @@ script into `tests/`, grouped by subject, so they are run rather than merely
 runnable. They still do not replace a live controller check; the demo is the simulation verification. A healthy run holds a steady
 root height (HRP5P z≈0.79, JVRC1 z≈0.83, RHPS1 z≈0.84) — a dropping z means the
 robot is falling.
+
+`describe --help` must stay independent of task loading. Task-specific inspection
+imports mjlab before our tasks and uses the registry's copied configurations;
+never build an environment, runner, action, or controller manager to inspect one.
+Keep parsing, collection, serialization, and rendering in `mc_mjlab/cli/`, outside
+task discovery. Registration can still link robot assets on first use. Full
+callable defaults are declared signature defaults, separate from explicit params;
+do not reuse or change checkpoint-manifest serialization for this report.
 
 For a *walking* controller (`LogisticController_ismpc`), height alone is not
 enough: a robot standing still holds a perfect z. Check that it is walking, by

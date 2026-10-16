@@ -22,7 +22,11 @@ dependencies = [
     "mujoco",
     "nanobind>=3.0.1",
     "torch",
+    "tyro",
 ]
+
+[project.scripts]
+describe = "mc_mjlab.cli.describe:main"
 
 [dependency-groups]
 dev = [
