@@ -575,7 +575,11 @@ def main() -> None:
     ):
       cfg.events.pop(name, None)
     for entity in cfg.scene.entities.values():
-      for actuator in getattr(entity, "articulation", entity).actuators:
+      # A free body such as the locomanip cart has no articulation to delay.
+      articulation = getattr(entity, "articulation", entity)
+      if articulation is None:
+        continue
+      for actuator in articulation.actuators:
         actuator.delay_max_lag = 0
     print("[compare] nominal model: startup randomization and delay lag removed")
   cfg.auto_reset = False
