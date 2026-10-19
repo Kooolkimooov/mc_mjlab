@@ -270,8 +270,8 @@ def _actions(
 
 def _observations() -> dict[str, ObservationGroupCfg]:
   """Balance state for the actor and ground truth for the critic."""
-  # Noise levels are residual_balance's, measured on this robot.
-  # docs/observations.md
+  # Noise levels are residual_balance's, measured on this robot, except
+  # joint_torque's, measured here. docs/observations.md
   terms = {
     "base_lin_vel": ObservationTermCfg(
       func=envs_mdp.base_lin_vel, noise=Unoise(n_min=-0.02, n_max=0.02)
@@ -301,6 +301,11 @@ def _observations() -> dict[str, ObservationGroupCfg]:
     ),
     "joint_vel": ObservationTermCfg(
       func=envs_mdp.joint_vel_rel, noise=Unoise(n_min=-0.05, n_max=0.05)
+    ),
+    "joint_torque": ObservationTermCfg(
+      func=mdp.observations.joint_torque,
+      noise=Unoise(n_min=-0.005, n_max=0.005),
+      history_length=SAFETY_HISTORY,
     ),
     "actions": ObservationTermCfg(
       func=mdp.observations.executed_action, history_length=SAFETY_HISTORY

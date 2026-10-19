@@ -169,3 +169,28 @@ Without them the policy cannot phase its residual with the plan it is meant to
 protect. `controller_position_error` uses the same biased encoder position the
 controller receives; the reference velocity is controller-internal and known
 exactly.
+
+## joint_torque
+
+**Current:** locomanip actor, `qfrc_actuator / RobotModule effort limit` on every
+target joint the module bounds (35 of HRP5P's 53; the fingers have no limit),
+`+/-0.005` noise, `history_length=SAFETY_HISTORY`. It is the proprioceptive
+payload sense left after the force sensors were removed from the actor.
+
+**Re-measure if:** the noise level should model a real torque estimate (motor
+current) rather than follow the signal-relative rule in `## Noise levels`, the
+robot or its RobotModule limits change, or the action stops being position PD
+(under PD, this channel is the tracking error times `kp`, plus a `kd` term).
+
+**History:**
+- 2026-10-19 — HRP5P `Locomanip-...-Position-Residual`, zero residual, 16 envs x
+  2500 steps (one episode, first 25 steps skipped, only steps before an env's
+  first termination counted; 9 of 16 envs ended inside the window). Channel RMS
+  mean `0.0334`, median `0.0295`; within-episode std mean `0.0235`, median
+  `0.0187`. Largest RMS: `RHDY` 0.086, `LKP` 0.085, `RKP` 0.084, `LHDY` 0.067,
+  `RAP` 0.060; smallest `WR` 0.006, `HP` 0.004. `+/-0.005` is 0.17 of the median
+  RMS, inside the 0.12-0.25 band the other channels sit at; it buries `HP`.
+  Second-half mean torque against the sampled log payload mass (1.1-489 kg):
+  `LAP` r -0.77 and `RAP` r -0.75, slope about -0.0145 per unit log-mass,
+  so the ankles carry the payload signal well above the noise. That correlation
+  includes zero second-half means from the envs that had already ended.

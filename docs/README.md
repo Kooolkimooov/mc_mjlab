@@ -29,7 +29,7 @@ are *deciding* something, not when you are reading the line that implements it.
 | [ppo.md](ppo.md) | `init_std`, `std_range`, `entropy_coef`, `desired_kl`, `num_steps_per_env`, the training budget and diagnostics |
 | [training-parameter-provenance.md](training-parameter-provenance.md) | root source and history of every active and pruned training parameter |
 | [residual-growth.md](residual-growth.md) | `entropy_coef`, `learn_std` and `residual_magnitude` screening results |
-| [observations.md](observations.md) | noise levels, the actor/critic split, the `controller_planned_*` terms |
+| [observations.md](observations.md) | noise levels, the actor/critic split, the `controller_planned_*` terms, `joint_torque` |
 | [external-controller-api.md](external-controller-api.md) | versioned deployment boundary for recovery state, residuals, and references |
 | [walking-reference.md](walking-reference.md) | datastore velocity action, the absolute feed, and the retired gated screen |
 | [residual-mpc.md](residual-mpc.md) | paper-style HRP5P task, action scale, objective telemetry, sign correction, and fidelity limits |

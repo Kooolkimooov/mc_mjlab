@@ -1,4 +1,4 @@
-"""Observations of the controller's own references, requests and disturbances."""
+"""Observations of the controller's references and requests, joint load and pushes."""
 
 from __future__ import annotations
 
@@ -13,9 +13,11 @@ from mc_mjlab.mdp.sensors import (
   residual_columns,
   residual_term,
 )
+from mc_mjlab.robots import robot_module as mc_rtc
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
+  from mjlab.managers.manager_base import ManagerTermBaseCfg
 
 
 def executed_action(
@@ -91,6 +93,35 @@ def controller_planned_com_velocity(
 ) -> torch.Tensor:
   """The CoM velocity the controller's plan calls for."""
   return residual_term(env, action_name).datastore_vector_output(CONTROL_COM_VEL)
+
+
+class joint_torque:
+  """Actuator torque of every limited target joint, as a fraction of its limit."""
+
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv) -> None:
+    term = residual_term(env, cfg.params.get("action_name", "mc_rtc_residual"))
+    limits = mc_rtc.get_effort_limits(term.cfg.mc_rtc_robot_name)
+
+    # Not the residual columns: the load is measured whether or not the policy
+    # acts on a joint, and the feedback task's residual has none.
+    names = [name for name in term.target_names if name in limits]
+    self._cols = torch.tensor(
+      [term.target_names.index(name) for name in names],
+      device=env.device,
+      dtype=torch.long,
+    )
+    self._limits = torch.tensor([limits[name] for name in names], device=env.device)
+
+  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+    """Stateless; the observation manager calls this on every class term."""
+    del env_ids
+
+  def __call__(
+    self, env: ManagerBasedRlEnv, action_name: str = "mc_rtc_residual"
+  ) -> torch.Tensor:
+    term = residual_term(env, action_name)
+    effort = env.scene[term.cfg.entity_name].data.qfrc_actuator[:, term.target_ids]
+    return effort[:, self._cols] / self._limits
 
 
 def steps_since_push(
