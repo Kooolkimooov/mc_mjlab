@@ -117,6 +117,17 @@ class ZmpSensors:
     if self._cache_key == key and self._cache is not None:
       return self._cache
 
+    self._cache_key = key
+    self._cache = self.current_offset(env, min_normal_force, plane_height)
+    return self._cache
+
+  def current_offset(
+    self,
+    env: ManagerBasedRlEnv,
+    min_normal_force: float = 20.0,
+    plane_height: float = 0.0,
+  ) -> tuple[torch.Tensor, torch.Tensor]:
+    """``measured_offset`` recomputed from ``sim.data`` as it is now, unmemoised."""
     num_envs, k = env.num_envs, self.num_sensors
     data = env.sim.data
 
@@ -145,8 +156,6 @@ class ZmpSensors:
       ),
       dim=-1,
     )
-
-    self._cache_key, self._cache = key, (measured, normal_force)
     return measured, normal_force
 
   def offset_error(
@@ -289,7 +298,8 @@ def measured_zmp_offset(
   asset_name: str = "robot",
 ) -> torch.Tensor:
   """The *measured* CoM-to-CoP offset, free of the observer drift the actor sees."""
-  measured, _ = zmp_sensors(env, sensor_names, asset_name).measured_offset(env)
+  # Observations run after auto-reset and forward(); the reward-phase memo is stale.
+  measured, _ = zmp_sensors(env, sensor_names, asset_name).current_offset(env)
   return measured
 
 

@@ -635,6 +635,11 @@ action-term lookup, at 50 Hz x num_envs.
 
 `common_step_counter` is a sound cache key because terminations, rewards and
 metrics all run in one phase of `ManagerBasedRlEnv.step` off the same `sim.data`.
+Observations do not: they run after auto-reset and the step's single `forward()`,
+at the same counter, so the critic's `measured_zmp_offset` reads `current_offset`,
+the unmemoised computation. Through the memo it read the previous episode's
+offset after a reset: -0.20 m on a CPU reproduction whose recomputed offset was
+0, and a value one physics substep stale on every step without a reset.
 The tolerances are in the key too, so a term configured with different ones gets
 its own value rather than someone else's. One shared instance per env exists
 because three separate ones would mean three separate memos, defeating the point.
