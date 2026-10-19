@@ -23,15 +23,17 @@ def test_mixture_keeps_model_fields_and_recompute_contract() -> None:
     payload_mixture.transition_payload.recompute  # ty: ignore[unresolved-attribute]
     == dr.pseudo_inertia.recompute  # ty: ignore[unresolved-attribute]
   )
-  assert payload_mixture.mass_bands(537.5) == (
+  # Explicit bounds: this checks the band arithmetic, not the configured range.
+  bounds = (10.0, 1000.0)
+  assert payload_mixture.mass_bands(537.5, bounds) == (
     (462.5, 612.5),
     (10, 462.5),
     (612.5, 1000),
   )
-  assert payload_mixture.mass_bands(950)[0] == (875, 1000)
+  assert payload_mixture.mass_bands(950, bounds)[0] == (875, 1000)
   with pytest.raises(ValueError):
-    payload_mixture.mass_bands(float("nan"))
-  assert payload_mixture.mass_bands(20)[1] == (10, 10)
+    payload_mixture.mass_bands(float("nan"), bounds)
+  assert payload_mixture.mass_bands(20, bounds)[1] == (10, 10)
 
 
 def test_reset_partitions_ids_and_calls_density_randomization_once_per_band(

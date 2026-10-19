@@ -27,14 +27,22 @@ from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionAction,
 )
 from mc_mjlab.tasks.locomanip import RESIDUAL_TASK_IDS
+from mc_mjlab.tasks.locomanip.locomanip_ppo_cfg import locomanip_ppo_cfg
 from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
   POSITION_REQUEST_WEIGHT,
   REQUEST_WEIGHT,
+  make_locomanip_residual_env_cfg,
 )
 from mc_mjlab.tasks.locomanip.mdp import accessors
 from mc_mjlab.tasks.locomanip.profiles import HRP5P
 from mc_mjlab.tasks.locomanip_motion import TASK_IDS
 from mc_mjlab.tasks.locomanip_motion import mdp as motion_mdp
+from mc_mjlab.tasks.locomanip_motion.locomanip_motion_env_cfg import (
+  DCM_REWARD_WEIGHT,
+  FAILURE_COST,
+  HOLDING_COST,
+  MOTION_EPISODE_SCALE,
+)
 
 if TYPE_CHECKING:
   from mjlab.rl import RslRlOnPolicyRunnerCfg
@@ -87,7 +95,7 @@ def test_new_task_keeps_joint_task_independent() -> None:
   assert not original_action.datastore_scalar_inputs
   assert "motion_control" not in original.observations["actor"].terms
   assert "motion_control" in cfg.observations["actor"].terms
-  assert cfg.episode_length_s == 2 * original.episode_length_s
+  assert cfg.episode_length_s == MOTION_EPISODE_SCALE * original.episode_length_s
   assert load_rl_cfg(TASK_IDS["HRP5P"]).experiment_name == TASK_IDS["HRP5P"]
 
 
@@ -336,9 +344,13 @@ def test_decision_state_is_uncorrupted_and_used_by_actor_and_critic() -> None:
     "actor": ("actor", "motion_decision"),
     "critic": ("critic", "motion_decision"),
   }
-  assert agent.actor.distribution_cfg is not None
-  assert agent.actor.distribution_cfg["init_std"] == 0.1
-  assert agent.actor.distribution_cfg["motion_init_std"] == 0.8
+  distribution = agent.actor.distribution_cfg
+  assert distribution is not None
+  shared = locomanip_ppo_cfg().actor.distribution_cfg
+  assert shared is not None
+  assert distribution["init_std"] == shared["init_std"]
+  low, high = distribution["motion_std_range"]
+  assert low <= distribution["motion_init_std"] <= high
 
 
 def test_partial_reset_preserves_other_rows_decision_clocks() -> None:
@@ -355,7 +367,9 @@ def test_decision_interval_respects_policy_timestep() -> None:
   action = motion_action()
   action._env = cast(Any, NS(num_envs=5, device="cpu", step_dt=0.01))
   action._setup_action_extensions(action.cfg)
-  assert action._motion_decision_steps == 200
+  assert action._motion_decision_steps == round(
+    action.cfg.motion_decision_period_s / 0.01
+  )
   action.cfg.motion_decision_period_s = 0.015
   with pytest.raises(ValueError, match="integer number"):
     action._setup_action_extensions(action.cfg)
@@ -366,11 +380,13 @@ def test_retuned_rewards_leave_raw_dcm_metric_and_other_task_weights_independent
 ):
   cfg = load_env_cfg(TASK_IDS["HRP5P"])
   original = load_env_cfg(RESIDUAL_TASK_IDS["HRP5P"])
-  assert cfg.rewards["contact_dcm_stability"].weight == 0.25
-  assert cfg.rewards["termination_penalty"].weight == -400
-  assert cfg.rewards["holding"].weight == -0.1
-  assert original.rewards["contact_dcm_stability"].weight == 1
-  assert original.rewards["termination_penalty"].weight == -200
+  assert cfg.rewards["contact_dcm_stability"].weight == DCM_REWARD_WEIGHT
+  assert cfg.rewards["termination_penalty"].weight == -FAILURE_COST
+  assert cfg.rewards["holding"].weight == -HOLDING_COST
+  # A fresh builder: the motion retune must not leak into the shared reward terms.
+  base = make_locomanip_residual_env_cfg().rewards
+  for name in ("contact_dcm_stability", "termination_penalty"):
+    assert original.rewards[name].weight == base[name].weight
   for name in ("residual_magnitude", "residual_rate"):
     assert cfg.rewards[name].weight == REQUEST_WEIGHT
     assert original.rewards[name].weight == POSITION_REQUEST_WEIGHT

@@ -36,7 +36,11 @@ def test_only_braking_authority_with_no_placement_reward(
   assert action.scale == 1.0 and action.offset == 0.0 and action.clip is None
   assert action.datastore_scalar_inputs == (MOTION_SCALE_SETTER,)
   assert not action.datastore_vectors_inputs
-  assert action.motion_decision_period_s == 2.0
+  joint_action = load_env_cfg(JOINT_TASK_IDS[robot], play=play).actions[
+    accessors.ACTION_NAME
+  ]
+  assert isinstance(joint_action, LocomanipMotionActionCfg)
+  assert action.motion_decision_period_s == joint_action.motion_decision_period_s
   assert set(cfg.rewards) == {
     "contact_dcm_stability",
     "termination_penalty",
