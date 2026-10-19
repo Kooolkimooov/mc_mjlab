@@ -305,35 +305,14 @@ def _observations() -> dict[str, ObservationGroupCfg]:
     "actions": ObservationTermCfg(
       func=mdp.observations.executed_action, history_length=SAFETY_HISTORY
     ),
-    "controller_pos_error": ObservationTermCfg(
-      func=mdp.observations.controller_position_error,
-      params={"residual_only": False},
-      noise=Unoise(n_min=-0.01, n_max=0.01),
-      history_length=SAFETY_HISTORY,
-    ),
     "controller_planned_com_vel": ObservationTermCfg(
       func=mdp.observations.controller_planned_com_velocity,
-      history_length=SAFETY_HISTORY,
-    ),
-    "foot_load_share": ObservationTermCfg(
-      func=mdp.sensors.foot_load_share, history_length=SAFETY_HISTORY
-    ),
-    "foot_normal_forces": ObservationTermCfg(
-      func=locomanip_mdp.observations.foot_normal_forces,
       history_length=SAFETY_HISTORY,
     ),
     "manipulation_phase": ObservationTermCfg(
       func=locomanip_mdp.observations.manipulation_phase
     ),
     "task_complete": ObservationTermCfg(func=locomanip_mdp.observations.task_complete),
-    **{
-      name: ObservationTermCfg(
-        func=envs_mdp.builtin_sensor,
-        params={"sensor_name": f"robot/{name}"},
-        history_length=FORCE_HISTORY,
-      )
-      for name in FORCE_SENSORS
-    },
     **{
       name: ObservationTermCfg(
         func=envs_mdp.builtin_sensor,
@@ -351,10 +330,6 @@ def _observations() -> dict[str, ObservationGroupCfg]:
     for name, term in terms.items()
   }
   critic_terms["joint_pos"] = replace(critic_terms["joint_pos"], params={})
-  critic_terms["controller_pos_error"] = replace(
-    critic_terms["controller_pos_error"],
-    params={**critic_terms["controller_pos_error"].params, "biased": False},
-  )
 
   # Privileged: exogenous, and the single largest source of return variance here.
   critic_terms |= {
