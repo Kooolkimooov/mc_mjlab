@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from mc_mjlab.tasks.locomanip.mdp.accessors import OBJECT_ENTITY, object_mass_kg
 
-CART_MASS_RANGE_KG = (10.0, 1000.0)
+CART_MASS_RANGE_KG = (1.0, 700.0)
 
 if TYPE_CHECKING:
   import torch
