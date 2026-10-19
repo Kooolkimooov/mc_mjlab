@@ -10,6 +10,7 @@ import pytest
 import torch
 from conftest import requires_controller
 from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
+from mjlab.envs.mdp.dr import Distribution
 
 import mc_mjlab.tasks  # noqa: F401
 from mc_mjlab import mdp
@@ -41,7 +42,7 @@ from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
 )
 from mc_mjlab.tasks.locomanip.mdp import accessors, metrics, rewards
 from mc_mjlab.tasks.locomanip.mdp import observations as locomanip_observations
-from mc_mjlab.tasks.locomanip.mdp.events import mass_alpha_range
+from mc_mjlab.tasks.locomanip.mdp.events import FLAT_MASS, LOG_MASS, mass_alpha_range
 from mc_mjlab.tasks.locomanip.profiles import HRP5P, PROFILES
 
 pytestmark = requires_controller(HRP5P.mc_rtc_yaml)
@@ -308,6 +309,7 @@ def test_payload_is_drawn_every_episode() -> None:
   assert payload.params["alpha_range"] == mass_alpha_range(
     CART_MASS_RANGE_KG, cart_nominal_mass_kg()
   )
+  assert payload.params["distribution"] is FLAT_MASS
   assert (
     "cart_payload"
     not in make_locomanip_residual_env_cfg(cart_mass_range_kg=None).events
@@ -354,6 +356,30 @@ def test_the_drawn_payload_is_absolute_kilograms() -> None:
   )
   assert math.isclose(nominal * math.exp(2.0 * low), CART_MASS_RANGE_KG[0])
   assert math.isclose(nominal * math.exp(2.0 * high), CART_MASS_RANGE_KG[1])
+
+
+def test_each_mass_law_is_the_one_its_name_says() -> None:
+  """Flat is uniform in kilograms, log is uniform in log-mass; zero ranges stay 0."""
+  nominal = 10.0
+  low, high = CART_MASS_RANGE_KG
+  alpha_range = torch.tensor(mass_alpha_range(CART_MASS_RANGE_KG, nominal))
+  torch.manual_seed(0)
+
+  def masses(law: Distribution) -> torch.Tensor:
+    alpha = law.sample(alpha_range[0], alpha_range[1], (200_000,), "cpu")
+    return nominal * torch.exp(2.0 * alpha)
+
+  flat, log = masses(FLAT_MASS), masses(LOG_MASS)
+  for mass in (flat, log):
+    assert low - 1e-3 <= float(mass.min()) and float(mass.max()) <= high + 1e-3
+  assert math.isclose(float(flat.median()), 0.5 * (low + high), rel_tol=0.01)
+  assert math.isclose(float(log.median()), math.sqrt(low * high), rel_tol=0.02)
+  light_share = float((flat < 10.0).float().mean())
+  assert math.isclose(light_share, (10.0 - low) / (high - low), abs_tol=0.002)
+
+  zero = torch.tensor(0.0)
+  for law in (FLAT_MASS, LOG_MASS):
+    assert torch.equal(law.sample(zero, zero, (8,), "cpu"), torch.zeros(8))
 
 
 def test_sparse_jacobian_is_kept() -> None:

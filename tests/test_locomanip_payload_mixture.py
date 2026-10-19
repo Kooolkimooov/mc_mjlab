@@ -12,6 +12,7 @@ from mjlab.envs.mdp import dr
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
 from mc_mjlab.tasks.locomanip.mdp import payload_mixture
+from mc_mjlab.tasks.locomanip.mdp.events import LOG_MASS
 
 
 def test_mixture_keeps_model_fields_and_recompute_contract() -> None:
@@ -58,7 +59,8 @@ def test_reset_partitions_ids_and_calls_density_randomization_once_per_band(
     assert [
       10 * math.exp(2 * value) for value in params["alpha_range"]
     ] == pytest.approx(band)
-    assert set(params) == {"alpha_range", "asset_cfg"}
+    assert params["distribution"] is LOG_MASS
+    assert set(params) == {"alpha_range", "asset_cfg", "distribution"}
   calls.clear()
   payload_mixture.transition_payload(
     env, torch.tensor([], dtype=torch.long), 537.5, 10, asset

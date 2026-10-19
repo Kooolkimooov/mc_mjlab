@@ -386,12 +386,17 @@ changes.
 
 ## cart_mass_range_kg
 
-**Current:** `(10.0, 1000.0)` kg -- the range the mc_mujoco sweep characterised,
-above the carts the grasp shoves away (below) -- drawn per episode by a `reset`-mode `dr.pseudo_inertia` event on the cart body.
-Its `alpha` is a *log* scale (mass and inertia both scale by `e^(2a)`), so
-`mdp.events.mass_alpha_range` converts kilograms to it and a uniform draw in
-`alpha` is log-uniform in mass, the spacing the sweep used. `dr.body_mass` is the
-wrong term: it leaves inertia behind.
+**Current:** `(1.0, 700.0)` kg, drawn *flat in kilograms* per episode by a
+`reset`-mode `dr.pseudo_inertia` event on the cart body. Its `alpha` is a *log*
+scale (mass and inertia both scale by `e^(2a)`), so `mdp.events.mass_alpha_range`
+converts kilograms to it and `mdp.events.FLAT_MASS` samples `e^(2a)` uniformly
+rather than `alpha`. `dr.body_mass` is the wrong term: it leaves inertia behind.
+
+**Why flat: the light carts the grasp shoves away (below) stay rare.** Over
+1--700 kg a flat draw puts 1.3% of episodes under 10 kg and 7.0% under 50 kg; the
+log-uniform draw the sweep's spacing implied put 35.1% and 59.7% there. Light-cart
+grasping has not been revalidated with the current controller, so that 1.3% still
+measures the grasp rather than the policy, and `safe_completion` can count them.
 
 **The range is absolute kilograms, not multiples of the asset.** `alpha` scales
 whatever mass the compiled model has, so the conversion needs that mass and
@@ -453,6 +458,8 @@ that band measures the grasp, not the policy.
 changes what `alpha` scales, or the grasp approach or gripper commands change.
 
 **History:**
+- 2026-10-19 -- range moved to `(1.0, 700.0)` and the draw made flat in kilograms;
+  log-uniform over that range would have put 35% of episodes in the shoved band.
 - 2026-10-10 -- lower bound raised from `1.0` to `10.0` after the traces above.
 - 2026-09-17 -- read the nominal from the asset instead of a `10.0` constant,
   after a sweep run left `Cart.xml` and `Cart.urdf` at 350 kg: every draw would

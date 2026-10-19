@@ -9,7 +9,11 @@ import torch
 from mjlab.envs.mdp import dr
 from mjlab.managers.event_manager import RecomputeLevel, requires_model_fields
 
-from mc_mjlab.tasks.locomanip.mdp.events import CART_MASS_RANGE_KG, mass_alpha_range
+from mc_mjlab.tasks.locomanip.mdp.events import (
+  CART_MASS_RANGE_KG,
+  LOG_MASS,
+  mass_alpha_range,
+)
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -42,6 +46,7 @@ def apply_mass_ranges(
       selected,
       asset_cfg=asset_cfg,
       alpha_range=mass_alpha_range(mass_range, nominal_mass_kg),
+      distribution=LOG_MASS,
     )
 
 

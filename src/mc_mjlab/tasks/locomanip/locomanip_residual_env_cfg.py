@@ -454,13 +454,14 @@ def _events(
       func=dr.pseudo_inertia,
       mode="reset",
       params={
-        # Uniform in this log scale is log-uniform in mass, the sweep's spacing.
         # Needs mujoco-warp >= 3.11. docs/locomanip.md#cart_mass_range_kg
         # Against the asset's own mass, read now: the draw is absolute
         # kilograms whatever the XML says. docs/locomanip.md#cart_mass_range_kg
         "alpha_range": locomanip_mdp.events.mass_alpha_range(
           cart_mass_range_kg, cart_nominal_mass_kg()
         ),
+        # Flat in kilograms, not log-uniform: keeps grasp-shoved light carts rare.
+        "distribution": locomanip_mdp.events.FLAT_MASS,
         "asset_cfg": SceneEntityCfg(
           locomanip_mdp.accessors.OBJECT_ENTITY,
           body_names=(locomanip_mdp.accessors.OBJECT_BODY,),

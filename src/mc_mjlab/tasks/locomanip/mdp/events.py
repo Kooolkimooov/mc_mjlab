@@ -1,16 +1,29 @@
-"""Converting a payload range into the log scale `pseudo_inertia` samples in."""
+"""The cart payload draw: kilograms to `pseudo_inertia`'s log scale, and its laws."""
 
 from __future__ import annotations
 
 import math
 from typing import TYPE_CHECKING
 
+import torch
+from mjlab.envs.mdp.dr import Distribution, uniform
+from mjlab.utils.lab_api.math import sample_uniform
+
 from mc_mjlab.tasks.locomanip.mdp.accessors import OBJECT_ENTITY, object_mass_kg
 
 CART_MASS_RANGE_KG = (1.0, 700.0)
 
+# Laws in kilograms over a `mass_alpha_range`. `pseudo_inertia` draws all ten of its
+# parameters with one, and a (0, 0) range still gives exactly 0 under either.
+LOG_MASS = Distribution(name="log_mass", sample=uniform.sample)
+FLAT_MASS = Distribution(
+  name="flat_mass",
+  sample=lambda lo, hi, shape, device: (
+    0.5 * sample_uniform(torch.exp(2.0 * lo), torch.exp(2.0 * hi), shape, device).log()
+  ),
+)
+
 if TYPE_CHECKING:
-  import torch
   from mjlab.envs import ManagerBasedRlEnv
 
 
