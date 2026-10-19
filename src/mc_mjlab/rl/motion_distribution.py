@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from torch.distributions import Normal
 
-from mc_mjlab.rl.squashed_gaussian import LOG_PROB_FLOOR, SquashedGaussianDistribution
+from mc_mjlab.rl.squashed_gaussian import SquashedGaussianDistribution, log_prob_floor
 
 
 class MotionGaussianDistribution(SquashedGaussianDistribution):
@@ -29,6 +29,9 @@ class MotionGaussianDistribution(SquashedGaussianDistribution):
     if not 0 < motion_std_range[0] <= motion_init_std <= motion_std_range[1]:
       raise ValueError("motion standard deviation must lie within positive bounds")
     self.motion_std_range = motion_std_range
+    self.log_prob_floor = log_prob_floor(
+      output_dim, min(std_range[0], motion_std_range[0])
+    )
     self.motion_std_param = nn.Parameter(
       torch.tensor([motion_init_std]), requires_grad=learn_std
     )
@@ -67,8 +70,9 @@ class MotionGaussianDistribution(SquashedGaussianDistribution):
       raise RuntimeError("update() must precede log_prob()")
     eps = torch.finfo(outputs.dtype).eps
     latent = torch.atanh(outputs.clamp(-1 + eps, 1 - eps))
-    density = self._distribution.log_prob(latent) - self._log_tanh_jacobian(latent)
-    return self._reduce(density, self._motion_active).clamp(min=LOG_PROB_FLOOR)
+    gaussian = self._reduce(self._distribution.log_prob(latent), self._motion_active)
+    jacobian = self._reduce(self._log_tanh_jacobian(latent), self._motion_active)
+    return gaussian.clamp(min=self.log_prob_floor) - jacobian
 
   def kl_divergence(
     self, old_params: tuple[torch.Tensor, ...], new_params: tuple[torch.Tensor, ...]

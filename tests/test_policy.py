@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 import pytest
 import torch
@@ -17,15 +18,13 @@ from mc_mjlab.mdp.rewards import (
   requested_action_rate_l2,
 )
 from mc_mjlab.rl import runner as runner_module
+from mc_mjlab.rl.motion_distribution import MotionGaussianDistribution
 from mc_mjlab.rl.rollout_adaptive_ppo import (
   RolloutAdaptivePPO,
   normalize_masked_advantages,
 )
 from mc_mjlab.rl.runner import McRtcResidualOnPolicyRunner
-from mc_mjlab.rl.squashed_gaussian import (
-  LOG_PROB_FLOOR,
-  SquashedGaussianDistribution,
-)
+from mc_mjlab.rl.squashed_gaussian import SquashedGaussianDistribution
 from mc_mjlab.rl.zero_init_actor import (
   ZeroInitMLPModel,
   mean_head_magnitude,
@@ -178,30 +177,48 @@ def test_masked_policy_objective() -> None:
   assert math.isclose(algorithm.last_actor_update_fraction, 4 / 12, rel_tol=1.0e-6)
 
 
-def test_log_ratio_cannot_overflow() -> None:
+def _squashed(output_dim: int) -> SquashedGaussianDistribution:
+  """Build the residual tasks' distribution at its narrowest std."""
+  return SquashedGaussianDistribution(output_dim, init_std=0.05, std_range=(0.05, 0.15))
+
+
+def _motion(output_dim: int) -> SquashedGaussianDistribution:
+  """Build the motion distribution with every row making a decision."""
+  dist = MotionGaussianDistribution(output_dim, init_std=0.05)
+  dist.set_motion_active(torch.ones(2))
+  return dist
+
+
+@pytest.mark.parametrize(
+  ("make", "output_dim"), [(_squashed, 4), (_squashed, 36), (_motion, 36)]
+)
+def test_log_ratio_cannot_overflow(
+  make: Callable[[int], SquashedGaussianDistribution], output_dim: int
+) -> None:
   """Check a saturated action cannot make `exp(new - old)` non-finite."""
-  dist = SquashedGaussianDistribution(4, init_std=0.05, std_range=(0.05, 0.30))
-  saturated = torch.full((3, 4), 1.0 - torch.finfo(torch.float32).eps)
+  dist = make(output_dim)
+  saturated = torch.full((2, output_dim), 1.0 - torch.finfo(torch.float32).eps)
   saturated[1] *= -1.0
+  latent = torch.atanh(saturated)
 
-  # Old policy centred, new policy moved far: the worst realistic ratio.
-  dist.update(torch.zeros(3, 4))
+  # Old mean far from the recovered latent, new mean exactly on it.
+  dist.update(-latent)
   old = dist.log_prob(saturated)
-  dist.update(torch.full((3, 4), 3.0))
+  dist.update(latent)
   new = dist.log_prob(saturated)
-  assert torch.isfinite(old).all() and torch.isfinite(new).all()
-  assert torch.isfinite(torch.exp(new - old)).all(), torch.exp(new - old)
-  assert float((new - old).abs().max()) < 88.0
+  ratio = torch.exp(new - old)
+  assert torch.isfinite(ratio).all(), new - old
+  assert torch.equal(torch.zeros(2) * ratio, torch.zeros(2))
 
-  # The floor binds only where the density is already absurd.
-  dist.update(torch.zeros(2, 4))
-  ordinary = dist.log_prob(torch.zeros(2, 4))
-  assert torch.isfinite(ordinary).all()
-  assert float(ordinary.min()) > LOG_PROB_FLOOR
-
-  # Exactly the arithmetic that killed the 2026-08-27 run.
-  masked_advantage = torch.zeros(1)
-  assert torch.isnan(masked_advantage * torch.tensor([float("inf")])).all()
+  # A typical sample of the widest policy is never floored.
+  dist.std_param.data.fill_(0.15)
+  dist.update(torch.zeros(2, output_dim))
+  typical = torch.tanh(dist.std)
+  exact = (
+    torch.distributions.Normal(0.0, dist.std).log_prob(torch.atanh(typical))
+    - torch.log1p(-typical.square())
+  ).sum(-1)
+  torch.testing.assert_close(dist.log_prob(typical), exact)
 
 
 class _StubWriter:

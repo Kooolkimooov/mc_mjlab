@@ -11,6 +11,14 @@ from torch.distributions import Normal
 
 #: Bounds the log-ratio so `exp` cannot overflow. docs/ppo.md#LOG_PROB_FLOOR
 LOG_PROB_FLOOR = -40.0
+#: Widest log-ratio a floored density admits; float32 `exp` overflows past 88.7.
+LOG_RATIO_LIMIT = 80.0
+
+
+def log_prob_floor(output_dim: int, min_std: float) -> float:
+  """Floor keeping peak latent density minus floor within `LOG_RATIO_LIMIT`."""
+  peak = output_dim * (-math.log(min_std) - 0.5 * math.log(2.0 * math.pi))
+  return max(LOG_PROB_FLOOR, peak - LOG_RATIO_LIMIT)
 
 
 class _TanhDeterministicOutput(nn.Module):
@@ -36,6 +44,7 @@ class SquashedGaussianDistribution(Distribution):
         f"expected 0 < min_std <= init_std <= max_std, got {std_range} and {init_std}"
       )
     self.std_range = std_range
+    self.log_prob_floor = log_prob_floor(output_dim, std_range[0])
     self.std_param = nn.Parameter(
       torch.tensor([init_std], dtype=torch.float32), requires_grad=learn_std
     )
@@ -71,14 +80,11 @@ class SquashedGaussianDistribution(Distribution):
     eps = torch.finfo(outputs.dtype).eps
     bounded = outputs.clamp(min=-1.0 + eps, max=1.0 - eps)
     latent = torch.atanh(bounded)
-    density = (
-      self._distribution.log_prob(latent) - self._log_tanh_jacobian(latent)
-    ).sum(dim=-1)
-    # A saturated action is a ~40-sigma deviate here, so a large policy move can
-    # push `exp(new - old)` past float32 in rsl_rl's ratio. Masked advantages are
-    # exactly zero, and `0 * inf` is NaN, so one such sample kills the update.
-    # docs/ppo.md#LOG_PROB_FLOOR
-    return density.clamp(min=LOG_PROB_FLOOR)
+    gaussian = self._distribution.log_prob(latent).sum(dim=-1)
+    jacobian = self._log_tanh_jacobian(latent).sum(dim=-1)
+    # Floor only the policy term: the Jacobian cancels in PPO's ratio, and inside
+    # the floor a saturated action's +15 nats/dim overflows `exp(new - old)`.
+    return gaussian.clamp(min=self.log_prob_floor) - jacobian
 
   def kl_divergence(
     self,

@@ -104,9 +104,14 @@ count down, 0.02 may already be enough.
 
 ## LOG_PROB_FLOOR
 
-**Current:** `-40.0`, a floor on the summed tanh-Gaussian log-density in
-`SquashedGaussianDistribution.log_prob`. It exists because without it one
-saturated action can end a run.
+**Current:** `-40.0`, a floor on the summed *latent Gaussian* log-density in
+`SquashedGaussianDistribution.log_prob`, applied before the tanh Jacobian is
+subtracted. `log_prob_floor` raises it to `peak - LOG_RATIO_LIMIT` (`80`) once
+the action is wide enough for `-40` to leave more than 80 nats below the
+narrowest policy's peak: from 20 dimensions at `std 0.05`, so `-7.5` for
+locomanip's 35-joint residual (`-5.4` with the motion channel) and `-40` for
+every balance, MPC and feedback task. It exists because without it one saturated
+action can end a run.
 
 **How the 2026-08-27 overnight run died**, at iteration 262 of 1500 after
 1 h 38 m: `ValueError: The observation group 'actor' ... contains NaN`. That is
@@ -134,15 +139,29 @@ PPO never meets this: its advantages are never exactly zero, so an overflowing
 ratio yields `inf` — bad and obvious — rather than a silent NaN. The masking and
 the squashed distribution are each sound alone.
 
-Flooring the summed log-density bounds `new - old` to about `48`, so `exp` stays
-finite. Maximum density is about `+8.3` at `std 0.05`, so the floor binds only
-where the density is already absurd, and clamping there is gradient clipping for
-samples the policy cannot usefully learn from.
+The floor has to exclude the Jacobian. `-log(1 - a^2)` depends on the action
+alone, so it cancels exactly in `new - old`, but it reaches `+15.25` nats per
+dimension at the `1 - eps` clamp. Floored together with the Gaussian, as first
+shipped, a saturated action's density ran from the `-40` floor to `+69.3` (4
+dimensions, new mean on the recovered latent), a log-ratio of `109` and an `inf`
+ratio. Floored alone, the Gaussian term peaks at `-log(std) - 0.919` per
+dimension (`+8.3` over 4 at `std 0.05`), so `new - old` stays under `48` there
+and under `80` at any width. The floor still binds only where the density is
+already absurd: a one-std sample of the widest (`0.15`) policy sits `24` nats
+above it at 35 dimensions. Clamping there is gradient clipping for samples the
+policy cannot usefully learn from. That margin shrinks by `1.6` nats per added
+dimension and closes at 50 at this `std_range`; past it no float32 window
+separates typical samples from absurd ones, and the update itself would need a
+clamped ratio.
 
 **Re-measure if:** `std_range`, the action dimension, or the advantage-masking
 scheme changes — all three set the reachable log-ratio.
 
 **History:**
+- 2026-10-19 — moved the floor off the Jacobian and made it width-aware after a
+  review reproduced an `inf` ratio (`-40` to `+69.3`) the 2026-08-28 floor
+  admitted; `test_log_ratio_cannot_overflow` now puts the new mean on the
+  recovered latent at 4 and 36 dimensions, for both distributions.
 - 2026-08-28 — added after the overnight ankle-pitch run died at iteration 262;
   `verify_log_ratio_cannot_overflow` pins the worst realistic ratio finite.
 
