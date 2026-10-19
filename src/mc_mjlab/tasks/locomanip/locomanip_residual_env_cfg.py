@@ -78,6 +78,9 @@ SAFETY_HISTORY = 5
 
 #: Price of a bounded request, magnitude and rate alike.
 REQUEST_WEIGHT = -0.3
+#: The registered position task's price: at -0.3 its exploration noise alone cost
+#: 85% of the objective. docs/locomanip.md#POSITION_REQUEST_WEIGHT
+POSITION_REQUEST_WEIGHT = -0.05
 
 # 0.4 s at 50 Hz covers the hand-wrench filter and a footstep.
 FORCE_HISTORY = 20
@@ -115,11 +118,14 @@ SUCCESS_YAW_TOLERANCE_RAD = math.radians(10.0)
 
 
 def locomanip_residual_env_cfg(
-  profile: LocomanipProfile, play: bool = False
+  profile: LocomanipProfile,
+  play: bool = False,
+  request_weight: float = POSITION_REQUEST_WEIGHT,
 ) -> ManagerBasedRlEnvCfg:
   """Build the trainable locomanip residual task, or its viewer variant."""
   cfg = make_locomanip_residual_env_cfg(
     profile=profile,
+    request_weight=request_weight,
     console_output="single" if play else "none",
     print_residual_every=PLAY_PRINT_RESIDUAL_EVERY if play else 0,
   )
@@ -152,6 +158,7 @@ def make_locomanip_residual_env_cfg(
   torque_fraction: float = TORQUE_FRACTION,
   cart_pose_range: dict[str, tuple[float, float]] | None = None,
   cart_mass_range_kg: tuple[float, float] | None = CART_MASS_RANGE_KG,
+  request_weight: float = REQUEST_WEIGHT,
   console_output: Literal["none", "single", "all"] = "none",
   print_residual_every: int = 0,
 ) -> ManagerBasedRlEnvCfg:
@@ -174,7 +181,7 @@ def make_locomanip_residual_env_cfg(
       print_residual_every,
     ),
     observations=_observations(),
-    rewards=_rewards(robot_name),
+    rewards=_rewards(robot_name, request_weight),
     terminations=_terminations(robot_name),
     events=_events(cart_pose_range, cart_mass_range_kg),
     metrics=_metrics(),
@@ -369,7 +376,7 @@ def _observations() -> dict[str, ObservationGroupCfg]:
   }
 
 
-def _rewards(robot_name: str) -> dict[str, RewardTermCfg]:
+def _rewards(robot_name: str, request_weight: float) -> dict[str, RewardTermCfg]:
   """Reward dynamic balance and charge near falls and unsafe contact."""
   minimum_height = 0.7 * mc_rtc.get_default_root_position(robot_name)[2]
   return {
@@ -400,10 +407,10 @@ def _rewards(robot_name: str) -> dict[str, RewardTermCfg]:
       params={**ZMP_PARAMS, "velocimeter_names": SOLE_VELOCIMETERS},
     ),
     "residual_magnitude": RewardTermCfg(
-      func=mdp.rewards.requested_action_l2, weight=REQUEST_WEIGHT
+      func=mdp.rewards.requested_action_l2, weight=request_weight
     ),
     "residual_rate": RewardTermCfg(
-      func=mdp.rewards.requested_action_rate_l2, weight=REQUEST_WEIGHT
+      func=mdp.rewards.requested_action_rate_l2, weight=request_weight
     ),
   }
 

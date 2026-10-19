@@ -950,12 +950,131 @@ delta is attributable.
 penalties after the first full feedback run plateaued for 1200 iterations while
 its force effort quadrupled.
 
+## POSITION_REQUEST_WEIGHT
+
+**Current:** the registered position-residual task charges `residual_magnitude`
+and `residual_rate` at **-0.05** each. `REQUEST_WEIGHT = -0.3` stays the
+builder default, so the hand-force feedback task (and the safety task built on
+it) and the motion task, whose rewards were retuned against -0.3
+(locomanip-motion.md#DCM_REWARD_WEIGHT), are unchanged. -0.05 is a hypothesis,
+not a measurement; it is the only weight changed, so the next run's delta is
+attributable to it.
+
+**Why it came down: at -0.3 the penalty priced the policy's own exploration
+noise, not its residual.** The request is the sampled tanh-Gaussian output over
+35 residual joints. With a near-zero mean, each joint's expected square is about
+`std^2`, and independent noise doubles that for the rate term. At the initial
+std 0.10 that is `0.3 x 35 x 0.01 x (1 + 2) = 0.315` per second in
+`Episode_Reward` units (episode sum / `max_episode_length_s`), against
+`contact_dcm_stability` 0.36-0.38: noise alone cost about 85% of the objective.
+The logged terms match that prediction, leaving almost nothing for the mean:
+
+| iteration | std | `residual_magnitude` (noise-only prediction) | `residual_rate` (noise-only prediction) |
+| --- | --- | --- | --- |
+| 50 | 0.09 | -0.0945 (-0.085) | -0.1824 (-0.170) |
+| 249 | 0.06 | -0.0501 (-0.038) | -0.0738 (-0.076) |
+
+Run `2026-10-16_14-55-11` (HRP5P position residual, 256 envs, seed 42,
+`REQUEST_WEIGHT = -0.3`) raised `Mean reward` from 3.10 to 10.0 between those
+iterations with `Mean episode length` flat (2017.63 -> 2033.15). The two request
+terms cover that rise: they fell by 0.153 per second, 7.9 over the 51.66 s
+episode, while `termination_penalty` went from -0.0221 to -0.0465.
+The training curves did not move. Means over 30-iteration windows, each
+iteration closing only about 5-20 episodes:
+
+| iterations | reward | `task_success` | `safe_completion` | `collapsed` | `controller_failed` | `contact_dcm_stability` metric |
+| --- | --- | --- | --- | --- | --- | --- |
+| 38-67 | 3.73 | 0.53 | 0.62 | 0.21 | 0.17 | 0.461 |
+| 98-127 | 6.98 | 0.53 | 0.61 | 0.26 | 0.13 | 0.472 |
+| 158-187 | 8.56 | 0.47 | 0.60 | 0.23 | 0.15 | 0.475 |
+| 218-247 | 10.22 | 0.51 | 0.63 | 0.25 | 0.12 | 0.480 |
+
+So the cheapest return was annealing std toward its 0.05 floor, and most of the
+run's early gradient went there.
+
+**The deterministic policy had beaten mc_rtc anyway.** `compare_to_baseline.py
+--task ... --num-envs 16 --num-workers 6 --minutes 20` on `model_300.pt` of that
+run, beside the training job, scored the first 9 episodes of each env, 72 per
+arm:
+
+| | baseline | policy | delta |
+| --- | --- | --- | --- |
+| `safe_completion` | 54.2% [42.7, 65.2] | 79.2% [68.4, 86.9] | +25.0%, p = 1.46e-03 |
+| `collapsed` | 36.1% | 8.3% | -27.8% |
+| `controller_failed` | 9.7% | 11.1% | +1.4% |
+| `contact_dcm_stability` metric | 0.5170 | 0.4940 | -0.0230, p = 1.27e-04 |
+| `zmp_error` | 0.1807 | 0.3113 | +0.1306, p = 0.150 |
+
+Every cart drew above 300 kg (mean 474.8 vs 466.7), so this is one stratum. The
+p-values treat episodes as independent, but each arm holds only 8 encoder-bias
+draws. Per env, the policy completed 7/10 to 8/9 everywhere; the baseline ran
+2/10 to 8/9, six envs at 6/10 or below. A Mann-Whitney test on those 8 vs 8
+rates sits near p = 0.05.
+
+**Replicated with `--nominal`, the effect is real but a third the size.**
+Same checkpoint and command with `--nominal --minutes 75`, which drops
+`encoder_bias` (this task's only startup draw), so episodes within an env are
+independent. First 36 episodes per env, 288 per arm, cart mass balanced
+(mean 468.4 vs 471.1 kg, KS p = 0.93):
+
+| | baseline | policy | delta [95% Newcombe] | p |
+| --- | --- | --- | --- | --- |
+| `safe_completion` | 186/288 = 64.6% | 213/288 = 74.0% | +9.4% [+1.8, +16.8] | Fisher 0.019; per-env Welch 0.050; mass-stratified CMH 0.007 |
+| `collapsed` | 62/288 = 21.5% | 34/288 = 11.8% | -9.7% [-15.8, -3.6] | Fisher 0.0024; CMH 0.0016 |
+| `controller_failed` | 32/288 = 11.1% | 35/288 = 12.2% | +1.0% | 0.80 |
+
+By cart mass, `safe_completion` reads 98/98 vs 98/98 at 300-400 kg, 68.8% vs
+73.2% at 400-525 kg, and 24.7% vs 47.3% at 525-700 kg: the policy's whole
+gain is in the heaviest band. It pays for it in tracking: the
+`contact_dcm_stability` metric 0.5067 -> 0.4937 (p = 8.4e-06), `zmp_error`
+0.2339 -> 0.3497 m (p = 0.0023), `object_position_error` 0.0694 -> 0.0985 m
+(p = 0.0075), `task_success` unchanged (0.5556 vs 0.5764, p = 0.62). The 20-min
+run's +25% came from 8 unmatched encoder-bias draws per arm, as
+evaluation.md#episodes-are-not-independent-samples warns.
+
+**`model_1040` gained nothing over `model_300`.** Same nominal command, 288 per
+arm, mass balanced (473.0 vs 473.6 kg, KS p = 0.96): `safe_completion` 183/288 =
+63.5% -> 207/288 = 71.9%, +8.3% [+0.7, +15.8] (Fisher 0.040, per-env Welch
+0.022, CMH 0.011); `collapsed` 20.8% -> 11.8% (Fisher 0.0046);
+`controller_failed` 15.3% vs 14.9%. At 525-700 kg 26.0% -> 41.4%, at 400-525 kg
+66.7% -> 76.0%. Tracking costs match: `contact_dcm_stability` 0.5050 -> 0.4915
+(p = 2.3e-06), `zmp_error` 0.2316 -> 0.3430 m (p = 0.022). Policy against policy,
+74.0% at 300 vs 71.9% at 1040 is indistinguishable, so the run's real gain was
+in place by iteration 300.
+
+Collapse in the stochastic training rollouts (0.21-0.26) exceeded the
+deterministic policy's 11.8%, so exploration noise may itself cost
+training-time falls. -0.05 is tested against a run that already beats the
+baseline, not one that failed to.
+
+**Why -0.05.** It cuts the noise-only cost at std 0.10 to `0.05 x 1.05 = 0.053`
+per second, about 14% of the objective. It still prices a real residual: a
+0.3 normalized request on all 35 joints costs 0.16 per second, 43% of the
+objective, and the clamp keeps the term bounded at any weight
+(reward-shaping.md#requested_action_l2). It also raises the net living reward
+from about 0.06 to 0.32 per second, so a fall forfeits more without touching
+`termination_penalty`.
+
+**Left alone:** `termination_penalty` (-2000 failed in reward-shaping.md#termination_penalty),
+`contact_dcm_stability` 1.0 (the only positive term), and the guard terms
+`upright`, `collapse_risk`, `rapid_tilt` and `foot_slip`. Those four together
+read under 0.01 per second in that run, so they did not compete with the
+objective.
+
+**Re-measure if:** the residual joint set, `std_range` or `init_std`, the
+request definition, or any other reward weight changes. Judge the next run by
+the windowed task metrics above, not by `Mean reward`.
+
+**History:** 2026-10-16 -- lowered from the shared -0.3 for the position task
+only, from run `2026-10-16_14-55-11` at iteration 250, without stopping it.
+
 ## locomanip safety objective
 
 **Current:** the trainable position and hand-feedback tasks reward
 `contact_dcm_stability` at 1.0, retain `termination_penalty` -200 and `upright`
 -2.0, and charge `collapse_risk` -2.0, `rapid_tilt` -0.2, `foot_slip` -1.0,
-and the existing residual magnitude/rate costs -0.3 each. `zmp_tracking` is
+and the existing residual magnitude/rate costs -0.3 each (-0.05 on the
+position task, see [POSITION_REQUEST_WEIGHT](#position_request_weight)). `zmp_tracking` is
 retired as a reward but its `zmp_error` and `zmp_grounded` diagnostics remain.
 These weights are initial hypotheses, not a measured optimum.
 

@@ -27,6 +27,10 @@ from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
   McRtcResidualJointPositionAction,
 )
 from mc_mjlab.tasks.locomanip import RESIDUAL_TASK_IDS
+from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
+  POSITION_REQUEST_WEIGHT,
+  REQUEST_WEIGHT,
+)
 from mc_mjlab.tasks.locomanip.mdp import accessors
 from mc_mjlab.tasks.locomanip.profiles import HRP5P
 from mc_mjlab.tasks.locomanip_motion import TASK_IDS
@@ -367,6 +371,9 @@ def test_retuned_rewards_leave_raw_dcm_metric_and_other_task_weights_independent
   assert cfg.rewards["holding"].weight == -0.1
   assert original.rewards["contact_dcm_stability"].weight == 1
   assert original.rewards["termination_penalty"].weight == -200
+  for name in ("residual_magnitude", "residual_rate"):
+    assert cfg.rewards[name].weight == REQUEST_WEIGHT
+    assert original.rewards[name].weight == POSITION_REQUEST_WEIGHT
   assert (
     cfg.metrics["contact_dcm_stability"] == original.metrics["contact_dcm_stability"]
   )
