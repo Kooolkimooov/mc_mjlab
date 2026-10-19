@@ -1,15 +1,17 @@
+# `--no-sync`: the hooks run with unstaged edits stashed, so a local
+# `[tool.uv.sources]` block vanishes and a syncing `uv run` swaps the venv's mjlab.
 repos:
   - repo: local
     hooks:
       - id: ruff-format
         name: ruff format
-        entry: uv run ruff format
+        entry: uv run --no-sync ruff format
         language: system
         types_or: [python, pyi]
 
       - id: ruff-check
         name: ruff check
-        entry: uv run ruff check --fix --force-exclude
+        entry: uv run --no-sync ruff check --fix --force-exclude
         language: system
         types_or: [python, pyi]
         require_serial: true
@@ -40,7 +42,7 @@ repos:
       # excludes ctest's `python` test, which this one already ran.
       - id: pytest
         name: pytest (tests/)
-        entry: uv run pytest -q
+        entry: uv run --no-sync pytest -q
         language: system
         types_or: [python, c++, c, cmake]
         pass_filenames: false
