@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import contextlib
 import math
-import os
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
+import pytest
 import torch
 from evaluation.qualification import (
   cluster_stats,
@@ -242,8 +242,9 @@ def test_qualifier_not_measured() -> None:
   assert "grounded_fraction" not in verdict["not_measured"]
 
 
-def test_qualification_sidecar() -> None:
+def test_qualification_sidecar(monkeypatch: pytest.MonkeyPatch) -> None:
   """Check a full resume refuses a checkpoint no sweep has qualified."""
+  monkeypatch.delenv(qualification_sidecar.ALLOW_UNQUALIFIED_ENV, raising=False)
   with tempfile.TemporaryDirectory() as directory:
     checkpoint = Path(directory) / "model_100.pt"
     checkpoint.write_bytes(b"policy")
@@ -271,11 +272,8 @@ def test_qualification_sidecar() -> None:
     with _expect_error("1 criteria not measured"):
       qualification_sidecar.enforce(checkpoint, full_resume=True)
 
-    os.environ[qualification_sidecar.ALLOW_UNQUALIFIED_ENV] = "1"
-    try:
-      qualification_sidecar.enforce(checkpoint, full_resume=True)
-    finally:
-      del os.environ[qualification_sidecar.ALLOW_UNQUALIFIED_ENV]
+    monkeypatch.setenv(qualification_sidecar.ALLOW_UNQUALIFIED_ENV, "1")
+    qualification_sidecar.enforce(checkpoint, full_resume=True)
 
 
 def test_qualification_strata() -> None:

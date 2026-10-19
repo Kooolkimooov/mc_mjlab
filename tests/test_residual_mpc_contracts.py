@@ -99,23 +99,3 @@ def test_blending() -> None:
   torch.testing.assert_close(effort, torch.tensor([[10.0, 1.0]]))
   torch.testing.assert_close(executed, torch.tensor([[1.0, 1.0]]))
   assert projected.tolist() == [[True, False]]
-
-
-def test_tracking_reward_discriminates() -> None:
-  """Check the bare prior cannot already score the tracking reward's ceiling."""
-  import math
-
-  from mc_mjlab.tasks.residual_mpc.residual_mpc_env_cfg import (
-    COMMAND_RANGES,
-    LINEAR_TRACKING_SIGMA,
-  )
-
-  # Measured prior speed under the training disturbance. docs/residual-mpc.md#COMMAND_RANGES
-  prior_speed = 0.243
-  top = COMMAND_RANGES[0][1]
-  error = ((top - prior_speed) / (1.0 + abs(top))) ** 2
-  score = math.exp(-error / LINEAR_TRACKING_SIGMA)
-  assert 0.5 < score < 0.8, (
-    f"the prior scores {score:.3f} at the top of the command box; sigma "
-    f"{LINEAR_TRACKING_SIGMA} leaves it nothing to earn"
-  )

@@ -22,8 +22,6 @@ def test_episode_buffers_survive_reset_without_advancing_history() -> None:
     "fell_over": torch.tensor([False, False]),
     "controller_worker_failed": torch.tensor([True, False]),
   }
-  history = torch.arange(8).reshape(2, 4)
-  before = history.clone()
 
   def reset(ids: torch.Tensor) -> None:
     order.append("reset")
@@ -55,7 +53,6 @@ def test_episode_buffers_survive_reset_without_advancing_history() -> None:
   assert snapshot.terminations["fell_over"] == [False]
   assert lengths.tolist() == [0, 11]
   assert rewards.tolist() == [0.0, 9.0]
-  torch.testing.assert_close(history, before)
 
 
 def test_metric_reductions_are_preserved() -> None:

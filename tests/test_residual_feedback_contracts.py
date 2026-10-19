@@ -3,18 +3,28 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from types import SimpleNamespace as NS
+from typing import Any, cast
+from unittest.mock import patch
 
 import numpy as np
 import torch
 from conftest import requires_controller
 
 import mc_mjlab.tasks  # noqa: F401
+import mc_rtc_interface as native_typed
 from mc_mjlab.actions.residual_feedback_action import (
-  ROOT_POSE_DIM,
   SUPPORTED_MODALITIES,
+  ResidualFeedbackJointTorqueAction,
   ResidualFeedbackJointTorqueActionCfg,
 )
-from mc_mjlab.bridge.sim_controller_bridge import _compose_small_rotation
+from mc_mjlab.actions.residual_mpc_joint_torque_action import (
+  ResidualMpcJointTorqueAction,
+)
+from mc_mjlab.bridge.sim_controller_bridge import (
+  SimControllerBridge,
+  _compose_small_rotation,
+)
 from mc_mjlab.tasks.residual_feedback.residual_feedback_env_cfg import (
   residual_feedback_env_cfg,
 )
@@ -24,6 +34,7 @@ from mc_mjlab.tasks.residual_mpc.residual_mpc_env_cfg import (
   residual_mpc_env_cfg,
 )
 
+native = cast(Any, native_typed)
 pytestmark = requires_controller(MC_RTC_YAML)
 
 
@@ -53,12 +64,36 @@ def test_rotation_composition() -> None:
 
 
 def test_modality_widths() -> None:
-  """Declared widths are what the action space grows by, per modality."""
-  cfg = residual_feedback_env_cfg(num_envs=2, num_workers=1)
-  action = cfg.actions[mdp.accessors.ACTION_NAME]
-  assert isinstance(action, ResidualFeedbackJointTorqueActionCfg)
-  assert set(action.feedback_modalities) <= set(SUPPORTED_MODALITIES)
-  assert ROOT_POSE_DIM == 6, "root pose is 3 translation plus 3 rotation"
+  """Each modality grows the action by its width, sliced in cfg order."""
+  cfg = residual_feedback_env_cfg(
+    num_envs=2, num_workers=1, feedback_modalities=SUPPORTED_MODALITIES
+  )
+  action_cfg = cfg.actions[mdp.accessors.ACTION_NAME]
+  assert isinstance(action_cfg, ResidualFeedbackJointTorqueActionCfg)
+  term = object.__new__(ResidualFeedbackJointTorqueAction)
+  term.cfg = action_cfg
+  term._env = NS(num_envs=2, device="cpu")
+  term._num_targets, term._action_dim = 3, 2
+  term._target_names = ("a", "b", "c")
+  term._residual_ids = torch.tensor([0, 2])
+  layout = native.IoLayout()
+  layout.input.force_sensors = ["LeftFootForceSensor", "RightFootForceSensor"]
+  term._bridge = object.__new__(SimControllerBridge)
+  term._bridge.layout = layout
+  term._bridge._clear_state_feedback_offsets()
+  with patch.object(ResidualMpcJointTorqueAction, "_build_bridge"):
+    term._build_bridge(action_cfg)
+
+  # Two residual joints each, 3 translation plus 3 rotation, two full wrenches.
+  widths = {"joint_position": 2, "joint_velocity": 2, "root_pose": 6, "wrench": 12}
+  assert term.action_dim == 2 + sum(widths.values())
+  feedback = torch.arange(float(sum(widths.values()))).expand(2, -1)
+  blocks = term._modality_slices(feedback)
+  assert {name: block.shape[1] for name, block in blocks.items()} == widths
+  assert list(blocks) == list(SUPPORTED_MODALITIES)
+  torch.testing.assert_close(torch.cat(list(blocks.values()), dim=1), feedback)
+  assert term.feedback_names[:4] == ("a/q", "c/q", "a/qd", "c/qd")
+  assert len(term.feedback_names) == feedback.shape[1]
 
 
 def test_rejects_bad_modalities() -> None:

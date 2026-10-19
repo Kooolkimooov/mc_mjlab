@@ -17,9 +17,8 @@ BINARY = Path(
   )
 )
 
-pytestmark = pytest.mark.skipif(not BINARY.exists(), reason=f"{BINARY} is not built")
 
-
+@pytest.mark.skipif(not BINARY.exists(), reason=f"{BINARY} is not built")
 def test_worker_views_the_trainers_rows() -> None:
   widths = subprocess.run(
     [BINARY, "--widths"], capture_output=True, text=True, check=True

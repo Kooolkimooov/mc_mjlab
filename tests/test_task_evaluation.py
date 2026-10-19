@@ -23,7 +23,7 @@ from mc_mjlab.tasks.locomanip import RESIDUAL_TASK_IDS
 from mc_mjlab.tasks.locomanip.evaluation import LOCOMANIP_EVALUATION
 from mc_mjlab.tasks.locomanip.profiles import HRP5P
 
-pytestmark = requires_controller(HRP5P.mc_rtc_yaml)
+requires_hrp5p = requires_controller(HRP5P.mc_rtc_yaml)
 
 
 def episode(nth: int, **metrics: float) -> ComparisonEpisode:
@@ -43,6 +43,7 @@ def test_a_task_cannot_declare_a_verdict_it_does_not_measure() -> None:
     TaskEvaluation(metrics=("a",), stratify="a", strata=(2.0, 1.0))
 
 
+@requires_hrp5p
 def test_locomanip_declares_safe_completion_and_cart_mass() -> None:
   """Verify the registered task resolves to its own declaration."""
   assert evaluation_for(RESIDUAL_TASK_IDS["HRP5P"]) is LOCOMANIP_EVALUATION
@@ -70,6 +71,7 @@ def test_episodes_bucket_by_their_own_metric() -> None:
   assert buckets[0][0].metrics["cart_mass"] == 5.0
 
 
+@requires_hrp5p
 def test_a_missing_metric_narrows_the_declaration() -> None:
   """Verify an env without the declared metrics loses the verdict, not the run."""
   env = cast(

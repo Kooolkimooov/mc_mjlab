@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import mujoco
 import numpy as np
+import pytest
 import torch
 
 import mc_mjlab.tasks  # noqa: F401
@@ -35,8 +36,8 @@ from mc_mjlab.utils.controller_install import (
 )
 
 
-def verify_layout() -> tuple[SimControllerBridge, NS, NS]:
-  """Exercise reference-order scatter, quaternion conversion and sensor routing."""
+def make_bridge() -> tuple[SimControllerBridge, NS, NS]:
+  """Build a two-joint bridge whose reference order holds one unsimulated joint."""
   model = mujoco.MjModel.from_xml_string("""
   <mujoco><worldbody><body name="robot/base"><freejoint name="robot/root"/>
   <geom size=".1" mass="1"/><site name="robot/imu"/>
@@ -100,7 +101,13 @@ def verify_layout() -> tuple[SimControllerBridge, NS, NS]:
       ("q", "alpha", "tau"),
       "robot",
     )
+  return bridge, env, entity
 
+
+def test_layout() -> None:
+  """Exercise reference-order scatter, quaternion conversion and sensor routing."""
+  bridge, env, _ = make_bridge()
+  data = env.sim.data
   rows = np.zeros((2, bridge.layout.input_size))
   bridge.set_feedback_offset(torch.tensor([[0.1, 0.2], [0.3, 0.4]]))
   bridge.set_joint_velocity_offset(torch.tensor([[0.2, 0.3], [0.4, 0.5]]))
@@ -139,12 +146,6 @@ def verify_layout() -> tuple[SimControllerBridge, NS, NS]:
     np.testing.assert_allclose(
       bridge.read_controller_output(block)[channel], out[:, [offset + 2, offset]]
     )
-  return bridge, env, entity
-
-
-def test_layout() -> None:
-  """Run the layout contract; the bridge it returns is for the other suites."""
-  verify_layout()
 
 
 def test_walking_reference_feed() -> None:
@@ -229,7 +230,7 @@ class Manager:
 
 def test_pipeline() -> None:
   """Keep interpolation delayed through partial resets and exclude failed rows."""
-  bridge, env, entity = verify_layout()
+  bridge, env, entity = make_bridge()
   action = object.__new__(McRtcResidualJointPositionAction)
   action._env = env  # ty: ignore[invalid-assignment]
   action._entity = entity  # ty: ignore[invalid-assignment]
@@ -330,14 +331,23 @@ def test_pipeline() -> None:
   assert not action._has_staged_control.any()
 
 
-def test_controller_is_installed_finds_the_workspace_controller() -> None:
-  """Verify the guard that skips a controller's tests can tell the two apart."""
-  assert not controller_is_installed("NoSuchController")
-  # A variant is configuration over another controller's module, so it has no
-  # .so of its own -- finding it is the whole reason the config half exists.
-  assert controller_is_installed("LogisticController_ismpc")
-  assert controller_config_paths("LocomanipController")
-  assert not controller_config_paths("NoSuchController")
+def test_controller_is_installed_finds_modules_and_config_only_variants(
+  tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+  """Verify the guard tells a module, a config-only variant and nothing apart."""
+  installed = tmp_path / "mc_controller"
+  (installed / "etc").mkdir(parents=True)
+  (installed / "Module.so").touch()
+  variant = installed / "etc" / "Variant.yaml"
+  variant.touch()
+  monkeypatch.setenv("LD_LIBRARY_PATH", f"{tmp_path / 'absent'}:{tmp_path}")
+
+  assert controller_is_installed("Module")
+  assert not controller_config_paths("Module")
+  # A variant configures another controller's module, so it has no .so of its own.
+  assert controller_is_installed("Variant")
+  assert controller_config_paths("Variant") == [variant.resolve()]
+  assert not controller_is_installed("Missing")
 
 
 def test_user_controller_overrides_enter_provenance() -> None:

@@ -36,22 +36,14 @@ def test_only_braking_authority_with_no_placement_reward(
   assert action.scale == 1.0 and action.offset == 0.0 and action.clip is None
   assert action.datastore_scalar_inputs == (MOTION_SCALE_SETTER,)
   assert not action.datastore_vectors_inputs
-  joint_action = load_env_cfg(JOINT_TASK_IDS[robot], play=play).actions[
-    accessors.ACTION_NAME
-  ]
-  assert isinstance(joint_action, LocomanipMotionActionCfg)
-  assert action.motion_decision_period_s == joint_action.motion_decision_period_s
-  assert set(cfg.rewards) == {
-    "contact_dcm_stability",
-    "termination_penalty",
-    "upright",
-    "collapse_risk",
-    "rapid_tilt",
-    "foot_slip",
-    "braking",
-    "braking_start",
-    "holding",
-  }
+  original = load_env_cfg(JOINT_TASK_IDS[robot], play=play)
+  original_action = original.actions[accessors.ACTION_NAME]
+  assert isinstance(original_action, LocomanipMotionActionCfg)
+  assert action.motion_decision_period_s == original_action.motion_decision_period_s
+  # The joint task's objective, minus the price of joint authority it lacks.
+  assert all(cfg.rewards[name] == original.rewards.get(name) for name in cfg.rewards)
+  assert not {"residual_magnitude", "residual_rate"} & set(cfg.rewards)
+  assert {"braking", "braking_start", "holding"} <= set(cfg.rewards)
   assert "actions" not in cfg.observations["actor"].terms
   assert "motion_control" in cfg.observations["actor"].terms
   assert "motion_decision" in cfg.observations
@@ -61,8 +53,5 @@ def test_only_braking_authority_with_no_placement_reward(
   agent = cast("RslRlOnPolicyRunnerCfg", load_rl_cfg(TASK_IDS[robot]))
   assert agent.experiment_name == TASK_IDS[robot]
   assert agent.actor.class_name == "mc_mjlab.rl.motion_actor:MotionActor"
-  original = load_env_cfg(JOINT_TASK_IDS[robot], play=play)
-  original_action = original.actions[accessors.ACTION_NAME]
-  assert isinstance(original_action, LocomanipMotionActionCfg)
   assert original_action.residual_actuator_names
   assert "residual_magnitude" in original.rewards

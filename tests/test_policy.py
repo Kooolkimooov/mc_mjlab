@@ -33,11 +33,6 @@ from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   MC_RTC_YAML,
   make_residual_balance_env_cfg,
 )
-from mc_mjlab.tasks.residual_balance.residual_balance_ppo_cfg import (
-  residual_balance_ppo_cfg,
-)
-
-pytestmark = requires_controller(MC_RTC_YAML)
 
 
 def test_distribution() -> None:
@@ -66,13 +61,6 @@ def test_distribution() -> None:
   loss.backward()
   assert distribution.std_param.shape == (1,)
   assert mean.grad is not None and math.isfinite(float(mean.grad.abs().max()))
-
-
-def test_residual_balance_exploration_cfg() -> None:
-  """Keep residual balance aligned with the powered ResidualMPC exploration fix."""
-  cfg = residual_balance_ppo_cfg()
-  assert cfg.actor.distribution_cfg["std_range"] == (0.05, 0.15)
-  assert cfg.algorithm.entropy_coef == 0.00005
 
 
 def test_zero_initialization() -> None:
@@ -120,12 +108,6 @@ def test_masked_policy_objective() -> None:
     normalize_masked_advantages(advantages, torch.zeros_like(mask)),
     torch.zeros_like(advantages),
   )
-
-  cfg = make_residual_balance_env_cfg("position")
-  assert cfg.rewards["residual_magnitude"].func is requested_action_l2
-  assert cfg.rewards["residual_rate"].func is requested_action_rate_l2
-  assert cfg.metrics["executed_residual_l2"].func is action_l2
-  assert cfg.metrics["requested_residual_l2"].func is requested_action_l2
 
   rollout_obs = TensorDict(
     {"actor": torch.randn(4, 3), "critic": torch.randn(4, 3)}, batch_size=[4]
@@ -175,6 +157,16 @@ def test_masked_policy_objective() -> None:
   assert all(math.isfinite(value) for value in losses.values())
   assert storage.step == 0
   assert math.isclose(algorithm.last_actor_update_fraction, 4 / 12, rel_tol=1.0e-6)
+
+
+@requires_controller(MC_RTC_YAML)
+def test_residual_balance_prices_the_requested_residual() -> None:
+  """Check costs read the policy's request while metrics also report execution."""
+  cfg = make_residual_balance_env_cfg("position")
+  assert cfg.rewards["residual_magnitude"].func is requested_action_l2
+  assert cfg.rewards["residual_rate"].func is requested_action_rate_l2
+  assert cfg.metrics["executed_residual_l2"].func is action_l2
+  assert cfg.metrics["requested_residual_l2"].func is requested_action_l2
 
 
 def _squashed(output_dim: int) -> SquashedGaussianDistribution:

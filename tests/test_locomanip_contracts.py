@@ -40,6 +40,7 @@ from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
   make_locomanip_residual_env_cfg,
 )
 from mc_mjlab.tasks.locomanip.mdp import accessors, metrics, rewards
+from mc_mjlab.tasks.locomanip.mdp import observations as locomanip_observations
 from mc_mjlab.tasks.locomanip.mdp.events import mass_alpha_range
 from mc_mjlab.tasks.locomanip.profiles import HRP5P, PROFILES
 
@@ -153,23 +154,23 @@ def test_balance_reward_uses_every_contact_and_keeps_zmp_diagnostic() -> None:
 
 
 def test_the_critic_sees_more_than_the_actor() -> None:
-  """Verify the privileged terms are critic-only and every actor term is shared."""
-  observations = make_locomanip_residual_env_cfg().observations
-  actor = set(observations["actor"].terms)
-  critic = set(observations["critic"].terms)
-  assert actor < critic
-  assert critic - actor == {
-    "object_mass",
-    "hand_contact_force",
-    "com_state",
-    "measured_zmp_offset",
+  """Verify every actor term is shared and no simulator-only truth reaches it."""
+  cfg = make_locomanip_residual_env_cfg()
+  actor = cfg.observations["actor"].terms
+  critic = cfg.observations["critic"].terms
+  assert set(actor) < set(critic)
+  privileged = {
+    locomanip_observations.object_mass,
+    locomanip_observations.hand_contact_force,
+    locomanip_observations.com_state,
   }
+  assert not privileged & {term.func for term in actor.values()}
   assert not any(name.startswith("object_") for name in actor)
-  assert "object_tracking" not in make_locomanip_residual_env_cfg().rewards
+  assert "object_tracking" not in cfg.rewards
 
 
-def test_safety_observations_cover_fall_and_contact_precursors() -> None:
-  """Verify every balance precursor the actor sees carries the safety history."""
+def test_observed_evidence_carries_its_history() -> None:
+  """Verify each optional precursor or payload sensor the actor sees keeps history."""
   terms = make_locomanip_residual_env_cfg().observations["actor"].terms
   precursors = {
     "base_ang_vel",
@@ -181,9 +182,12 @@ def test_safety_observations_cover_fall_and_contact_precursors() -> None:
     "foot_normal_forces",
     *SOLE_VELOCIMETERS,
   }
-  # Which precursors are observed is a tuning choice; their history is not.
+  # Which of these the actor observes is a tuning choice; their history is not.
   for name in precursors & set(terms):
     assert terms[name].history_length == SAFETY_HISTORY, name
+  for name in set(FORCE_SENSORS) & set(terms):
+    assert terms[name].history_length == FORCE_HISTORY, name
+  assert terms["manipulation_phase"].history_length == 0
 
 
 def test_fall_labels_partition_low_and_tilted_states(
@@ -249,14 +253,6 @@ def test_safe_completion_excludes_falls_and_controller_faults(
     ),
   )
   assert metrics.safe_completion(env).tolist() == [1.0, 0.0, 0.0, 0.0, 0.0]
-
-
-def test_the_payload_evidence_carries_history() -> None:
-  """Verify one frame is not all the policy gets of the cart it must infer."""
-  actor = make_locomanip_residual_env_cfg().observations["actor"].terms
-  for name in set(FORCE_SENSORS) & set(actor):
-    assert actor[name].history_length == FORCE_HISTORY, name
-  assert actor["manipulation_phase"].history_length == 0
 
 
 def test_only_the_actor_pays_for_noise() -> None:

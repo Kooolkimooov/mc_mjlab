@@ -225,20 +225,40 @@ def test_json_ignores_color_mode(task: str, capfd: pytest.CaptureFixture[str]) -
   assert json.loads(output)["task_id"] == task
 
 
-def test_top_level_help_skips_loading(
-  monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
-) -> None:
-  """Expose command help without importing mjlab or attempting registry access."""
-  original_import = builtins.__import__
+# Runs in a fresh interpreter: this one has already imported everything help must not.
+HELP_WITHOUT_LOADING = """
+import importlib.abc, sys
+from importlib.metadata import entry_points
 
-  def guarded_import(name: str, *args: Any, **kwargs: Any) -> Any:
-    assert not name.startswith("mjlab")
-    return original_import(name, *args, **kwargs)
+FORBIDDEN = ("mjlab", "mujoco", "torch", "mc_rtc", "mc_rtc_interface",
+             "mc_mjlab.actions", "mc_mjlab.tasks")
+attempted = []
 
-  monkeypatch.setattr(builtins, "__import__", guarded_import)
-  describe.main(["--help"])
-  output = capfd.readouterr().out
-  assert all(option in output for option in ("--full", "--play", "--format", "--color"))
+class Forbid(importlib.abc.MetaPathFinder):
+  def find_spec(self, name, path=None, target=None):
+    if any(name == root or name.startswith(root + ".") for root in FORBIDDEN):
+      attempted.append(name)
+      raise ImportError(name)
+
+sys.meta_path.insert(0, Forbid())
+(command,) = entry_points(group="console_scripts", name="describe")
+code = 0
+try:
+  command.load()(["--help"])
+except SystemExit as done:
+  code = done.code
+sys.exit(f"help imported {attempted}" if attempted else code)
+"""
+
+
+def test_top_level_help_skips_loading() -> None:
+  """Expose the installed command's help without importing what tasks would load."""
+  result = subprocess.run(
+    [sys.executable, "-c", HELP_WITHOUT_LOADING], capture_output=True, text=True
+  )
+  assert result.returncode == 0, result.stderr
+  options = ("--full", "--play", "--format", "--color")
+  assert all(option in result.stdout for option in options)
 
 
 def test_task_help_exposes_overrides(
@@ -417,16 +437,6 @@ def installed_command() -> Iterator[list[str]]:
   command = Path(sys.executable).parent / "describe"
   assert command.is_file(), "install project console scripts before testing"
   yield [str(command)]
-
-
-def test_installed_command_and_clean_import_help(installed_command: list[str]) -> None:
-  """Verify the entry point works and top-level help avoids task registration."""
-  result = subprocess.run(
-    installed_command + ["--help"], capture_output=True, text=True
-  )
-  assert result.returncode == 0
-  assert "--full" in result.stdout
-  assert "[WARN]" not in result.stderr
 
 
 def test_custom_runner_selection(task: str, capfd: pytest.CaptureFixture[str]) -> None:

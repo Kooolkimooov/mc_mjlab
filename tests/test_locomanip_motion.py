@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from types import SimpleNamespace as NS
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 import torch
 from conftest import requires_controller
-from mjlab.managers.reward_manager import RewardManager
+from mjlab.managers.reward_manager import RewardManager, RewardTermCfg
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 from probe_locomanip_motion import _checks
 
@@ -54,12 +55,16 @@ if TYPE_CHECKING:
 pytestmark = requires_controller(HRP5P.mc_rtc_yaml)
 
 
-def motion_action(residual_dim: int = 2) -> LocomanipMotionAction:
+def motion_action(
+  residual_dim: int = 2, decision_period_s: float | None = None
+) -> LocomanipMotionAction:
   """Build only the CPU action buffers needed to exercise dispatch contracts."""
   cfg = cast(
     LocomanipMotionActionCfg,
     load_env_cfg(TASK_IDS["HRP5P"]).actions[accessors.ACTION_NAME],
   )
+  if decision_period_s is not None:
+    cfg.motion_decision_period_s = decision_period_s
   action = object.__new__(LocomanipMotionAction)
   action._env = cast(Any, NS(num_envs=5, device="cpu", step_dt=0.02))
   action.cfg = cfg
@@ -77,6 +82,11 @@ def motion_action(residual_dim: int = 2) -> LocomanipMotionAction:
   action.controller_failed = torch.zeros(5, dtype=torch.bool)
   action.controller_worker_failed = torch.zeros(5, dtype=torch.bool)
   return action
+
+
+def unit_cost(func: Callable[..., torch.Tensor], env: Any) -> RewardManager:
+  """Price one motion term at unit cost, independent of the task's tuning."""
+  return RewardManager({"cost": RewardTermCfg(func=func, weight=-1.0)}, env)
 
 
 def test_new_task_keeps_joint_task_independent() -> None:
@@ -226,14 +236,20 @@ def test_braking_reward_charges_applied_scale_only_during_bilateral_hold(
   monkeypatch.setattr(
     accessors, "residual_action", lambda env, action_name=accessors.ACTION_NAME: action
   )
-  cfg = load_env_cfg(TASK_IDS["HRP5P"])
-  env = cast(Any, NS(num_envs=5, device="cpu"))
-  manager = RewardManager({"braking": cfg.rewards["braking"]}, env)
+  manager = unit_cost(motion_mdp.braking, NS(num_envs=5, device="cpu"))
   torch.testing.assert_close(
-    manager.compute(0.02), torch.tensor([0.0, -0.0003, -0.0006, 0.0, 0.0])
+    manager.compute(1.0), torch.tensor([0.0, -0.5, -1.0, 0.0, 0.0])
   )
   assert action.motion_scale_dispatched.tolist() == [1.0] * 5
-  assert "braking" not in load_env_cfg(RESIDUAL_TASK_IDS["HRP5P"]).rewards
+
+
+def test_motion_costs_are_charged_only_by_the_motion_task() -> None:
+  rewards = load_env_cfg(TASK_IDS["HRP5P"]).rewards
+  residual = load_env_cfg(RESIDUAL_TASK_IDS["HRP5P"]).rewards
+  for name in ("braking", "braking_start", "holding"):
+    assert rewards[name].func is getattr(motion_mdp, name)
+    assert rewards[name].weight < 0
+    assert name not in residual
 
 
 def test_native_braking_events_accumulate_once_and_reset_per_row(
@@ -259,10 +275,9 @@ def test_native_braking_events_accumulate_once_and_reset_per_row(
     action._motion_count_previous, torch.tensor([0, 1, 2, 0, 2]).float()
   )
   monkeypatch.setattr(accessors, "residual_action", lambda env: action)
-  reward = load_env_cfg(TASK_IDS["HRP5P"]).rewards["braking_start"]
   env = cast(Any, NS(num_envs=5, device="cpu", step_dt=0.02))
-  manager = RewardManager({"braking_start": reward}, env)
-  expected = torch.tensor([0.0, -0.22, -0.44, 0.0, -0.44])
+  manager = unit_cost(motion_mdp.braking_start, env)
+  expected = torch.tensor([0.0, -1.0, -2.0, 0.0, -2.0])
   torch.testing.assert_close(manager.compute(env.step_dt), expected)
   env.step_dt = 0.01
   torch.testing.assert_close(manager.compute(env.step_dt), expected)
@@ -279,18 +294,17 @@ def test_holding_cost_excludes_slow_travel_and_inactive_hand_phases(
   monkeypatch.setattr(
     accessors, "residual_action", lambda env, action_name=accessors.ACTION_NAME: action
   )
-  env = cast(Any, NS(num_envs=5, device="cpu"))
-  reward = load_env_cfg(TASK_IDS["HRP5P"]).rewards["holding"]
-  manager = RewardManager({"holding": reward}, env)
+  manager = unit_cost(motion_mdp.holding, NS(num_envs=5, device="cpu"))
   torch.testing.assert_close(
-    manager.compute(0.02), torch.tensor([0, 0, -0.002, 0, 0]).float()
+    manager.compute(1.0), torch.tensor([0, 0, -1.0, 0, 0]).float()
   )
 
 
 def test_motion_latches_per_row_while_joints_keep_updating(
   monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-  action = motion_action()
+  period = 5
+  action = motion_action(decision_period_s=period * 0.02)
   monkeypatch.setattr(
     McRtcResidualJointPositionAction,
     "process_actions",
@@ -299,8 +313,9 @@ def test_motion_latches_per_row_while_joints_keep_updating(
   action.process_actions(torch.tensor([[0.1, 0.2, 0.5]] * 5))
   assert action.motion_decisions.tolist() == [1] * 5
   assert action.motion_decision_state[:, 0].tolist() == [0] * 5
-  assert action.motion_decision_state[:, 1].tolist() == pytest.approx([0.99] * 5)
-  for _ in range(99):
+  remaining = (period - 1) / period
+  assert action.motion_decision_state[:, 1].tolist() == pytest.approx([remaining] * 5)
+  for _ in range(period - 1):
     action.process_actions(torch.tensor([[0.3, 0.4, 0.0]] * 5))
   assert action.motion_scale_requested.tolist() == [0.5] * 5
   assert action._raw_actions.tolist() == pytest.approx(torch.tensor([[0.3, 0.4]] * 5))

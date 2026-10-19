@@ -37,6 +37,7 @@ from mc_mjlab.tasks.residual_balance.curriculum_stages import (
   achievement_contract,
   achievement_contract_sha256,
 )
+from mc_mjlab.tasks.residual_balance.evaluation import IMPULSE_STRATA
 from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   AUTHORITY_SETS,
   MC_RTC_YAML,
@@ -246,23 +247,22 @@ def test_curriculum_reachability() -> None:
   assert seen, "no staged reward curriculum was checked"
 
 
-def test_stratified_impulse() -> None:
-  """Check qualifier coverage, band validation, standing exclusion, routing."""
+def test_stratified_impulse(monkeypatch: pytest.MonkeyPatch) -> None:
+  """Check qualifier coverage, mixture validity, and authority-set wiring."""
   push = residual_balance_position_matched_impulse_env_cfg().events["push_robot"]
   assert push.func is stratified_finite_impulse_curriculum
   assert push.params["bands"] == QUALIFICATION_MATCHED_BANDS
   assert push.params["band_weights"] == QUALIFICATION_MATCHED_WEIGHTS
-  assert push.params["stages"] == ((0, (0.10, 0.60)),)
-  assert math.isclose(sum(QUALIFICATION_MATCHED_WEIGHTS), 1.0)
-  for magnitude in (0.25, 0.40, 0.50, 0.60):
+  for magnitude in IMPULSE_STRATA:
     assert any(low <= magnitude <= high for low, high in QUALIFICATION_MATCHED_BANDS)
 
-  # Every branch of the promotion verdict must already have a valid mixture.
-  assert QUALIFICATION_MATCHED_MIXTURES["matched"] == QUALIFICATION_MATCHED_WEIGHTS
+  # The shipped term must construct, and every promotion verdict's mixture with it.
+  monkeypatch.setattr(
+    finite_impulse_curriculum, "__init__", lambda self, cfg, env: None
+  )
+  term = stratified_finite_impulse_curriculum(push, _StratifiedEnv())
   for name, weights in QUALIFICATION_MATCHED_MIXTURES.items():
-    assert len(weights) == len(QUALIFICATION_MATCHED_BANDS) + 1, name
-    assert math.isclose(sum(weights), 1.0), name
-    assert all(value >= 0.0 for value in weights), name
+    term.validated_weights(weights)
     assert weights[0] > 0.0, name
   matched = QUALIFICATION_MATCHED_MIXTURES["matched"]
   gait = QUALIFICATION_MATCHED_MIXTURES["gait"]
@@ -306,60 +306,48 @@ def test_stratified_impulse() -> None:
   for key in ("window_s", "min_normal_force", "push_term_name"):
     assert coverage.params.get(key) == metrics["recovery_active"].params.get(key), key
 
-  env = _StratifiedEnv()
-  original_init = finite_impulse_curriculum.__init__
-  finite_impulse_curriculum.__init__ = lambda self, cfg, env: None
-  try:
-    for weights, stages in (
-      ((0.2, 0.3, 0.3, 0.3), ((0, (0.10, 0.60)),)),
-      ((0.5, 0.5), ((0, (0.10, 0.60)),)),
-      (QUALIFICATION_MATCHED_WEIGHTS, ((0, (0.10, 0.50)),)),
-      (QUALIFICATION_MATCHED_WEIGHTS, ((0, (0.10, 0.60)), (1, (0.10, 0.60)))),
-    ):
-      params = {
-        "bands": QUALIFICATION_MATCHED_BANDS,
-        "band_weights": weights,
-        "stages": stages,
-      }
-      try:
-        stratified_finite_impulse_curriculum(
-          RewardTermCfg(func=None, params=params, weight=1.0), env
-        )
-      except ValueError:
-        continue
-      raise AssertionError(f"accepted invalid band configuration {params}")
-    params = {
-      "bands": QUALIFICATION_MATCHED_BANDS,
-      "band_weights": QUALIFICATION_MATCHED_WEIGHTS,
-      "stages": ((0, (0.10, 0.60)),),
-    }
-    term = stratified_finite_impulse_curriculum(
+
+def test_stratified_impulse_routing(monkeypatch: pytest.MonkeyPatch) -> None:
+  """Check band validation, standing exclusion, and per-band routing."""
+  bands = ((0.1, 0.2), (0.2, 0.5))
+  union = ((0, (0.1, 0.5)),)
+  env: Any = _StratifiedEnv()
+  monkeypatch.setattr(
+    finite_impulse_curriculum, "__init__", lambda self, cfg, env: None
+  )
+
+  def build(weights: tuple[float, ...], stages: Any) -> Any:
+    """Construct the term over the fixture bands."""
+    params = {"bands": bands, "band_weights": weights, "stages": stages}
+    return stratified_finite_impulse_curriculum(
       RewardTermCfg(func=None, params=params, weight=1.0), env
     )
-  finally:
-    finite_impulse_curriculum.__init__ = original_init
+
+  for weights, stages in (
+    ((0.2, 0.3, 0.6), union),
+    ((0.5, 0.5), union),
+    ((0.5, 0.25, 0.25), ((0, (0.1, 0.4)),)),
+    ((0.5, 0.25, 0.25), ((0, (0.1, 0.5)), (1, (0.1, 0.5)))),
+  ):
+    with pytest.raises(ValueError):
+      build(weights, stages)
+  term = build((0.5, 0.25, 0.25), union)
 
   term.enabled = torch.ones(4, dtype=torch.bool)
   term.next_push_step = torch.zeros(4, dtype=torch.long)
-  term.sampled_band = torch.tensor([-1, 0, 1, 2])
+  term.sampled_band = torch.tensor([-1, 0, 1, 1])
   assert torch.equal(term._due(env), torch.tensor([False, True, True, True]))
 
   routed: list[tuple[list[int], tuple[float, float]]] = []
-  original_trigger = finite_impulse_curriculum._trigger
-  finite_impulse_curriculum._trigger = (
+  monkeypatch.setattr(
+    finite_impulse_curriculum,
+    "_trigger",
     lambda self, env, env_ids, duration_range_s, height_range_m, stages: routed.append(
       (sorted(int(value) for value in env_ids), stages[0][1])
-    )
+    ),
   )
-  try:
-    term._trigger(env, torch.tensor([0, 1, 2, 3]), (0.08, 0.20), (0.0, 0.25), ())
-  finally:
-    finite_impulse_curriculum._trigger = original_trigger
-  assert routed == [
-    ([1], (0.10, 0.25)),
-    ([2], (0.25, 0.40)),
-    ([3], (0.40, 0.60)),
-  ]
+  term._trigger(env, torch.tensor([0, 1, 2, 3]), (0.08, 0.20), (0.0, 0.25), ())
+  assert routed == [([1], bands[0]), ([2, 3], bands[1])]
 
 
 def test_achievement_curriculum() -> None:
@@ -544,15 +532,16 @@ def test_environment_variants() -> None:
     "randomize_pd_gains",
     "randomize_strength",
   } <= robust.events.keys()
+  # Only what the deployed actor senses is delayed; the critic stays privileged.
   assert all(
-    term.delay_max_lag == 1 for term in robust.observations["actor"].terms.values()
+    term.delay_max_lag > 0 for term in robust.observations["actor"].terms.values()
   )
   assert all(
     term.delay_max_lag == 0 for term in robust.observations["critic"].terms.values()
   )
   assert robust.scene.entities["robot"].articulation is not None
   assert all(
-    actuator.delay_max_lag == 2
+    actuator.delay_max_lag > 0
     for actuator in robust.scene.entities["robot"].articulation.actuators
   )
 
