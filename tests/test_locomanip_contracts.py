@@ -163,6 +163,7 @@ def test_the_critic_sees_more_than_the_actor() -> None:
     locomanip_observations.object_mass,
     locomanip_observations.hand_contact_force,
     locomanip_observations.com_state,
+    mdp.sensors.measured_zmp_offset,
   }
   assert not privileged & {term.func for term in actor.values()}
   assert not any(name.startswith("object_") for name in actor)

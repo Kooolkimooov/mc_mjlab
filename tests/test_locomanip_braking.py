@@ -41,9 +41,9 @@ def test_only_braking_authority_with_no_placement_reward(
   assert isinstance(original_action, LocomanipMotionActionCfg)
   assert action.motion_decision_period_s == original_action.motion_decision_period_s
   # The joint task's objective, minus the price of joint authority it lacks.
-  assert all(cfg.rewards[name] == original.rewards.get(name) for name in cfg.rewards)
-  assert not {"residual_magnitude", "residual_rate"} & set(cfg.rewards)
-  assert {"braking", "braking_start", "holding"} <= set(cfg.rewards)
+  joint_costs = {"residual_magnitude", "residual_rate"}
+  assert set(original.rewards) - joint_costs <= set(cfg.rewards)
+  assert not joint_costs & set(cfg.rewards)
   assert "actions" not in cfg.observations["actor"].terms
   assert "motion_control" in cfg.observations["actor"].terms
   assert "motion_decision" in cfg.observations
