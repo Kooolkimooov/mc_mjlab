@@ -245,6 +245,7 @@ def _actions(
       num_workers=num_workers,
       pd_gains_path=str(robot.pd_gains_path),
       controller_objects={"obj": locomanip_mdp.accessors.OBJECT_ENTITY},
+      controller_force_feedback=False,
       datastore_vectors_outputs=(
         locomanip_mdp.accessors.OBJECT_REFERENCE_POSITION,
         locomanip_mdp.accessors.OBJECT_REFERENCE_RPY,

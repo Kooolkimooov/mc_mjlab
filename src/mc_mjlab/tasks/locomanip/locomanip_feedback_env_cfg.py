@@ -71,7 +71,13 @@ def make_locomanip_feedback_env_cfg(
   )
   base = cfg.actions[mdp.accessors.ACTION_NAME]
   carried = {f.name: getattr(base, f.name) for f in fields(base)}
-  carried.update(residual_actuator_names=(), scale=1.0, offset=0.0, clip=None)
+  carried.update(
+    residual_actuator_names=(),
+    scale=1.0,
+    offset=0.0,
+    clip=None,
+    controller_force_feedback=True,
+  )
   cfg.actions[mdp.accessors.ACTION_NAME] = ResidualFeedbackJointPositionActionCfg(
     **carried,
     feedback_modalities=("wrench",),

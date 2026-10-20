@@ -253,6 +253,10 @@ def test_task_registration_and_environment_parity() -> None:
   for profile in PROFILES:
     old = make_locomanip_residual_env_cfg(profile=profile)
     new = make_locomanip_feedback_env_cfg(profile=profile)
+    assert canonicalize(new.actions[accessors.ACTION_NAME])["controller_force_feedback"]
+    assert not canonicalize(old.actions[accessors.ACTION_NAME])[
+      "controller_force_feedback"
+    ]
     for name in ("scene", "sim", "rewards", "terminations", "events"):
       assert canonicalize(getattr(new, name)) == canonicalize(getattr(old, name))
     for group in old.observations:

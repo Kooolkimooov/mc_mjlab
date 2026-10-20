@@ -36,7 +36,9 @@ from mc_mjlab.utils.controller_install import (
 )
 
 
-def make_bridge() -> tuple[SimControllerBridge, NS, NS]:
+def make_bridge(
+  *, controller_force_feedback: bool = True
+) -> tuple[SimControllerBridge, NS, NS]:
   """Build a two-joint bridge whose reference order holds one unsimulated joint."""
   model = mujoco.MjModel.from_xml_string("""
   <mujoco><worldbody><body name="robot/base"><freejoint name="robot/root"/>
@@ -100,6 +102,7 @@ def make_bridge() -> tuple[SimControllerBridge, NS, NS]:
       "test",
       ("q", "alpha", "tau"),
       "robot",
+      controller_force_feedback=controller_force_feedback,
     )
   return bridge, env, entity
 
@@ -146,6 +149,32 @@ def test_layout() -> None:
     np.testing.assert_allclose(
       bridge.read_controller_output(block)[channel], out[:, [offset + 2, offset]]
     )
+
+
+def test_force_sensor_measurements_cannot_reach_disabled_controller() -> None:
+  """Block all six wrench channels without hiding IMU or simulator truth."""
+  bridge, env, _ = make_bridge(controller_force_feedback=False)
+  rows = np.full((2, bridge.layout.input_size), 123.0)
+  layout = bridge.layout.input
+  start = layout.force_sensors_offset()
+  imu = layout.body_sensors_offset() + 6
+  assert layout.force_sensors == ["foot"]
+
+  for reading in (17.0, -33.0, float("nan")):
+    env.sim.data.sensordata[:, 6:12] = reading
+    bridge.fill_controller_input(rows)
+    np.testing.assert_array_equal(rows[:, start : start + 6], 0.0)
+    np.testing.assert_allclose(rows[:, imu : imu + 6], env.sim.data.sensordata[:, :6])
+    torch.testing.assert_close(
+      env.sim.data.sensordata[:, 6:12], torch.full((2, 6), reading), equal_nan=True
+    )
+
+  bridge.set_wrench_offset(torch.full((2, 6), 2.0))
+  bridge.fill_controller_input(rows)
+  np.testing.assert_array_equal(rows[:, start : start + 6], 2.0)
+  bridge.set_wrench_offset(None)
+  bridge.fill_controller_input(rows)
+  np.testing.assert_array_equal(rows[:, start : start + 6], 0.0)
 
 
 def test_walking_reference_feed() -> None:

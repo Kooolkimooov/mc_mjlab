@@ -64,6 +64,8 @@ class SimControllerBridge:
     channels: tuple[str, ...],
     entity_name: str,
     controller_objects: dict[str, str] | None = None,
+    *,
+    controller_force_feedback: bool = True,
   ) -> None:
     self._env = env
     self._entity = entity
@@ -74,7 +76,7 @@ class SimControllerBridge:
 
     self._resolve_joint_columns(robot_name, entity, target_names)
     self._resolve_root_joint()
-    self._resolve_sensor_routes(robot_name)
+    self._resolve_sensor_routes(robot_name, controller_force_feedback)
     self._resolve_object_feedback(env, controller_objects or {})
     self._clear_state_feedback_offsets()
     self._alloc_device_buffers(env.num_envs)
@@ -268,7 +270,9 @@ class SimControllerBridge:
         self._root_dof_adr = int(model.jnt_dofadr[i])
         break
 
-  def _resolve_sensor_routes(self, robot_name: str) -> None:
+  def _resolve_sensor_routes(
+    self, robot_name: str, controller_force_feedback: bool
+  ) -> None:
     """Route each named MuJoCo sensor triple to its slot in the sensor block."""
     module = robots.get_robot_module(robot_name)
     # mc_rbdyn sensor names come back as bytes; the native setter wants str.
@@ -290,6 +294,10 @@ class SimControllerBridge:
         self._route(
           adr, layout.body_sensors_offset() + _SENSOR_STRIDE * i + _TRIPLE * j
         )
+
+    # Retain zero-filled slots so native reset and step overwrite every wrench.
+    if not controller_force_feedback:
+      return
 
     for i, name in enumerate(layout.force_sensors):
       for j, suffix in enumerate(_FORCE_SENSOR_CHANNELS):

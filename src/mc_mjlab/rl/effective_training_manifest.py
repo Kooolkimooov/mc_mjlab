@@ -645,6 +645,21 @@ def _normalize_impulse_defaults(value: Any) -> Any:
   return result
 
 
+def _normalize_controller_force_feedback(value: Any) -> Any:
+  """Interpret checkpoints predating the sensor switch as sensor-enabled runs."""
+  if isinstance(value, list):
+    return [_normalize_controller_force_feedback(item) for item in value]
+  if not isinstance(value, dict):
+    return value
+
+  result = {
+    key: _normalize_controller_force_feedback(item) for key, item in value.items()
+  }
+  if "mc_rtc_config_path" in result and "mc_rtc_robot_name" in result:
+    result.setdefault("controller_force_feedback", True)
+  return result
+
+
 def validate_effective_training_manifest(
   saved: dict, active: dict, *, full_resume: bool
 ) -> None:
@@ -663,6 +678,8 @@ def validate_effective_training_manifest(
   active_payload = _normalize_impulse_defaults(
     _strip_source_hashes(active.get(payload_key))
   )
+  saved_payload = _normalize_controller_force_feedback(saved_payload)
+  active_payload = _normalize_controller_force_feedback(active_payload)
 
   # A field added after a checkpoint was written cannot appear in its manifest,
   # so an addition alone must not strand it. Removals and changed values still

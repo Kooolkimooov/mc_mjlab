@@ -23,6 +23,39 @@ def _manifest_probe(_env: Any, gain: float = 2.0) -> float:
   return gain
 
 
+@pytest.mark.parametrize("full_resume", [False, True])
+@pytest.mark.parametrize("saved_feedback", [None, False, True])
+@pytest.mark.parametrize("active_feedback", [False, True])
+def test_force_feedback_is_part_of_checkpoint_contract(
+  full_resume: bool, saved_feedback: bool | None, active_feedback: bool
+) -> None:
+  """Reject sensor changes even when the checkpoint predates the sensor switch."""
+  config: dict[str, Any] = {
+    "mc_rtc_config_path": "/controller.yaml",
+    "mc_rtc_robot_name": "HRP5P",
+  }
+  if saved_feedback is not None:
+    config["controller_force_feedback"] = saved_feedback
+  key = "training_contract" if full_resume else "policy_interface"
+  saved = {
+    "schema_version": 1,
+    key: {"actions": {"terms": {"mc_rtc_residual": {"config": config}}}},
+  }
+  active = json.loads(json.dumps(saved))
+  active[key]["actions"]["terms"]["mc_rtc_residual"]["config"][
+    "controller_force_feedback"
+  ] = active_feedback
+
+  expected = True if saved_feedback is None else saved_feedback
+  if expected == active_feedback:
+    validate_effective_training_manifest(saved, active, full_resume=full_resume)
+  else:
+    with pytest.raises(RuntimeError, match="controller_force_feedback"):
+      validate_effective_training_manifest(saved, active, full_resume=full_resume)
+  if saved_feedback is None:
+    assert "controller_force_feedback" not in config
+
+
 @dataclass
 class _ActionCfg:
   """Provide action fields used by manifest assertions."""

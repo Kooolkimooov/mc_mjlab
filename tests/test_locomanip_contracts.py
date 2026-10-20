@@ -76,6 +76,7 @@ def test_every_profile_builds() -> None:
     cfg = make_locomanip_residual_env_cfg(profile=profile)
     assert cfg.scene.entities["cart"].init_state.pos[0] == profile.cart_init_x
     assert {s.name for s in cfg.scene.sensors} == {"left_hand_cart", "right_hand_cart"}
+    assert not _action(cfg).controller_force_feedback
 
 
 def test_action_name_matches_the_provenance_key() -> None:

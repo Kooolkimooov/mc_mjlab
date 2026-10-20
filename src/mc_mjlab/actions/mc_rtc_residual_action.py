@@ -73,6 +73,9 @@ class McRtcResidualActionCfg(BaseActionCfg):
   controller_objects: dict[str, str] = field(default_factory=dict)
   """Measured mc_rtc object names mapped to free-body scene entities."""
 
+  controller_force_feedback: bool = True
+  """Forward measured force/torque sensors to mc_rtc. docs/locomanip.md"""
+
   controller_timeout_ms: int = 60000
   """Native collection timeout, in milliseconds."""
 
@@ -486,6 +489,7 @@ class McRtcResidualActionBase(BaseAction):
       self.output_channels,
       cfg.entity_name,
       cfg.controller_objects,
+      controller_force_feedback=cfg.controller_force_feedback,
     )
 
     self._bridge.layout.output.datastore_scalar = list(

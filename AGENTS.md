@@ -391,6 +391,10 @@ Cross-cutting invariants:
 - The stabilizer is a force-feedback loop: foot/hand wrenches and the IMU
   must be fed (automatic when the model has sensors named
   `<ForceSensor>_fsensor`/`_tsensor`, `<BodySensor>_gyro`/`_accelerometer`).
+  The locomanip position-residual experiment deliberately disables all measured
+  wrenches with `controller_force_feedback=False`; its motion/braking variants
+  inherit this. Critic/reward sensors remain simulated. Older checkpoints imply
+  `True` and must not load silently with `False`. docs/locomanip.md#controller_force_feedback
 
 # Gotchas
 

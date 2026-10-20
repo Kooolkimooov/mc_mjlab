@@ -290,6 +290,14 @@ curriculum, and every episode pushes the same waypoint until you randomize one â
 see [docs/locomanip.md](docs/locomanip.md#locomanip_residual_env_cfg) for what is
 wired and what is deliberately missing.
 
+The position-residual task (including its motion and braking variants) disables
+all measured hand and foot force/torque feedback to mc_rtc. Forces remain
+available to the privileged critic, rewards and metrics. Older sensor-enabled
+checkpoints require `controller_force_feedback=True` in the action configuration
+when replayed; they do not establish performance without force sensors. The demo
+and hand-force feedback tasks retain their measured sensors. See
+[the sensor contract](docs/locomanip.md#controller_force_feedback).
+
 The `locomanip_motion` variant adds a controller motion action after the joint
 residual: zero keeps normal speed, 0.5 requests half speed, and 0.95 or more
 requests hold. A later zero request resumes the remaining route at nominal

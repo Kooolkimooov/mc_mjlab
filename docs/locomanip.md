@@ -1634,3 +1634,62 @@ averaging difference, not a contradiction.
 
 **Re-measure if:** anything in that list is trained. None of it is validated; the
 run that produced this section is the only evidence either way.
+
+## controller_force_feedback
+
+**Current:** the locomanip position-residual task, including its motion and
+braking derivatives, sets `controller_force_feedback=False`. The bridge omits
+all measured force-sensor routes, both force and moment triples, while retaining
+every native sensor slot. Each input fill writes zero into these slots, including
+initialization and episode resets, so mc_rtc cannot retain an earlier measurement.
+IMU, encoders, root/object state and actuator effort still reach the controller.
+Actuator effort is `qfrc_actuator`, not a contact force/torque sensor reading.
+
+MuJoCo continues computing force measurements for privileged critic observations,
+rewards and diagnostics. The actor has no direct wrench observations. Controller
+outputs observed by the actor now derive from the masked controller inputs.
+No measured force is replaced with nominal support forces or simulator contact
+estimates. Any wrench-feedback action explicitly configured on top would be a
+synthetic policy output, not a measured sensor baseline.
+
+The generic action default stays `True`; the demo and the separate hand-force
+feedback task retain measured feedback, as do the latter's safety derivatives.
+The checkpoint contract includes this flag for both full resumes and actor-only
+loads. A checkpoint without the field means `True`, even though generic added
+fields are otherwise tolerated. Replaying an old experiment therefore requires
+explicitly restoring measured feedback; training the no-sensor experiment starts
+a new run. C4 governs checkpoint validity and C5 limits what training results
+establish about deployment in [hard-constraints.md](hard-constraints.md).
+
+**Re-measure if:** sensor routing, controller observers or force-dependent tasks
+change. Masking the measurements establishes the information restriction; it
+does not demonstrate that the existing controller can balance without them.
+
+**History:** on 2026-10-20, the audit of
+`2026-10-19_17-57-41_mass-range` found no direct actor force observations and
+`HandWrenchAdaptation.enable: false` in the snapshotted HRP5P controller config.
+Nevertheless, `SimControllerBridge` routed every named hand and foot sensor into
+native `ControllerInstance::apply_input`, which called `setWrenches` each period.
+The hand tasks were impedance tasks. Disabling hand-wrench adaptation had not
+disabled their measurements or the controller's foot feedback. Results from that
+run describe a sensor-enabled base controller, not a robot without force sensors.
+
+Live HRP5P check on 2026-10-20: seed 42, one environment and one native worker,
+10 kg cart, zero residual, encoder-bias event removed, automatic reset disabled.
+Two explicit 12 s reset cycles per condition first verified input routing: the
+sensor-disabled condition had exactly zero in all 24 native wrench columns on
+every policy step while simulator forces reached 604.154 N. Both disabled cycles
+survived those 12 s; minimum root heights were 0.768678844 and 0.768678904 m.
+
+A separate full-cycle check used the same settings, n=1 episode per condition:
+
+| Measured feedback | End time | Minimum root height | Planar displacement | Outcome |
+| --- | --- | --- | --- | --- |
+| Enabled | 49.64 s | 0.725322247 m | 1.210022569 m | Completion truncation |
+| Disabled | 16.66 s | 0.543859005 m | 0.743203044 m | Physical termination |
+
+Neither condition reported a controller or worker failure. The disabled run's
+maximum absolute native wrench input was exactly 0 throughout; simulator force
+components reached 1485.612 N. The no-sensor base controller fell during motion.
+These are routing and baseline smoke checks, not policy evaluations or evidence
+that residual training can recover a controller deprived of foot feedback.
