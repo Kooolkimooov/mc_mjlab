@@ -8,6 +8,7 @@ from typing import cast
 
 import pytest
 import torch
+import yaml
 from conftest import requires_controller
 from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.dr import Distribution
@@ -23,7 +24,7 @@ from mc_mjlab.bridge.controller_datastore import (
   PLANNED_ZMP,
 )
 from mc_mjlab.residuals.authority import TORQUE_FRACTION
-from mc_mjlab.tasks.locomanip import DEMO_TASK_IDS, RESIDUAL_TASK_IDS
+from mc_mjlab.tasks.locomanip import CONTROLLER_NAME, DEMO_TASK_IDS, RESIDUAL_TASK_IDS
 from mc_mjlab.tasks.locomanip.cart import cart_nominal_mass_kg
 from mc_mjlab.tasks.locomanip.evaluation import LOCOMANIP_EVALUATION
 from mc_mjlab.tasks.locomanip.locomanip_env_cfg import locomanip_env_cfg
@@ -44,6 +45,10 @@ from mc_mjlab.tasks.locomanip.mdp import accessors, metrics, rewards
 from mc_mjlab.tasks.locomanip.mdp import observations as locomanip_observations
 from mc_mjlab.tasks.locomanip.mdp.events import FLAT_MASS, LOG_MASS, mass_alpha_range
 from mc_mjlab.tasks.locomanip.profiles import HRP5P, PROFILES
+from mc_mjlab.utils.controller_install import (
+  controller_config_paths,
+  user_controller_config_paths,
+)
 
 pytestmark = requires_controller(HRP5P.mc_rtc_yaml)
 
@@ -77,6 +82,21 @@ def test_every_profile_builds() -> None:
     assert cfg.scene.entities["cart"].init_state.pos[0] == profile.cart_init_x
     assert {s.name for s in cfg.scene.sensors} == {"left_hand_cart", "right_hand_cart"}
     assert not _action(cfg).controller_force_feedback
+
+
+def test_installed_controller_enables_no_sensors() -> None:
+  """Verify every config layer that sets overwrite keys keeps the task's NoSensors."""
+  layers = [
+    *controller_config_paths(CONTROLLER_NAME),
+    *(path for path in user_controller_config_paths(CONTROLLER_NAME) if path.is_file()),
+    *(profile.mc_rtc_yaml for profile in PROFILES),
+  ]
+  keys = [
+    (yaml.safe_load(path.read_text()) or {}).get("OverwriteConfigKeys")
+    for path in layers
+  ]
+  assert any(k is not None for k in keys)
+  assert all("NoSensors" in k for k in keys if k is not None)
 
 
 def test_action_name_matches_the_provenance_key() -> None:
@@ -362,8 +382,9 @@ def test_the_drawn_payload_is_absolute_kilograms() -> None:
 def test_each_mass_law_is_the_one_its_name_says() -> None:
   """Flat is uniform in kilograms, log is uniform in log-mass; zero ranges stay 0."""
   nominal = 10.0
-  low, high = CART_MASS_RANGE_KG
-  alpha_range = torch.tensor(mass_alpha_range(CART_MASS_RANGE_KG, nominal))
+  # A range straddling 10 kg, whatever the task draws, so the light share is testable.
+  low, high = 1.0, 700.0
+  alpha_range = torch.tensor(mass_alpha_range((low, high), nominal))
   torch.manual_seed(0)
 
   def masses(law: Distribution) -> torch.Tensor:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import math
 from dataclasses import replace
 from pathlib import Path
@@ -107,8 +108,11 @@ CONTACT_ZMP_PARAMS = {
   "contact_sensor_names": mdp.sensors.GROUND_CONTACT_SENSORS + HAND_FORCE_SENSORS,
 }
 
-#: The swept range above the carts Grasp shoves away. docs/locomanip.md#cart_mass_range_kg
+#: Straddles the baseline's failure edge. docs/locomanip.md#cart_mass_range_kg
 CART_MASS_RANGE_KG = locomanip_mdp.events.CART_MASS_RANGE_KG
+
+#: Difficulty dial; baseline fails from ~650 kg. docs/locomanip.md#cart_push_friction
+CART_PUSH_FRICTION = 0.05
 
 FALL_LIMIT_ANGLE = math.radians(45.0)
 
@@ -158,6 +162,7 @@ def make_locomanip_residual_env_cfg(
   torque_fraction: float = TORQUE_FRACTION,
   cart_pose_range: dict[str, tuple[float, float]] | None = None,
   cart_mass_range_kg: tuple[float, float] | None = CART_MASS_RANGE_KG,
+  cart_push_friction: float = CART_PUSH_FRICTION,
   request_weight: float = REQUEST_WEIGHT,
   console_output: Literal["none", "single", "all"] = "none",
   print_residual_every: int = 0,
@@ -170,7 +175,7 @@ def make_locomanip_residual_env_cfg(
   )
 
   return ManagerBasedRlEnvCfg(
-    scene=_scene(robot_cfg, num_envs, profile),
+    scene=_scene(robot_cfg, num_envs, profile, cart_push_friction),
     actions=_actions(
       robot_name,
       robot,
@@ -191,7 +196,12 @@ def make_locomanip_residual_env_cfg(
   )
 
 
-def _scene(robot_cfg: EntityCfg, num_envs: int, profile: LocomanipProfile) -> SceneCfg:
+def _scene(
+  robot_cfg: EntityCfg,
+  num_envs: int,
+  profile: LocomanipProfile,
+  cart_push_friction: float,
+) -> SceneCfg:
   """The robot, the cart it pushes, and the ground they share."""
   return SceneCfg(
     num_envs=num_envs,
@@ -201,7 +211,7 @@ def _scene(robot_cfg: EntityCfg, num_envs: int, profile: LocomanipProfile) -> Sc
       locomanip_mdp.accessors.OBJECT_ENTITY: cart_cfg(profile.cart_init_x),
     },
     # The cart's own directional friction pair needs the scene's ground plane.
-    spec_fn=cart_floor_contact,
+    spec_fn=functools.partial(cart_floor_contact, push_friction=cart_push_friction),
     sensors=hand_cart_contact_sensors(profile.hand_bodies),
     env_spacing=5.0,
   )
@@ -245,6 +255,7 @@ def _actions(
       num_workers=num_workers,
       pd_gains_path=str(robot.pd_gains_path),
       controller_objects={"obj": locomanip_mdp.accessors.OBJECT_ENTITY},
+      # Needs the controller's NoSensors override, or the feet drift on zero wrenches.
       controller_force_feedback=False,
       datastore_vectors_outputs=(
         locomanip_mdp.accessors.OBJECT_REFERENCE_POSITION,

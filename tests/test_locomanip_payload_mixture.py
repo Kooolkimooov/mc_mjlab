@@ -12,7 +12,7 @@ from mjlab.envs.mdp import dr
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
 from mc_mjlab.tasks.locomanip.mdp import payload_mixture
-from mc_mjlab.tasks.locomanip.mdp.events import LOG_MASS
+from mc_mjlab.tasks.locomanip.mdp.events import CART_MASS_RANGE_KG, LOG_MASS
 
 
 def test_mixture_keeps_model_fields_and_recompute_contract() -> None:
@@ -76,5 +76,7 @@ def test_degenerate_lower_band_redistributes_samples(
   monkeypatch.setattr(torch, "rand", lambda *a, **kw: torch.tensor([0.1, 0.9]))
   env = cast(Any, NS(num_envs=2, device="cpu"))
   asset = SceneEntityCfg("cart", body_names=("Body",))
-  payload_mixture.transition_payload(env, torch.tensor([0, 1]), 20, 10, asset)
+  # 50 kg above the configured floor, so the lower band collapses to a point.
+  midpoint = CART_MASS_RANGE_KG[0] + 50.0
+  payload_mixture.transition_payload(env, torch.tensor([0, 1]), midpoint, 10, asset)
   assert [ids.tolist() for ids in calls] == [[0], [1]]

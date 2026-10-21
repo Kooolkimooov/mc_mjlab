@@ -386,11 +386,17 @@ changes.
 
 ## cart_mass_range_kg
 
-**Current:** `(1.0, 700.0)` kg, drawn *flat in kilograms* per episode by a
+**Current:** `(400.0, 900.0)` kg, drawn *flat in kilograms* per episode by a
 `reset`-mode `dr.pseudo_inertia` event on the cart body. Its `alpha` is a *log*
 scale (mass and inertia both scale by `e^(2a)`), so `mdp.events.mass_alpha_range`
 converts kilograms to it and `mdp.events.FLAT_MASS` samples `e^(2a)` uniformly
 rather than `alpha`. `dr.body_mass` is the wrong term: it leaves inertia behind.
+
+**Why 400-900 kg: it straddles the base controller's failure edge.** Under
+`NoSensors` with `cart_push_friction` at `0.05`, the zero-residual controller
+completes every cart to ~600 kg and none from ~700 kg (measurements under
+`cart_push_friction`), so a flat draw over this range has the baseline failing
+about half the time. Light carts are out of the range entirely.
 
 **Why flat: the light carts the grasp shoves away (below) stay rare.** Over
 1--700 kg a flat draw puts 1.3% of episodes under 10 kg and 7.0% under 50 kg; the
@@ -458,6 +464,9 @@ that band measures the grasp, not the policy.
 changes what `alpha` scales, or the grasp approach or gripper commands change.
 
 **History:**
+- 2026-10-21 -- range moved to `(400.0, 900.0)` together with
+  `cart_push_friction` `0.05`. The committed code had meanwhile drawn
+  `(1.0, 800.0)`; under `NoSensors` with the asset friction every mass completed.
 - 2026-10-19 -- range moved to `(1.0, 700.0)` and the draw made flat in kilograms;
   log-uniform over that range would have put 35% of episodes in the shoved band.
 - 2026-10-10 -- lower bound raised from `1.0` to `10.0` after the traces above.
@@ -468,6 +477,80 @@ changes what `alpha` scales, or the grasp approach or gripper commands change.
   run showed `zmp_grounded` pinned at 0 and episodes ending at 3.7 s; carried a
   `set_const_fixed` term that rescaled the cart's own reference weights by hand
   until mujoco-warp 3.11 made the workaround unnecessary, and it was dropped.
+
+## cart_push_friction
+
+**Current:** `0.05` -- the `cart_floor` pair's second tangential friction
+coefficient, the cart's resistance along the push direction, for the residual
+task and everything built on it. `Cart.xml` itself carries `0.02`
+(`cart.ASSET_PUSH_FRICTION`), which the demo keeps for mc_mujoco parity. The
+first coefficient (`0.5`, sideways) and the torsional and rolling terms are the
+asset's. For scale, caster carts run about `0.01-0.03` on hard floors and
+`0.05-0.15` on carpet or with worn wheels; `0.05` is a hard-to-push cart, not a
+sliding box (`0.3-0.6`).
+
+**Why a difficulty dial at all:** under `NoSensors` the hands track position
+instead of yielding to the zero planned hand force, and at the asset value even a
+900-1000 kg cart needs only a ~95 N median push, which the open-loop controller
+supplies. Zero-residual completion was then 32/32 at every mass sampled
+(`controller_force_feedback`), leaving the residual nothing to improve. Friction
+loads the push itself: the controller plans no hand force and never leans, so past
+some resistance the cart stalls, the scheduled steps carry the robot into it, and
+it falls.
+
+**Measured 2026-10-21:** HRP5P, zero residual, `NoSensors`, sensors masked, seed
+42, 32 environments, first episode each, 6 workers.
+
+Friction at the 900-1000 kg range the working tree then drew, and robot pushes
+(`push_and_record`, planar kick of the given speed, every 5-7 s after a 10 s
+warm-up) at the asset friction:
+
+| Dial | Completed | Median hand push | Median cart travel |
+| --- | --- | --- | --- |
+| friction `0.02` | 32/32 | 95 N | 0.94 m |
+| friction `0.05` | 0/32 | 29 N | 0.00 m |
+| friction `0.1` | 0/32 | 5 N | 0.00 m |
+| friction `0.2` | 0/32 | -16 N | 0.00 m |
+| friction `0.3` | 0/32 | -22 N | 0.00 m |
+| push `0.1`-`0.4` m/s | 32/32 each | 93-94 N | 0.92 m |
+
+Pushes did fire (one-env check: four kicks between 12 and 29 s, all while
+holding, ~0.4 m/s each) and never toppled the robot: a hand grip on a
+near-immovable cart braces it. Every friction failure was `fell_over` at
+46.0-46.3 s.
+
+Mass at friction `0.05`, two runs pooled (1-900 kg at seed 42, 300-900 kg at
+seed 43), 64 episodes:
+
+| Mass | Completed | Hand push (median per episode) | Cart travel |
+| --- | --- | --- | --- |
+| <= 602 kg | 40/40 | rises with mass to 175-187 N | 1.12-0.60 m |
+| 641-670 kg | 3/8 (642, 660, 670 kg passed) | 190-203 N passing, 32-105 N failing | 0.61-0.63 m passing, <= 0.13 m failing |
+| >= 696 kg | 0/16 | 18-166 N | <= 0.38 m |
+
+All 16 heavy failures but one were `fell_over` at 46.1-46.2 s; 710 kg
+`collapsed` at 47.5 s. The registered task at its defaults (400-900 kg, seed 42,
+32 environments) then completed 11/32: 10/10 at <= 606 kg, 1/8 at 643-698 kg
+(698 kg passed), 0/14 at >= 714 kg. The edge sits at about 200 N of median push, against a
+nominal `0.05 * 640 kg * g` = 314 N: MuJoCo's soft contact lets the cart creep
+under less than the Coulomb limit, so the effective coefficient is lower than
+the configured one (at `0.02`, 95 N moved 950 kg, a ratio of about 0.01).
+
+Failure mechanism, one env at 999 kg and friction `0.05`: the forward hand force
+peaked at 300-350 N around 20-26 s while the cart crept 0.1 m and the robot
+walked 0.4 m on schedule into it. The force then turned to a pull of about
+-650 N with |F| near 1300 N as the robot hung on the handle, base height falling
+from 0.79 to 0.65 m. Hold ended at 44.5 s and the robot fell at 46.2 s.
+
+Whether a residual can save the top of the range is open: about 440 N nominal at
+900 kg means leaning the CoM roughly 0.4 m ahead of the feet at hand height,
+beyond a foot length (handle height not measured).
+
+**Re-measure if:** the `NoSensors` block or the cart asset changes, contact solver
+parameters (`impratio`, `solref`) change, or `cart_mass_range_kg` moves. The
+sweep scripts lived in a session scratchpad; rerun with
+`make_locomanip_residual_env_cfg(cart_push_friction=..., cart_mass_range_kg=...)`
+and zero actions.
 
 ## JVRC1 hand-force blend in mc_mjlab
 
@@ -1645,6 +1728,25 @@ initialization and episode resets, so mc_rtc cannot retain an earlier measuremen
 IMU, encoders, root/object state and actuator effort still reach the controller.
 Actuator effort is `qfrc_actuator`, not a contact force/torque sensor reading.
 
+The same tasks rely on LocomanipController's `NoSensors` override, which the
+controller's own `etc/LocomanipController.in.yaml` now enables
+(`OverwriteConfigKeys: [NoSensors]`, commit 5296b9f on its `mc_mjlab-setup`
+branch). `test_installed_controller_enables_no_sensors` fails when the installed
+config, a user override or a profile drops it. It zeroes every foot and hand
+impedance wrench gain, gives every foot phase the swing spring/damper, and disables
+`CentroidalManager.enableZmpFeedback`. The default foot gains integrate the force
+error with no spring behind it (single-support roll/pitch, double-support z), so
+on zero wrenches the feet drift until the robot collapses. ZMP feedback reached
+the robot only through those foot wrench targets, so dropping it loses nothing
+once the gains are zero. Balance is open loop: the CoM follows the preview plan,
+which still includes the *reference* hand wrench.
+
+Because the override lives in the controller, every LocomanipController task runs
+it: the demo, the hand-force feedback task and its safety derivative included.
+Those still receive measured wrenches, but `NoSensors` zeroes the hand impedance
+wrench gain, the path both those measurements and the feedback task's offsets act
+through. Their earlier results were measured under the default gains.
+
 MuJoCo continues computing force measurements for privileged critic observations,
 rewards and diagnostics. The actor has no direct wrench observations. Controller
 outputs observed by the actor now derive from the masked controller inputs.
@@ -1661,9 +1763,10 @@ explicitly restoring measured feedback; training the no-sensor experiment starts
 a new run. C4 governs checkpoint validity and C5 limits what training results
 establish about deployment in [hard-constraints.md](hard-constraints.md).
 
-**Re-measure if:** sensor routing, controller observers or force-dependent tasks
-change. Masking the measurements establishes the information restriction; it
-does not demonstrate that the existing controller can balance without them.
+**Re-measure if:** sensor routing, controller observers, force-dependent tasks,
+the installed `NoSensors` block or the cart mass range change. Under `NoSensors`
+the zero-residual controller completes every sampled episode (History), so task
+completion alone leaves the residual nothing to improve.
 
 **History:** on 2026-10-20, the audit of
 `2026-10-19_17-57-41_mass-range` found no direct actor force observations and
@@ -1693,3 +1796,24 @@ maximum absolute native wrench input was exactly 0 throughout; simulator force
 components reached 1485.612 N. The no-sensor base controller fell during motion.
 These are routing and baseline smoke checks, not policy evaluations or evidence
 that residual training can recover a controller deprived of foot feedback.
+
+Training `2026-10-20_14-08-38_no-force-feedback` (sensors masked, default gains)
+was stopped at iteration 820: task completion stayed at 1-4% from iteration 50 on,
+against 36% at iteration 50 and 84% at iteration 810 for `mass-range`, with nearly
+every episode ending in `collapsed`.
+
+Zero-residual config comparison on 2026-10-20: HRP5P, seed 42, 32 environments,
+the first episode of each, training cart-mass draws paired across conditions
+(19-790 kg, median 468), encoder bias on, 4 workers per condition. Sensors masked
+unless noted:
+
+| Controller config | Completed | Mean task_success | Median end | Failure masses (kg) |
+| --- | --- | --- | --- | --- |
+| Measured feedback, default gains | 20/32 | 0.47 | 49.26 s | all >= 437 |
+| Default gains | 1/32 | 0.03 | 18.46 s | 19-790 |
+| `NoSensors` | 32/32 | 1.00 | 49.28 s | none |
+| Feet-only wrench gains zeroed | 32/32 | 1.00 | 49.28 s | none |
+| `NoSensors` + `useActualStateForMpc: true` | 0/32 | 0.00 | 2.06 s | 19-790 |
+
+Feet-only matched `NoSensors` exactly, so the foot gains carry the whole effect.
+Re-planning from the measured CoM collapsed within about 2 s in every episode.

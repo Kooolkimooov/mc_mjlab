@@ -11,7 +11,7 @@ from mjlab.utils.lab_api.math import sample_uniform
 
 from mc_mjlab.tasks.locomanip.mdp.accessors import OBJECT_ENTITY, object_mass_kg
 
-CART_MASS_RANGE_KG = (1.0, 800.0)
+CART_MASS_RANGE_KG = (400.0, 900.0)
 
 # Laws in kilograms over a `mass_alpha_range`. `pseudo_inertia` draws all ten of its
 # parameters with one, and a (0, 0) range still gives exactly 0 under either.

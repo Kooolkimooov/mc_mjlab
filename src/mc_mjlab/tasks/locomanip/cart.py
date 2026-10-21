@@ -14,6 +14,9 @@ from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mc_mjlab.robots.robot_module import get_robot_module
 from mc_mjlab.tasks.locomanip.mdp.accessors import OBJECT_BODY
 
+#: Cart.xml's own push-axis friction, which the demo keeps for mc_mujoco parity.
+ASSET_PUSH_FRICTION = 0.02
+
 
 def cart_xml_path() -> Path:
   """Resolve the installed module's source asset or an explicit XML override."""
@@ -64,8 +67,11 @@ def cart_cfg(init_x: float) -> EntityCfg:
   )
 
 
-def cart_floor_contact(spec: mujoco.MjSpec) -> None:  # ty: ignore[unresolved-attribute]
-  """Restore the asset's directional friction against the scene's sole plane."""
+def cart_floor_contact(
+  spec: mujoco.MjSpec,  # ty: ignore[unresolved-attribute]
+  push_friction: float = ASSET_PUSH_FRICTION,
+) -> None:
+  """Restore the asset's directional friction pair, optionally retuning the push axis."""
   planes = [
     g
     for g in spec.geoms
@@ -78,7 +84,7 @@ def cart_floor_contact(spec: mujoco.MjSpec) -> None:  # ty: ignore[unresolved-at
     geomname1="cart/cart_box",
     geomname2=planes[0].name,
     condim=3,
-    friction=[0.5, 0.02, 0.005, 0.0001, 0.0001],
+    friction=[0.5, push_friction, 0.005, 0.0001, 0.0001],
   )
 
 

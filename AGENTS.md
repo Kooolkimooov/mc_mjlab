@@ -392,9 +392,13 @@ Cross-cutting invariants:
   must be fed (automatic when the model has sensors named
   `<ForceSensor>_fsensor`/`_tsensor`, `<BodySensor>_gyro`/`_accelerometer`).
   The locomanip position-residual experiment deliberately disables all measured
-  wrenches with `controller_force_feedback=False`; its motion/braking variants
-  inherit this. Critic/reward sensors remain simulated. Older checkpoints imply
-  `True` and must not load silently with `False`. docs/locomanip.md#controller_force_feedback
+  wrenches with `controller_force_feedback=False` and relies on the `NoSensors`
+  override that LocomanipController's own config enables, without which the
+  force-tracking feet drift and it falls; its motion/braking variants inherit both.
+  That override applies to every LocomanipController task, and a workspace built
+  from another controller branch drops it (a contract test checks it).
+  Critic/reward sensors remain simulated. Older checkpoints imply `True` and must
+  not load silently with `False`. docs/locomanip.md#controller_force_feedback
 
 # Gotchas
 
