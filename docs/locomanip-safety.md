@@ -2,9 +2,12 @@
 
 ## SAFETY_CONFIG
 
-**Current:** `etc/mc_rtc_hrp5_locomanip_safety.yaml` declares HRP5P and
+**Current:** the HRP5P locomanip profile itself
+(`etc/mc_rtc_hrp5_locomanip.yaml`), which declares HRP5P and
 LocomanipController, the 2 ms control period, and disabled GUI and native
-logging. The selected hand adaptation (`alpha: 0.03`,
+logging. Its former byte-identical copy, `etc/mc_rtc_hrp5_locomanip_safety.yaml`,
+was removed on 2026-10-21; the profile and provenance hashes cover content, not
+path, so neither changed. The selected hand adaptation (`alpha: 0.03`,
 `forceProjection: [0, 0, 0.98]`, `momentProjection: [0, 0, 0]`) already lives in
 the installed per-robot controller configuration. The run provenance snapshots
 the selector and installed controller files. The authority gate hashes both

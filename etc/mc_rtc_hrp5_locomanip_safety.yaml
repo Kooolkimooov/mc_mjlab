@@ -1,6 +1,0 @@
-MainRobot: HRP5P
-Enabled: LocomanipController
-Timestep: 0.002
-GUIServer:
-  Enable: false
-Log: false

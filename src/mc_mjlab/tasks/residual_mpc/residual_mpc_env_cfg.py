@@ -39,7 +39,7 @@ from mc_mjlab.robots.registry import (
 )
 from mc_mjlab.tasks.residual_mpc import mdp
 
-MC_RTC_YAML = MC_RTC_CONFIG_PATH / "mc_rtc_hrp5_logistic_ismpc_patched.yaml"
+MC_RTC_YAML = MC_RTC_CONFIG_PATH / "mc_rtc_hrp5_logistic_ismpc.yaml"
 
 BLEND_FACTOR = 0.1
 SELF_COLLISION_SENSOR = "self_collision"

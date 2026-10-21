@@ -23,13 +23,13 @@ class LocomanipProfile:
 
 
 HRP5P = LocomanipProfile(
-  mc_rtc_yaml=MC_RTC_CONFIG_PATH / "mc_rtc_hrp5_locomanip_patched.yaml",
+  mc_rtc_yaml=MC_RTC_CONFIG_PATH / "mc_rtc_hrp5_locomanip.yaml",
   cart_init_x=0.90,
   hand_bodies={"left": "Lhand_Link0_Plan2", "right": "Rhand_Link0_Plan2"},
 )
 
 JVRC1 = LocomanipProfile(
-  mc_rtc_yaml=MC_RTC_CONFIG_PATH / "mc_rtc_jvrc1_locomanip_patched.yaml",
+  mc_rtc_yaml=MC_RTC_CONFIG_PATH / "mc_rtc_jvrc1_locomanip.yaml",
   cart_init_x=0.75,
   hand_bodies={"left": "L_WRIST_Y_S", "right": "R_WRIST_Y_S"},
 )

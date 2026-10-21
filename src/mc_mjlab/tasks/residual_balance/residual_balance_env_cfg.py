@@ -44,7 +44,7 @@ from mc_mjlab.robots.registry import (
 )
 from mc_mjlab.tasks.residual_balance.curriculum_stages import ACHIEVEMENT_STAGES
 
-MC_RTC_YAML = MC_RTC_CONFIG_PATH / "mc_rtc_hrp5_logistic_ismpc_patched.yaml"
+MC_RTC_YAML = MC_RTC_CONFIG_PATH / "mc_rtc_hrp5_logistic_ismpc.yaml"
 
 # Only values used twice or more live here; the rest sit in the term that uses them.
 # Training bands chosen to cover the qualifier's own push magnitudes (0.40 and

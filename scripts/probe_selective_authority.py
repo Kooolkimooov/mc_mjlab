@@ -18,7 +18,7 @@ from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   select_residual_joints,
 )
 
-MC_RTC_YAML = MC_RTC_CONFIG_PATH / "mc_rtc_hrp5_logistic_ismpc_patched.yaml"
+MC_RTC_YAML = MC_RTC_CONFIG_PATH / "mc_rtc_hrp5_logistic_ismpc.yaml"
 
 
 @dataclass

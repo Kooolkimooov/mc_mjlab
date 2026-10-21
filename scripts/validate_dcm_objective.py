@@ -18,7 +18,7 @@ from mc_mjlab.tasks.residual_balance.residual_balance_env_cfg import (
   make_residual_balance_env_cfg,
 )
 
-MC_RTC_YAML = MC_RTC_CONFIG_PATH / "mc_rtc_hrp5_logistic_ismpc_patched.yaml"
+MC_RTC_YAML = MC_RTC_CONFIG_PATH / "mc_rtc_hrp5_logistic_ismpc.yaml"
 
 #: Candidate kernel widths to score the measured distribution through.
 STD_CANDIDATES = (0.03, 0.04, 0.05, 0.06, 0.08, 0.10)

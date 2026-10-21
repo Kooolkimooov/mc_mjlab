@@ -68,7 +68,7 @@ controller's own states in this repo. The controller-side per-robot file *can*
 reach states, through the root merge above.
 
 What stays in this repo is only what mc_rtc cannot know: which profile to run
-(`etc/mc_rtc_{hrp5,jvrc1}_locomanip_patched.yaml`, differing in `MainRobot`
+(`etc/mc_rtc_{hrp5,jvrc1}_locomanip.yaml`, differing in `MainRobot`
 alone), and `tasks/locomanip/profiles.py`'s two scene values -- where the cart
 stands and which MuJoCo bodies are the hands.
 
