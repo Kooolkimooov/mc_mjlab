@@ -404,7 +404,8 @@ def test_retuned_rewards_leave_raw_dcm_metric_and_other_task_weights_independent
     assert original.rewards[name].weight == base[name].weight
   for name in ("residual_magnitude", "residual_rate"):
     assert cfg.rewards[name].weight == REQUEST_WEIGHT
-    assert original.rewards[name].weight == POSITION_REQUEST_WEIGHT
+  assert original.rewards["residual_magnitude"].weight == 0.0
+  assert original.rewards["residual_rate"].weight == POSITION_REQUEST_WEIGHT
   assert (
     cfg.metrics["contact_dcm_stability"] == original.metrics["contact_dcm_stability"]
   )

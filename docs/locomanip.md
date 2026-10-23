@@ -1081,13 +1081,96 @@ its force effort quadrupled.
 
 ## POSITION_REQUEST_WEIGHT
 
-**Current:** the registered position-residual task charges `residual_magnitude`
-and `residual_rate` at **-0.05** each. `REQUEST_WEIGHT = -0.3` stays the
-builder default, so the hand-force feedback task (and the safety task built on
-it) and the motion task, whose rewards were retuned against -0.3
-(locomanip-motion.md#DCM_REWARD_WEIGHT), are unchanged. -0.05 is a hypothesis,
-not a measurement; it is the only weight changed, so the next run's delta is
-attributable to it.
+**Current:** the registered HRP5P/JVRC1 position-residual tasks set
+`residual_magnitude` to **0.0** and retain `residual_rate` at **-0.05**, in
+training and play. A steady corrective offset is free; changing it still costs.
+`REQUEST_WEIGHT = -0.3` stays the lower-level builder default. Hand-force
+feedback and its safety derivative are unchanged; the motion task explicitly
+restores its calibrated magnitude cost (locomanip-motion.md#DCM_REWARD_WEIGHT).
+No cart-error, progress or success reward is added. PPO, authority, observations,
+mass range and friction are unchanged.
+
+The former magnitude cost was small at the learned residual, but expensive at
+larger offsets: over 48 s, a constant normalized request on all 35 joints costs
+`0.05 * 35 * a^2 * 48`, or 21 at magnitude 0.5 and 84 at magnitude 1.0.
+The explicit fall charge is `200 * 0.02 = 4`. These are undiscounted component
+costs, not a comparison of complete trajectory returns. Removing magnitude cost
+tests whether the safety objective can learn sustained corrections without it.
+
+User-supplied probes reported constant equal requests on all 35 residual joints,
+over the full 51 s cycle, friction 0.05, seed 42, one episode per cell. At 750 kg,
+requests 0/-0.1/-0.25/-0.5 moved the cart 0.04/0.08/0.34/0.58 m; only -0.5
+completed. At 900 kg, 0/-0.25/-0.5/-1.0 moved it 0.00/0.05/0.26/0.47 m;
+only -1.0 completed. These reported measurements were not independently
+reproduced or matched to saved artifacts during this change. They motivate the
+experiment, not a claim of reliable recovery or correct placement.
+
+Start a fresh training run; do not bypass the changed training contract
+([C4](hard-constraints.md#c4-the-only-valid-resume-point-is-a-checkpoint-whose-sweep-exists)).
+Judge improvement using paired physical-failure and safe-completion measurements,
+with displacement diagnostic, rather than training reward or single episodes
+([C5](hard-constraints.md#c5-training-scale-metrics-are-not-deployment-scale-metrics),
+[C8](hard-constraints.md#c8-a-single-small-sample-failure-rate-is-not-a-verdict)).
+
+**Training `2026-10-22_10-00-47_no-magnitude-penalty`, read at iteration 1150 of
+2000 while still running:** HRP5P, 256 envs, seed 42, commit 6bdc265 plus this
+change. Its effective-training manifest differs from
+`2026-10-21_10-52-44_push-friction`'s ([cart_push_friction](#cart_push_friction)) only in the
+`residual_magnitude` weight, so the two are paired. Means of the per-iteration
+training metrics over 300-iteration blocks, push-friction / no-magnitude:
+
+| iterations | `safe_completion` | `fell_over` | `collapsed` | `task_success` | `contact_dcm_stability` metric | `policy_mean_rms` |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0-299 | 0.442 / 0.439 | 0.425 / 0.428 | 0.029 / 0.030 | 0.043 / 0.031 | 0.446 / 0.446 | 0.040 / 0.041 |
+| 300-599 | 0.528 / 0.510 | 0.450 / 0.482 | 0.040 / 0.033 | 0.058 / 0.049 | 0.442 / 0.444 | 0.067 / 0.070 |
+| 600-899 | 0.547 / 0.508 | 0.433 / 0.470 | 0.040 / 0.046 | 0.051 / 0.026 | 0.459 / 0.460 | 0.080 / 0.085 |
+| 900-1150 | 0.540 / 0.572 | 0.437 / 0.412 | 0.042 / 0.037 | 0.049 / 0.030 | 0.478 / 0.473 | 0.089 / 0.096 |
+
+The curves are indistinguishable so far: `safe_completion` and `fell_over`
+differences change sign and stay within 0.04, and the mean residual grew only
+3-8% larger without the magnitude cost. `task_success` reads lower in every
+block, by 0.009-0.025.
+
+The same comparison on this run's `model_1120`, first 9 episodes per env:
+`safe_completion` 35/72 = 48.6% -> 37/72 = 51.4%, +2.8% (p = 0.74); +7.3% at
+the pooled mass mix (CMH p = 0.21), the policy arm having drawn heavier carts
+(660.7 vs 641.2 kg). Against the -0.05 run's `model_1120`
+([cart_push_friction](#cart_push_friction)), policy to policy at the pooled
+mass mix, it reads -7.4% (CMH p = 0.14): removing the magnitude cost bought
+nothing measurable by iteration 1120.
+
+**Best checkpoints on the nominal model, 2026-10-23.** Each run's checkpoint at
+the argmax of `Episode_Metrics/safe_completion` smoothed over 60 iterations
+(evaluation.md#never-score-the-last-checkpoint): `model_1180` of the -0.05 run
+(0.614) and `model_1660` of this one (0.616), after it finished at 1999.
+`compare_to_baseline.py --task ... --nominal --num-envs 64 --num-workers 12
+--minutes 75`, both runs side by side on disjoint cores with no training job,
+episodes 2-20 / 2-21 of every env: 608 vs 608 and 640 vs 640. The two baseline
+arms agree at the pooled mass mix (-0.6%, CMH p = 0.39), so they are pooled.
+
+On the nominal model completion is a step in cart mass: each arm completes
+everything below its edge and nothing above it, with at most one episode per
+arm out of order.
+
+| | baseline (pooled) | -0.05 `model_1180` | 0.0 `model_1660` |
+| --- | --- | --- | --- |
+| 50% completion mass (logistic on 600-720 kg, bootstrap 95% CI) | 640 kg [638, 641] | 682 kg [680, 682] | 671 kg [669, 673] |
+| heaviest completed / lightest failed | 640.0 / 638.8 kg | 681.1 / 682.7 kg | 671.1 / 670.4 kg |
+| `safe_completion`, 400-900 kg | 630/1248 = 50.5% | 323/608 = 53.1% | 344/640 = 53.8% |
+| vs own baseline, raw (Fisher) | -- | +5.4% (p = 0.066) | +0.6% (p = 0.87) |
+| vs pooled baseline at the pooled mass mix (CMH, 50 kg strata) | -- | +7.0% (p = 8.2e-20) | +5.3% (p = 3.2e-14) |
+| `contact_dcm_stability` metric | 0.4570 | 0.5001 | 0.5230 |
+| `zmp_error` | 0.1409 | 0.1342 | 0.1324 |
+| `task_success` | 6.65% | 5.10% | 3.59% (p = 0.0028 vs pooled) |
+
+Policy to policy at 640-700 kg, the only band where the two differ: 41/59 =
+69.5% at -0.05 against 31/62 = 50.0% without the magnitude cost (Fisher
+p = 0.041); CMH over the full range p = 0.038. Dropping the cost raised the
+objective term (p = 1.9e-63) and moved the edge 11 kg less. Raw deltas are
+small because about 90% of a flat 400-900 kg draw lies where no arm differs.
+Randomization was off; how far encoder bias blurs the step is unmeasured for
+these checkpoints.
+The measurements below describe the earlier equal-weight configurations.
 
 **Why it came down: at -0.3 the penalty priced the policy's own exploration
 noise, not its residual.** The request is the sampled tanh-Gaussian output over
@@ -1194,16 +1277,25 @@ objective.
 request definition, or any other reward weight changes. Judge the next run by
 the windowed task metrics above, not by `Mean reward`.
 
-**History:** 2026-10-16 -- lowered from the shared -0.3 for the position task
-only, from run `2026-10-16_14-55-11` at iteration 250, without stopping it.
+**History:**
+- 2026-10-23 -- best checkpoints on the nominal model: the completion edge moved
+  31 kg without the magnitude cost against 42 kg with it.
+- 2026-10-22 -- removed only the registered position tasks' magnitude cost;
+  rate remains -0.05. Run `2026-10-22_10-00-47_no-magnitude-penalty` trains it;
+  its curves matched the -0.05 run through iteration 1150, and at
+  `model_1120` it scored no better.
+- 2026-10-16 -- lowered both costs from the shared -0.3 for the position task
+  only, from run `2026-10-16_14-55-11` at iteration 250, without stopping it.
 
 ## locomanip safety objective
 
 **Current:** the trainable position and hand-feedback tasks reward
 `contact_dcm_stability` at 1.0, retain `termination_penalty` -200 and `upright`
 -2.0, and charge `collapse_risk` -2.0, `rapid_tilt` -0.2, `foot_slip` -1.0,
-and the existing residual magnitude/rate costs -0.3 each (-0.05 on the
-position task, see [POSITION_REQUEST_WEIGHT](#position_request_weight)). `zmp_tracking` is
+and residual magnitude/rate costs -0.3 each on hand feedback. The position tasks
+use magnitude 0.0 and rate -0.05 (see
+[POSITION_REQUEST_WEIGHT](#position_request_weight)). Cart error, progress and
+success remain diagnostics, not rewards. `zmp_tracking` is
 retired as a reward but its `zmp_error` and `zmp_grounded` diagnostics remain.
 These weights are initial hypotheses, not a measured optimum.
 

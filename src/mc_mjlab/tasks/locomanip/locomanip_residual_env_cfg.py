@@ -79,7 +79,7 @@ SAFETY_HISTORY = 5
 
 #: Price of a bounded request, magnitude and rate alike.
 REQUEST_WEIGHT = -0.3
-#: The registered position task's price: at -0.3 its exploration noise alone cost
+#: The registered position task's rate price: at -0.3 exploration noise alone cost
 #: 85% of the objective. docs/locomanip.md#POSITION_REQUEST_WEIGHT
 POSITION_REQUEST_WEIGHT = -0.05
 
@@ -133,6 +133,7 @@ def locomanip_residual_env_cfg(
     console_output="single" if play else "none",
     print_residual_every=PLAY_PRINT_RESIDUAL_EVERY if play else 0,
   )
+  cfg.rewards["residual_magnitude"].weight = 0.0
   if play:
     cfg.scene.num_envs = 1
     # None, not 1: `--num-envs` is applied after this, so the pool has to size
