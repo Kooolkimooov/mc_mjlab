@@ -49,6 +49,11 @@ Launch long-running training inside tmux. Reuse an existing tmux session/window
 when one is available; create a named session only when none exists. Do not leave
 a training process owned only by an agent exec session.
 
+Commit every config or source change a run depends on before launching it. The
+run records only HEAD plus a working-tree diff (`<run>/git/mc_mjlab.diff`), so an
+uncommitted change leaves that diff as the sole record of what trained. The
+`[tool.uv.sources]` block is the one exception: it stays uncommitted.
+
 ```sh
 uv sync                                          # after choosing the mjlab source
 scripts/demos/run_test_mc_rtc.sh                 # viser viewer (1 env)
