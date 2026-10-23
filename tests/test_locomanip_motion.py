@@ -30,8 +30,8 @@ from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
 from mc_mjlab.tasks.locomanip import RESIDUAL_TASK_IDS
 from mc_mjlab.tasks.locomanip.locomanip_ppo_cfg import locomanip_ppo_cfg
 from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
-  POSITION_REQUEST_WEIGHT,
   REQUEST_WEIGHT,
+  locomanip_residual_env_cfg,
   make_locomanip_residual_env_cfg,
 )
 from mc_mjlab.tasks.locomanip.mdp import accessors
@@ -404,8 +404,11 @@ def test_retuned_rewards_leave_raw_dcm_metric_and_other_task_weights_independent
     assert original.rewards[name].weight == base[name].weight
   for name in ("residual_magnitude", "residual_rate"):
     assert cfg.rewards[name].weight == REQUEST_WEIGHT
-  assert original.rewards["residual_magnitude"].weight == 0.0
-  assert original.rewards["residual_rate"].weight == POSITION_REQUEST_WEIGHT
+  # Against a fresh build, not pinned values: retuning the position task is no failure.
+  fresh = locomanip_residual_env_cfg(HRP5P).rewards
+  assert {n: t.weight for n, t in original.rewards.items()} == {
+    n: t.weight for n, t in fresh.items()
+  }
   assert (
     cfg.metrics["contact_dcm_stability"] == original.metrics["contact_dcm_stability"]
   )

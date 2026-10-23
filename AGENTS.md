@@ -95,6 +95,10 @@ runnable. They still do not replace a live controller check; the demo is the sim
 root height (HRP5P z≈0.79, JVRC1 z≈0.83, RHPS1 z≈0.84) — a dropping z means the
 robot is falling.
 
+Tests check mechanisms and wiring, never tuning values: compare against the
+named constant or a fresh build, so retuning a config never fails a test. The
+frozen `locomanip_safety` task is the one deliberate exception.
+
 `describe --help` must stay independent of task loading. Task-specific inspection
 imports mjlab before our tasks and uses the registry's copied configurations;
 never build an environment, runner, action, or controller manager to inspect one.
