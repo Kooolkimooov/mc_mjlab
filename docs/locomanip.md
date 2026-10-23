@@ -546,6 +546,45 @@ Whether a residual can save the top of the range is open: about 440 N nominal at
 900 kg means leaning the CoM roughly 0.4 m ahead of the feet at hand height,
 beyond a foot length (handle height not measured).
 
+**Training `2026-10-21_10-52-44_push-friction`:** HRP5P position residual at
+commit 6bdc265 (400-900 kg, friction `0.05`, `NoSensors`, sensors masked,
+request magnitude/rate -0.05 each), 256 envs, seed 42, stopped at iteration
+1479 of 2000 (last checkpoint `model_1460.pt`). Means of the per-iteration
+training metrics over 30-iteration windows; at 64 steps per env and ~2390-step
+episodes, about 7 episodes close per iteration:
+
+| iterations | std | `safe_completion` | `fell_over` | `collapsed` | `controller_failed` | `task_success` | `contact_dcm_stability` metric | `policy_mean_rms` |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 30-59 | 0.099 | 0.398 | 0.391 | 0.021 | 0.000 | 0.041 | 0.407 | 0.025 |
+| 330-359 | 0.077 | 0.558 | 0.439 | 0.028 | 0.000 | 0.033 | 0.433 | 0.061 |
+| 630-659 | 0.061 | 0.551 | 0.465 | 0.024 | 0.000 | 0.048 | 0.451 | 0.075 |
+| 930-959 | 0.050 | 0.513 | 0.434 | 0.072 | 0.000 | 0.058 | 0.473 | 0.087 |
+| 1230-1259 | 0.050 | 0.553 | 0.428 | 0.025 | 0.005 | 0.045 | 0.484 | 0.097 |
+| 1450-1479 | 0.050 | 0.502 | 0.430 | 0.073 | 0.010 | 0.016 | 0.498 | 0.107 |
+
+`safe_completion` rose from 0.40 to about 0.55 by iteration 330 and stayed
+there; `Mean reward` kept climbing (11.3 -> 16.9) on the `contact_dcm_stability`
+term (0.368 -> 0.453 per second) and a rate cost shrinking with std
+(-0.031 -> -0.010). The failures are the zero-residual mechanism, `fell_over` near the end of
+the cycle, not the `collapsed` and `controller_failed` (0.04-0.16 and 0.09-0.17)
+of `2026-10-19_17-57-41_mass-range`, which ran measured feedback over lighter
+carts. `task_success` stayed at 0.02-0.10: completed episodes rarely leave the
+cart within 0.15 m. The magnitude cost read -0.015 to -0.022 per second against
+an objective term of 0.37-0.45, so it barely priced the mean residual
+([POSITION_REQUEST_WEIGHT](#position_request_weight)).
+
+`compare_to_baseline.py --task ... --minutes 30` on `model_1120` (16 envs, 6
+workers, randomization on, beside a training job), first 9/8 episodes per env:
+`safe_completion` 30/72 = 41.7% -> 37/64 = 57.8%, +16.1% (p = 0.06); every
+gain a fall avoided (`fell_over` 52.8% -> 42.2%, `collapsed` 5.6% -> 0%), no
+controller failures in either arm. By cart mass, 400-500 kg 12/12 vs 10/10,
+500-600 kg 14/16 vs 14/14, 600-700 kg 4/12 vs 11/11, 700-800 kg 0/10 vs 2/18,
+800-900 kg 0/22 vs 0/11; the heaviest completion was 677 vs 709 kg. Reweighted
+to the pooled mass mix the delta is +16.3% (CMH p = 0.001), but each arm holds
+only 8 encoder-bias draws, so that p overstates confidence
+(evaluation.md#episodes-are-not-independent-samples). `task_success` is
+1/72 vs 4/64, none above 500 kg.
+
 **Re-measure if:** the `NoSensors` block or the cart asset changes, contact solver
 parameters (`impratio`, `solref`) change, or `cart_mass_range_kg` moves. The
 sweep scripts lived in a session scratchpad; rerun with
