@@ -33,7 +33,6 @@ def locomanip_motion_env_cfg(
   """Build joint motion authority with time for a slower route to finish."""
   # Its rewards were retuned against this price. docs/locomanip-motion.md#DCM_REWARD_WEIGHT
   cfg = locomanip_residual_env_cfg(profile, play=play, request_weight=REQUEST_WEIGHT)
-  cfg.rewards["residual_magnitude"].weight = REQUEST_WEIGHT
   cfg.episode_length_s *= MOTION_EPISODE_SCALE
   base = cfg.actions[accessors.ACTION_NAME]
   carried = {field.name: getattr(base, field.name) for field in fields(base)}

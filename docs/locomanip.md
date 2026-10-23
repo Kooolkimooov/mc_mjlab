@@ -1081,18 +1081,18 @@ its force effort quadrupled.
 
 ## POSITION_REQUEST_WEIGHT
 
-**Current:** the registered HRP5P/JVRC1 position-residual tasks set
-`residual_magnitude` to **0.0** and retain `residual_rate` at **-0.05**, in
-training and play. A steady corrective offset is free; changing it still costs.
-`REQUEST_WEIGHT = -0.3` stays the lower-level builder default. Hand-force
-feedback and its safety derivative are unchanged; the motion task explicitly
-restores its calibrated magnitude cost (locomanip-motion.md#DCM_REWARD_WEIGHT).
-No cart-error, progress or success reward is added. PPO, authority, observations,
-mass range and friction are unchanged.
+**Current:** the registered HRP5P/JVRC1 position-residual tasks charge
+`residual_magnitude` and `residual_rate` at **-0.05** each, in training and play.
+`REQUEST_WEIGHT = -0.3` stays the lower-level builder default, which hand-force
+feedback, its safety derivative and the motion task
+(locomanip-motion.md#DCM_REWARD_WEIGHT) keep. The magnitude cost was dropped to
+0.0 for one run and restored after its best checkpoint moved the completion edge
+less (below).
 
-The former magnitude cost was small at the learned residual, but expensive at
-larger offsets: over 48 s, a constant normalized request on all 35 joints costs
-`0.05 * 35 * a^2 * 48`, or 21 at magnitude 0.5 and 84 at magnitude 1.0.
+**Why 0.0 was tried.** The magnitude cost was small at the learned residual, but
+expensive at larger offsets: over 48 s, a constant normalized request on all 35
+joints costs `0.05 * 35 * a^2 * 48`, or 21 at magnitude 0.5 and 84 at magnitude
+1.0.
 The explicit fall charge is `200 * 0.02 = 4`. These are undiscounted component
 costs, not a comparison of complete trajectory returns. Removing magnitude cost
 tests whether the safety objective can learn sustained corrections without it.
@@ -1278,8 +1278,8 @@ request definition, or any other reward weight changes. Judge the next run by
 the windowed task metrics above, not by `Mean reward`.
 
 **History:**
-- 2026-10-23 -- best checkpoints on the nominal model: the completion edge moved
-  31 kg without the magnitude cost against 42 kg with it.
+- 2026-10-23 -- magnitude cost restored to -0.05: at the best checkpoints on the
+  nominal model the completion edge moved 31 kg without it against 42 kg with it.
 - 2026-10-22 -- removed only the registered position tasks' magnitude cost;
   rate remains -0.05. Run `2026-10-22_10-00-47_no-magnitude-penalty` trains it;
   its curves matched the -0.05 run through iteration 1150, and at
@@ -1293,9 +1293,8 @@ the windowed task metrics above, not by `Mean reward`.
 `contact_dcm_stability` at 1.0, retain `termination_penalty` -200 and `upright`
 -2.0, and charge `collapse_risk` -2.0, `rapid_tilt` -0.2, `foot_slip` -1.0,
 and residual magnitude/rate costs -0.3 each on hand feedback. The position tasks
-use magnitude 0.0 and rate -0.05 (see
-[POSITION_REQUEST_WEIGHT](#position_request_weight)). Cart error, progress and
-success remain diagnostics, not rewards. `zmp_tracking` is
+charge -0.05 each (see [POSITION_REQUEST_WEIGHT](#position_request_weight)).
+Cart error, progress and success remain diagnostics, not rewards. `zmp_tracking` is
 retired as a reward but its `zmp_error` and `zmp_grounded` diagnostics remain.
 These weights are initial hypotheses, not a measured optimum.
 
