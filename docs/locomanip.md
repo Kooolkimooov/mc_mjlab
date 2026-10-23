@@ -377,8 +377,58 @@ carts the same offsets as light ones.
 `TORQUE_FRACTION` changes.
 
 **History:**
+- 2026-10-23 -- the registered HRP5P position task multiplies the arms' scale by
+  [residual_scale_gains](#residual_scale_gains); this section still holds for
+  every other joint and task.
 - 2026-09-16 -- calibrated from a uniform 0.01 rad inherited from
   `residual_balance`, whose ankle-authority screen has no bearing on pushing.
+
+## residual_scale_gains
+
+**Current:** `LocomanipProfile.residual_scale_gains`, a joint regex to a
+multiplier on [RESIDUAL_FALLBACK_SCALE](#residual_fallback_scale)'s
+`0.2 * tau_limit / kp`. The clip follows the scale. HRP5P doubles shoulders and
+elbows (`[LR](S[CPRY]|EP)`, 10 joints): shoulders now reach 1.63-4.02 deg, and the
+elbows 1.14 deg. Legs, waist, head and wrists keep the hardware scale. JVRC1 has
+no gains because its arms were never probed. Only the registered position task
+(`locomanip_residual_env_cfg`) applies them. The motion task opts out with
+`apply_scale_gains=False`. `make_locomanip_residual_env_cfg` (the feedback and
+safety tasks, the probes) builds without them. A regex that matches no residual
+joint fails the build.
+
+**Why the arms, and why 2x:** in the joint-group probe under
+[RESIDUAL_FALLBACK_SCALE](#residual_fallback_scale), the arms alone at a
+constant -1.0 complete up to 800 kg. At -0.5 they complete only 700 kg. The best
+checkpoints never come near: no joint above 95% of its clip, and offsets that do
+not grow with the cart. At 2x, -0.5 commands what -1.0 did before, which puts the
+offset inside the range exploration reaches. `residual_magnitude` is charged on
+the normalized request, so the same radians cost a quarter. The waist stays out:
+alone at -1.0 it collapses the robot from 750 kg. Changing one group also keeps
+the run's result attributable to it.
+
+**Checkpoints:** the scale and clip are part of the actor-interface contract
+(`effective_training_manifest.json`, `policy_interface.actions`). Position
+checkpoints trained before this change (`model_1180`, `model_1660`) no longer
+match the registered task. Evaluating them again needs a revision from before
+this change.
+
+**Idea for later, not implemented:** set the arm limits directly in degrees
+instead of as a multiplier on the torque-derived scale. The residual is a
+position offset; torque only sizes it. `0.2 * tau / kp` is the offset at which the
+PD would push 20% of the joint's torque limit against a held joint, which makes
+the push comparable across joints with very different `kp`: 0.01 rad is 25% of a
+knee's limit (kp 36000) and 3.6% of a wrist's (kp 1386). The probe found the
+*angles* that carry a heavy cart, though. Absolute limits for the joints that
+push would state that requirement without going through the PD gains, and a
+gains-file change would not silently move them. The cost: they stop scaling
+with `TORQUE_FRACTION`, and the per-joint torque comparability is lost.
+
+**Re-measure if:** a run with the gains finishes (compare against `model_1180`
+with the same nominal protocol, [POSITION_REQUEST_WEIGHT](#position_request_weight)),
+or the probe's group table changes.
+
+**History:**
+- 2026-10-23 -- added at 2x on HRP5P's arms, from the joint-group probe.
 
 ## Retired object tracking width
 

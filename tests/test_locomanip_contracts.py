@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from types import SimpleNamespace
 from typing import cast
 
@@ -39,12 +40,13 @@ from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
   SOLE_VELOCIMETERS,
   SUCCESS_POSITION_TOLERANCE_M,
   SUCCESS_YAW_TOLERANCE_RAD,
+  locomanip_residual_env_cfg,
   make_locomanip_residual_env_cfg,
 )
 from mc_mjlab.tasks.locomanip.mdp import accessors, metrics, rewards
 from mc_mjlab.tasks.locomanip.mdp import observations as locomanip_observations
 from mc_mjlab.tasks.locomanip.mdp.events import FLAT_MASS, LOG_MASS, mass_alpha_range
-from mc_mjlab.tasks.locomanip.profiles import HRP5P, PROFILES
+from mc_mjlab.tasks.locomanip.profiles import HRP5P, PROFILES, LocomanipProfile
 from mc_mjlab.utils.controller_install import (
   controller_config_paths,
   user_controller_config_paths,
@@ -134,6 +136,29 @@ def test_residual_authority_is_per_joint_hardware_authority() -> None:
   halved = _scales(make_locomanip_residual_env_cfg(torque_fraction=TORQUE_FRACTION / 2))
   for pattern, value in halved.items():
     assert value == pytest.approx(full[pattern] / 2)
+
+
+@pytest.mark.parametrize("profile", PROFILES)
+def test_registered_scale_applies_the_profile_gains(profile: LocomanipProfile) -> None:
+  """Verify each residual joint a profile regex matches, and only those, is scaled."""
+  hardware = make_locomanip_residual_env_cfg(profile=profile)
+  registered = _scales(locomanip_residual_env_cfg(profile))
+  for joint in _action(hardware).residual_actuator_names or ():
+    gains = [
+      gain
+      for pattern, gain in profile.residual_scale_gains.items()
+      if re.fullmatch(pattern, joint)
+    ]
+    expected = _scales(hardware)[re.escape(joint)] * math.prod(gains)
+    assert registered[re.escape(joint)] == pytest.approx(expected)
+  unscaled = locomanip_residual_env_cfg(profile, apply_scale_gains=False)
+  assert _scales(unscaled) == _scales(hardware)
+
+
+def test_a_scale_gain_matching_no_joint_raises() -> None:
+  """Verify a mistyped joint regex fails the build instead of scaling nothing."""
+  with pytest.raises(ValueError, match="matches no residual joint"):
+    make_locomanip_residual_env_cfg(residual_scale_gains={"NOT_A_JOINT": 2.0})
 
 
 def test_declared_datastore_outputs_cover_the_terms() -> None:

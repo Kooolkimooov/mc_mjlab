@@ -32,7 +32,9 @@ def locomanip_motion_env_cfg(
 ) -> ManagerBasedRlEnvCfg:
   """Build joint motion authority with time for a slower route to finish."""
   # Its rewards were retuned against this price. docs/locomanip-motion.md#DCM_REWARD_WEIGHT
-  cfg = locomanip_residual_env_cfg(profile, play=play, request_weight=REQUEST_WEIGHT)
+  cfg = locomanip_residual_env_cfg(
+    profile, play=play, request_weight=REQUEST_WEIGHT, apply_scale_gains=False
+  )
   cfg.episode_length_s *= MOTION_EPISODE_SCALE
   base = cfg.actions[accessors.ACTION_NAME]
   carried = {field.name: getattr(base, field.name) for field in fields(base)}

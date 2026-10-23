@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import functools
 import math
+import re
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import Literal
@@ -125,11 +127,13 @@ def locomanip_residual_env_cfg(
   profile: LocomanipProfile,
   play: bool = False,
   request_weight: float = POSITION_REQUEST_WEIGHT,
+  apply_scale_gains: bool = True,
 ) -> ManagerBasedRlEnvCfg:
   """Build the trainable locomanip residual task, or its viewer variant."""
   cfg = make_locomanip_residual_env_cfg(
     profile=profile,
     request_weight=request_weight,
+    residual_scale_gains=profile.residual_scale_gains if apply_scale_gains else None,
     console_output="single" if play else "none",
     print_residual_every=PLAY_PRINT_RESIDUAL_EVERY if play else 0,
   )
@@ -160,6 +164,7 @@ def make_locomanip_residual_env_cfg(
   num_workers: int = NUM_WORKERS,
   episode_length_s: float = EPISODE_LENGTH_S,
   torque_fraction: float = TORQUE_FRACTION,
+  residual_scale_gains: Mapping[str, float] | None = None,
   cart_pose_range: dict[str, tuple[float, float]] | None = None,
   cart_mass_range_kg: tuple[float, float] | None = CART_MASS_RANGE_KG,
   cart_push_friction: float = CART_PUSH_FRICTION,
@@ -181,6 +186,7 @@ def make_locomanip_residual_env_cfg(
       robot,
       mc_rtc_yaml,
       torque_fraction,
+      residual_scale_gains or {},
       num_workers,
       console_output,
       print_residual_every,
@@ -222,6 +228,7 @@ def _actions(
   robot: RobotSpec,
   mc_rtc_yaml: Path,
   torque_fraction: float,
+  scale_gains: Mapping[str, float],
   num_workers: int | None,
   console_output: Literal["none", "single", "all"],
   print_residual_every: int,
@@ -242,6 +249,7 @@ def _actions(
       pattern: value * torque_fraction / TORQUE_FRACTION
       for pattern, value in scales.items()
     }
+  scales = _apply_scale_gains(scales, robot.get_residual_joints(), scale_gains)
 
   return {
     locomanip_mdp.accessors.ACTION_NAME: McRtcResidualJointPositionActionCfg(
@@ -278,6 +286,22 @@ def _actions(
       print_residual_every=print_residual_every,
     )
   }
+
+
+def _apply_scale_gains(
+  scales: dict[str, float],
+  residual_joints: tuple[str, ...],
+  gains: Mapping[str, float],
+) -> dict[str, float]:
+  """Multiply the residual joints each regex matches; a regex matching none raises."""
+  scaled = dict(scales)
+  for pattern, gain in gains.items():
+    matched = [joint for joint in residual_joints if re.fullmatch(pattern, joint)]
+    if not matched:
+      raise ValueError(f"scale gain {pattern!r} matches no residual joint")
+    for joint in matched:
+      scaled[re.escape(joint)] *= gain
+  return scaled
 
 
 def _observations() -> dict[str, ObservationGroupCfg]:

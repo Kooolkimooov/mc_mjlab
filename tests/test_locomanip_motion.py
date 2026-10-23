@@ -390,6 +390,12 @@ def test_decision_interval_respects_policy_timestep() -> None:
     action._setup_action_extensions(action.cfg)
 
 
+def test_motion_task_keeps_the_hardware_residual_scale() -> None:
+  """Verify the position task's per-joint scale gains do not reach the motion task."""
+  scale = load_env_cfg(TASK_IDS["HRP5P"]).actions[accessors.ACTION_NAME].scale
+  assert scale == make_locomanip_residual_env_cfg().actions[accessors.ACTION_NAME].scale
+
+
 def test_retuned_rewards_leave_raw_dcm_metric_and_other_task_weights_independent() -> (
   None
 ):
