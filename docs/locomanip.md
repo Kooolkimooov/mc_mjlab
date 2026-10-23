@@ -344,6 +344,35 @@ Nobody fell (minimum base height 0.703-0.728 m), and the authority survives a
 30x payload, which is the regime that matters. The asymmetry is the controller's
 own push direction: a positive residual adds to it.
 
+**By joint group, at the push-friction payloads, 2026-10-23.**
+`probe_locomanip_authority.py --groups all,legs,waist,arms,wrists
+--levels=-1.0,-0.5,0.5,1.0 --seconds 52`, one run per mass: HRP5P, friction
+`0.05`, encoder bias off, seed 42, one episode per cell, a constant normalized
+request on the group for the whole cycle. Groups: legs = hip, knee and ankle
+(12 joints); waist = `W[PRY]` (3); arms = shoulder and elbow (10); wrists = wrist
+and hand yaw (8). Cell: completed (OK), `fell_over` (F) or `collapsed` (C), and
+cart travel:
+
+| group | level | 700 kg | 750 kg | 800 kg | 900 kg |
+| --- | --- | --- | --- | --- | --- |
+| zero | 0.0 | F +0.09 m | F +0.04 m | F +0.01 m | F +0.00 m |
+| all | -1.0 | OK +0.62 m | OK +0.58 m | OK +0.54 m | OK +0.47 m |
+| all | -0.5 | OK +0.63 m | OK +0.58 m | OK +0.50 m | F +0.26 m |
+| all | +0.5 / +1.0 | F, -0.05 to -0.06 m | F | F | F |
+| arms | -1.0 | OK +0.64 m | OK +0.60 m | OK +0.54 m | C +0.33 m |
+| arms | -0.5 | OK +0.61 m | C +0.44 m | F +0.10 m | F +0.05 m |
+| waist | -1.0 | OK +0.60 m | C +0.45 m | F +0.09 m | F +0.06 m |
+| waist | -0.5 | F +0.39 m | F +0.10 m | F +0.05 m | F +0.02 m |
+| legs | any of the four | F, <= +0.10 m | F | F | F |
+| wrists | any of the four | F, <= +0.11 m | F | F | F |
+| arms, waist | +0.5 / +1.0 | F, <= +0.04 m | F | F | F |
+
+The authority that carries a heavy cart is the arms', then the waist's, and only
+negative: legs and wrists move nothing at full scale. The best checkpoints use a
+fraction of it -- 32 nominal episodes at 600-760 kg, no joint ever at 95% of its
+clip, largest mean offset waist pitch -0.14 (`model_1180`) -- and give heavy
+carts the same offsets as light ones.
+
 **Re-measure if:** the PD gains file, the robot, the residual joint set or
 `TORQUE_FRACTION` changes.
 
@@ -1101,9 +1130,9 @@ User-supplied probes reported constant equal requests on all 35 residual joints,
 over the full 51 s cycle, friction 0.05, seed 42, one episode per cell. At 750 kg,
 requests 0/-0.1/-0.25/-0.5 moved the cart 0.04/0.08/0.34/0.58 m; only -0.5
 completed. At 900 kg, 0/-0.25/-0.5/-1.0 moved it 0.00/0.05/0.26/0.47 m;
-only -1.0 completed. These reported measurements were not independently
-reproduced or matched to saved artifacts during this change. They motivate the
-experiment, not a claim of reliable recovery or correct placement.
+only -1.0 completed. Reproduced 2026-10-23 and split by joint group
+([RESIDUAL_FALLBACK_SCALE](#residual_fallback_scale)); neither claims correct
+placement.
 
 Start a fresh training run; do not bypass the changed training contract
 ([C4](hard-constraints.md#c4-the-only-valid-resume-point-is-a-checkpoint-whose-sweep-exists)).

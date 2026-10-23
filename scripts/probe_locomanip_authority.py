@@ -10,6 +10,7 @@ from typing import Any
 
 from evaluation.locomanip_authority import (
   CHANNELS,
+  JOINT_GROUPS,
   AuthorityTrace,
   action_matrix,
   conditions,
@@ -34,7 +35,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
   levels = [float(level) for level in (args.levels or default_levels).split(",")]
   if any(not math.isfinite(level) or abs(level) > 1 for level in levels):
     raise ValueError("levels must be finite normalized actions in [-1, 1]")
-  rows = conditions(args.task, levels, args.channel)
+  groups = tuple(g.strip() for g in args.groups.split(",") if g.strip())
+  rows = conditions(args.task, levels, args.channel, groups)
   builder = (
     make_locomanip_feedback_env_cfg
     if args.task == "feedback"
@@ -74,6 +76,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     "residual_unit": "N" if args.task == "feedback" else "rad",
     "seed": 42,
     "encoder_bias": False,
+    "groups": {g: JOINT_GROUPS[g] for g in groups} if args.task == "position" else None,
     "arms": results,
   }
 
@@ -85,6 +88,11 @@ def main() -> None:
   parser.add_argument("--robot", choices=sorted(ROBOTS), default="HRP5P")
   parser.add_argument("--channel", choices=("all", *CHANNELS), default="all")
   parser.add_argument("--levels")
+  parser.add_argument(
+    "--groups",
+    default="all",
+    help=f"position task: comma-separated joint groups from {', '.join(JOINT_GROUPS)}",
+  )
   parser.add_argument("--force-scale", type=float, default=50.0)
   parser.add_argument("--mass", type=float, default=10.0)
   parser.add_argument("--seconds", type=float, default=16.0)
@@ -94,6 +102,9 @@ def main() -> None:
   args = parser.parse_args()
   if args.seconds <= 0 or args.mass <= 0 or args.num_workers < 1:
     parser.error("seconds, mass and num-workers must be positive")
+  unknown = set(args.groups.split(",")) - set(JOINT_GROUPS)
+  if unknown:
+    parser.error(f"unknown joint groups: {', '.join(sorted(unknown))}")
   result = run(args)
   if args.output is not None:
     args.output.parent.mkdir(parents=True, exist_ok=True)

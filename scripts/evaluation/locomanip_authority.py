@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 import torch
@@ -13,12 +14,25 @@ if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
 CHANNELS = ("left_fx", "left_fy", "left_fz", "right_fx", "right_fy", "right_fz")
+#: HRP5P residual joints by body part; one matching nothing on the robot raises.
+JOINT_GROUPS = {
+  "all": r".*",
+  "legs": r"[LR](C[PRY]|KP|A[PR])",
+  "waist": r"W[PRY]",
+  "head": r"H[PY]",
+  "arms": r"[LR](S[CPRY]|EP)",
+  "wrists": r"[LR](WR[PRY]|HDY)",
+}
 
 
-def conditions(task: str, levels: list[float], channel: str) -> list[dict[str, Any]]:
-  """Include repeated zero controls and independent signed force excitations."""
+def conditions(
+  task: str, levels: list[float], channel: str, groups: tuple[str, ...] = ("all",)
+) -> list[dict[str, Any]]:
+  """Include repeated zero controls and independent signed excitations."""
   if task == "position":
-    return [{"channel": "all", "level": level} for level in [0.0, *levels]]
+    rows = [{"channel": "zero", "level": 0.0}]
+    rows.extend({"channel": g, "level": level} for g in groups for level in levels)
+    return rows
 
   rows = [{"channel": "zero", "level": 0.0} for _ in range(3)]
   channels = CHANNELS if channel == "all" else (channel,)
@@ -34,11 +48,22 @@ def action_matrix(env: ManagerBasedRlEnv, rows: list[dict[str, Any]]) -> torch.T
     env.num_envs, env.action_manager.total_action_dim, device=env.device
   )
   for index, row in enumerate(rows):
-    if row["channel"] == "all":
-      actions[index] = row["level"]
+    if row["channel"] in JOINT_GROUPS:
+      actions[index, group_columns(env, row["channel"])] = row["level"]
     elif row["channel"] != "zero":
       actions[index, CHANNELS.index(row["channel"])] = row["level"]
   return actions
+
+
+def group_columns(env: ManagerBasedRlEnv, group: str) -> list[int]:
+  """Residual action columns of the joints a group names."""
+  names = accessors.residual_action(env).residual_names
+  columns = [
+    i for i, name in enumerate(names) if re.fullmatch(JOINT_GROUPS[group], name)
+  ]
+  if not columns:
+    raise ValueError(f"joint group {group!r} matches no residual joint on this robot")
+  return columns
 
 
 class AuthorityTrace:
@@ -129,6 +154,14 @@ class AuthorityTrace:
       "matched_steps": int(self.response_steps[index]),
       "terminated": terminated,
       "truncated": truncated,
+      "termination": next(
+        (
+          name
+          for name in env.termination_manager.active_terms
+          if bool(env.termination_manager.get_term(name)[index])
+        ),
+        None,
+      ),
       "controller_failed": bool(term.controller_failed[index]),
       "worker_failed": bool(term.controller_worker_failed[index]),
     }
