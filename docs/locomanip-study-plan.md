@@ -336,6 +336,30 @@ until outcome evidence supports it.
   `logs/locomanip-study/zero-reordered`. These are repeatability tests, not
   qualification samples. Launch in existing `mc_mjlab_training:2.1`.
 
+## Zero-policy repeatability
+
+**Current:** Smoke cohort `docs/locomanip-study-smoke.json` (400/700/900 kg, seed
+1001, one nominal draw, fresh and recycled: 6 conditions) at `bb98c3b`. Four
+zero-policy sources, `zero-smoke` (batch 6) and `zero-reordered` (`--reverse
+--batch-size 3`) with two arms each, agree on every outcome and termination
+label. 400 kg completes at 49.26-49.28 s; 700 and 900 kg end `fell_over` at
+46.18-46.22 s in both lifecycles. Spreads across the four sources: displacement
+<= 0.0109 m, end time <= 0.040 s. Runs are not bitwise repeatable, so live
+equivalence checks are judged against these spreads. Report:
+`logs/locomanip-study/zero-repeatability.json`, from `uv run python
+scripts/compare_study_runs.py logs/locomanip-study/zero-smoke
+logs/locomanip-study/zero-reordered`.
+
+**Re-measure if:** rollout resets, payload application, batching or the
+controller change.
+
+**History:**
+- 2026-10-26 14:30 — first live attempt stopped at the first completed warm-up:
+  `RuntimeError: Float did not match Long`, integer JSON masses compared against
+  the applied float mass. Fixed in `bb98c3b`; the failed directory is kept as
+  `zero-smoke-failed-long-mass`.
+- 2026-10-26 14:35-14:50 — the two runs above, in `mc_mjlab_training:2.1`.
+
 ## S1 implementation record
 
 **Current:** `locomanip_study` registers an independent original-scale control;
