@@ -13,7 +13,7 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | S3 PD telemetry | complete | `pd_telemetry` `f963cb2`: motor table and chain trajectory identical, stepped-only samples, partial resets (7 tests) | live: no outcome disagreement, spread 0.017 m; +3% step time; rate traces sum exactly | `zero-telemetry/`, `zero-telemetry-rate/` | Used by S4 | 2026-10-26 15:20 +09:00 |
 | S4 phase diagnosis | active | nominal probe `868cffb`: 16 arms x 6 masses x 2 lifecycles, 192/192 segmented | combined arms+waist -1 completes 600-900 kg; references stop at 650; all failures 1.4-4.7 s after the scheduled release | `phase-nominal/summary.json` | Matched encoder draws running (`phase-encoder/`) | 2026-10-26 16:55 +09:00 |
 | S5 focused exploration | active | `StudySpec` arms-waist/coordinated `071c50c`, init fix `ed098ff`; live: level-0 requests equal zero and identical joint requests agree across all three tasks | not trained | `s5-mapping/` | Training needs approval (S9 items 2-3) | 2026-10-26 16:50 +09:00 |
-| S6 observation history | active | history-10/20 `6287f6f`: all continuous actor channels and critic copies; phase/completion instantaneous; original checkpoint rejected live | pending | none | Family smoke, then training needs approval | 2026-10-26 15:55 +09:00 |
+| S6 observation history | active | history-10/20 `6287f6f`; live family smoke: both build, recycle and match zero at level 0 (0.0042 m, 0.06 s); `model_1180` rejected | not trained | `history-smoke/` | Training needs approval (S9 items 4-5) | 2026-10-26 17:45 +09:00 |
 | S7 objective audit | rejected (current evidence) | `059681f`; audit of 541 matched failure/success pairs from S4 nominal | current defect 354/541 (discounted); candidate leaves 312/541, 0/541 only without residual costs | `phase-nominal/objective.json` | Re-run when learned policies complete heavy loads | 2026-10-26 16:55 +09:00 |
 | S8 robustness/transitions | active | 38 typed scenarios `97244ba` (3 tests); Hold handover `579fbec`; worker-replacement check `da810e5` | pending | none | Live scenario smoke and worker kill once a pane is free | 2026-10-26 15:55 +09:00 |
 | S9 campaign | planned | No new training launched | pending | none | S2 qualification and family smoke tests first | 2026-10-26 14:20 +09:00 |
@@ -486,6 +486,10 @@ history semantics change.
   --masses 700,800 --lifecycles fresh,recycled --profiles
   control,arms-waist,coordinated --groups arms,waist --levels 0,-1 --arms
   zero,control/arms/-1,control/waist/-1,arms-waist/arms/0,arms-waist/arms/-1,coordinated/arms/0,coordinated/arms/-1,coordinated/waist/-1`.
+- 2026-10-26 17:06-17:40 — history family smoke (`history-smoke/`, `0dbd1b4`,
+  700 kg, fresh and recycled, nominal): history-10 and history-20 at level 0 match
+  zero (identical outcomes, displacement within 0.0042 m, time within 0.06 s);
+  arms -1 completes both conditions under both, as under the control.
 - 2026-10-26 15:48 — first live build of the coordinated term failed: mjlab's
   `BaseAction` sized buffers from `action_dim` before grouping existed
   (`AttributeError: _residual_action_dim`). Fixed in `ed098ff`; config tests could
@@ -549,6 +553,12 @@ change.
   12/12 records measured, evaluator exit 0, and outcomes agree with the earlier
   zero runs (8 sources, displacement spread 0.017 m, time 0.06 s). The first
   harness attempt crashed on `/proc` names with spaces and is not a result.
+- 2026-10-26 17:05- — gain sensitivity (`sensitivity/`, `51c3d61`, fresh,
+  nominal, one condition per mass): installed gains x0.9 make zero and both
+  references fail at every mass from 600 kg (nominally they complete 600, and the
+  references 650), while combined -1 completes 600-800 kg; gains x1.1 let zero
+  and the references complete 600-700 kg and fail at 800, combined -1 again
+  completes all four. Outcomes are very sensitive to +/-10% on the installed gains.
 - 2026-10-26 16:17-17:04 — scenario smoke (`8f81e2b`), zero versus `original`
   at 650 kg fresh (`docs/locomanip-study-scenario-smoke.json`; one condition each,
   so no rate is estimated). `original` completes (49.3 s) under 10 ms delay, foot
