@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from evaluation.phase_summary import outcome_matrix, zero_contrasts
 from evaluation.phase_windows import (
   GROUPS,
   find_events,
@@ -79,3 +80,30 @@ def test_window_summary_groups_and_rewards() -> None:
   assert summary["reward"]["foot_slip"] == pytest.approx(-100 * DT)
   assert summary["max_hand_force_n"] == [10.0, 20.0]
   assert summary["min_foot_load_kn"] == 3.0
+
+
+def test_outcomes_and_zero_contrasts_pair_by_condition() -> None:
+  def episode(arm: str, lifecycle: str, complete: bool, end: float) -> dict:
+    return {
+      "arm": arm,
+      "condition_id": f"seed=1/mass=700/repeat=0/lifecycle={lifecycle}",
+      "mass_kg": 700.0,
+      "lifecycle": lifecycle,
+      "complete": complete,
+      "timeout": False,
+      "combined_failure": not complete,
+      "terminations": [] if complete else ["collapsed"],
+      "event_time_s": {"hold_entry": 11.0, "release": None, "terminal": end},
+      "windows": {},
+    }
+
+  phases = [
+    episode("zero", "fresh", False, 46.0),
+    episode("zero", "recycled", False, 46.0),
+    episode("arms", "recycled", True, 49.0),
+    episode("arms", "fresh", True, 50.0),
+  ]
+  assert outcome_matrix(phases) == {"zero": {"700": "XX"}, "arms": {"700": "CC"}}
+  contrast = zero_contrasts(phases)["arms"]
+  assert contrast["completion"] == {"mean": 1.0, "n": 2}
+  assert contrast["end_time_s"]["mean"] == 3.5
