@@ -5,6 +5,7 @@ from __future__ import annotations
 from conftest import requires_controller
 from mjlab.tasks.registry import load_env_cfg
 
+from mc_mjlab.bridge.config import get_main_robot_name
 from mc_mjlab.tasks.locomanip import RESIDUAL_TASK_IDS
 from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
   locomanip_residual_env_cfg,
@@ -25,6 +26,6 @@ def test_study_control_preserves_production_and_hardware_authority() -> None:
   assert CONTROL_TASK_ID not in RESIDUAL_TASK_IDS.values()
   for profile in PROFILES:
     production = locomanip_residual_env_cfg(profile)
-    robot = production.actions[ACTION_NAME].mc_rtc_robot_name
+    robot = get_main_robot_name(profile.mc_rtc_yaml)
     registered = load_env_cfg(RESIDUAL_TASK_IDS[robot])
     assert registered.actions[ACTION_NAME] == production.actions[ACTION_NAME]

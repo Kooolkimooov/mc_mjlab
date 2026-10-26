@@ -9,9 +9,11 @@ import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import mjlab  # noqa: F401
 import torch
+from mjlab.rl import RslRlVecEnvWrapper
 from mjlab.tasks.registry import load_env_cfg
 
 from mc_mjlab.rl.controller_provenance import (
@@ -56,7 +58,7 @@ def main() -> None:
   args = parser.parse_args()
   cfg = load_env_cfg(CONTROL_TASK_ID)
   provenance = collect_controller_provenance(
-    SimpleNamespace(unwrapped=SimpleNamespace(cfg=cfg))
+    cast(RslRlVecEnvWrapper, SimpleNamespace(unwrapped=SimpleNamespace(cfg=cfg)))
   )
   root = Path(__file__).resolve().parents[1]
   runs = (

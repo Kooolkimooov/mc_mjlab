@@ -9,7 +9,7 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | --- | --- | --- | --- | --- | --- | --- |
 | S0 plan | complete | Complete approved plan transcribed before source changes; commit containing this entry | not measured | this document | Freeze references | 2026-10-26 14:20 +09:00 |
 | S1 references | active | Starting HEAD `5cba058b71b1c3cc67d3bb0272744238f7bfb999`; local mjlab override present | pending | pending inventory | Hash inputs and resolve matching configurations | 2026-10-26 14:20 +09:00 |
-| S2 qualification | planned | Existing safety evaluator inspected | pending | none | Extend separate-arm matched evaluator and validate repeatability | 2026-10-26 14:20 +09:00 |
+| S2 qualification | active | Separate-arm rollout and paired outcome statistics; 10 targeted tests passed | pending | `scripts/evaluate_locomanip_study.py` | Live zero/zero smoke, reordered batches, historical runner loads | 2026-10-26 14:30 +09:00 |
 | S3 PD telemetry | planned | none | pending | none | Exact delayed pre-clamp instrumented actuator | 2026-10-26 14:20 +09:00 |
 | S4 phase diagnosis | planned | none | pending | none | Depends on S2/S3 | 2026-10-26 14:20 +09:00 |
 | S5 focused exploration | planned | none | pending | none | Measured groups from S4; typed study tasks | 2026-10-26 14:20 +09:00 |
@@ -294,6 +294,47 @@ continuation path.
 ## Amendments
 
 None. Original decisions are preserved above.
+
+## Reference identities and first evaluator milestone
+
+**Current:** Reference inventory in `logs/locomanip-study/references.json`, created
+with `uv run python scripts/freeze_locomanip_references.py --output
+logs/locomanip-study/references.json` at source `f577463`. All three embedded
+controller-provenance comparisons pass; actual runner loads remain pending.
+The inventory records full configuration/provenance hashes and source revisions.
+Local mjlab HEAD is `ba314ea2f37b724684af21b63a1c5dbe114a6cd7`.
+
+| Reference | Run under `logs/rsl_rl/Mc-Mjlab-Locomanip-Locomanipcontroller-Hrp5P-Position-Residual/` | Checkpoint SHA256 |
+| --- | --- | --- |
+| original `model_1180.pt` | `2026-10-21_10-52-44_push-friction` | `dd5530445dfa2f6e49e03a42ddd5687e637f9bacce069fe438e22e0640df6300` |
+| no magnitude `model_1660.pt` | `2026-10-22_10-00-47_no-magnitude-penalty` | `ad5113b21d6088e91036c208dbb15301feaeebf09fcb392409a0a66a7b8407ef` |
+| 2x arms `model_1280.pt` | `2026-10-23_17-39-18_arm-scale-2x` | `61cc88a47078d3cbbf66bf75d82701db7002fec3f6662c5e02c17aeac1b518c3` |
+
+The public study evaluator accepts candidate/reference task IDs and checkpoints,
+`--cohort` JSON, `--output`, batching, bounded worker retries, traces and reverse
+ordering. Default validation and `--held-out` select the planned cohorts. Omitted
+checkpoints mean exact zero action. Both arms run independently, so action widths
+can differ. Corruption is disabled; encoder draws are condition keyed. Recycled
+rows first complete a nominal 600 kg zero-action episode, then reset individually
+into their target payload/draw. Failed warm-ups are not target measurements.
+Timeouts are measured non-completions; only worker failures are retried. Reports
+cannot promote while campaign-wide gates remain pending. No boundary is fitted
+until outcome evidence supports it.
+
+**Re-measure if:** any file identity, rollout reset behavior or cohort changes.
+
+**History:**
+- 2026-10-26 — targeted cohort/control tests: 10 passed. Paired statistics are
+  invariant to record ordering; lifecycle repeats share clusters; nominal repeats
+  receive no population confidence interval. Missing/nonfinite values cannot pass.
+  Generated architecture and strict prose checks passed at S1. The first type
+  pass found four annotation errors; corrected before live execution.
+- Next live command after committing this milestone:
+  `uv run python scripts/evaluate_locomanip_study.py --cohort
+  docs/locomanip-study-smoke.json --batch-size 6 --workers 3 --output
+  logs/locomanip-study/zero-smoke`. Repeat with `--reverse --batch-size 3` into
+  `logs/locomanip-study/zero-reordered`. These are repeatability tests, not
+  qualification samples. Launch in existing `mc_mjlab_training:2.1`.
 
 ## S1 implementation record
 
