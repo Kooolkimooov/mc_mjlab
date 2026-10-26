@@ -8,6 +8,7 @@ import pytest
 import torch
 from evaluation.locomanip_inputs import assert_payload_masses, draw_encoder_bias
 from evaluation.study_cohort import StudyCohort
+from evaluation.study_repeatability import compare_sources
 from evaluation.study_statistics import measured, summarize
 
 
@@ -103,3 +104,19 @@ def test_integer_json_masses_keep_float_identities() -> None:
   assert all(type(row["mass_kg"]) is float for row in rows)
   assert rows[0]["input_id"] == "seed=1001/mass=400/repeat=0"
   assert_payload_masses(torch.tensor([400.0, 700.0]), rows[::2])
+
+
+def test_repeatability_flags_outcome_changes_and_spreads() -> None:
+  cohort = StudyCohort(masses=(600,), seeds=(1001,), draws=1)
+  first = {r["condition_id"]: {**r, "time_s": 10.0} for r in records(cohort)[::2]}
+  second = deepcopy(first)
+  changed = next(iter(second))
+  second[changed].update(timeout=False, combined_failure=True, time_s=9.5)
+  second[changed]["robot_displacement_m"] += 0.25
+  report = compare_sources({"a": first, "b": second})
+  assert report["outcome_disagreements"] == [
+    {"condition_id": changed, "field": "combined_failure"},
+    {"condition_id": changed, "field": "timeout"},
+  ]
+  assert report["max_displacement_spread_m"] == 0.25
+  assert report["max_time_spread_s"] == 0.5
