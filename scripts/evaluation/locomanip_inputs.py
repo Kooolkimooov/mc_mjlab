@@ -29,7 +29,9 @@ def draw_encoder_bias(identifier: str, width: int, enabled: bool) -> torch.Tenso
 
 def assert_payload_masses(actual: torch.Tensor, rows: list[dict[str, Any]]) -> None:
   """Reject a condition when the applied cart mass differs from its label."""
-  requested = torch.tensor([row["mass_kg"] for row in rows], device=actual.device)
+  requested = torch.tensor(
+    [row["mass_kg"] for row in rows], dtype=actual.dtype, device=actual.device
+  )
   if torch.allclose(actual, requested, atol=0.05, rtol=1e-5):
     return
   error = (actual - requested).abs().max().item()
@@ -67,7 +69,9 @@ def fixed_payloads(
 ) -> None:
   """Apply each condition's exact density scale, including partial resets."""
   ids = torch.arange(env.num_envs, device=env.device) if env_ids is None else env_ids
-  masses = torch.tensor([row["mass_kg"] for row in rows], device=env.device)
+  masses = torch.tensor(
+    [row["mass_kg"] for row in rows], dtype=torch.float, device=env.device
+  )
   assignments = [
     (ids[masses[ids] == mass], (mass, mass)) for mass in masses[ids].unique().tolist()
   ]

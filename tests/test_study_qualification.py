@@ -6,7 +6,7 @@ from copy import deepcopy
 
 import pytest
 import torch
-from evaluation.locomanip_inputs import draw_encoder_bias
+from evaluation.locomanip_inputs import assert_payload_masses, draw_encoder_bias
 from evaluation.study_cohort import StudyCohort
 from evaluation.study_statistics import measured, summarize
 
@@ -95,3 +95,11 @@ def test_corrupt_identity_and_duplicate_arms_are_rejected() -> None:
   changed[0]["mass_kg"] = 700
   with pytest.raises(ValueError, match="metadata"):
     summarize(changed, cohort)
+
+
+def test_integer_json_masses_keep_float_identities() -> None:
+  cohort = StudyCohort(masses=(400, 700), seeds=(1001,), draws=1)
+  rows = cohort.conditions()
+  assert all(type(row["mass_kg"]) is float for row in rows)
+  assert rows[0]["input_id"] == "seed=1001/mass=400/repeat=0"
+  assert_payload_masses(torch.tensor([400.0, 700.0]), rows[::2])

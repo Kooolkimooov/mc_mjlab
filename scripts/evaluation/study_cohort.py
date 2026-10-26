@@ -23,6 +23,8 @@ class StudyCohort:
   nominal: bool = False
 
   def __post_init__(self) -> None:
+    # JSON integers would otherwise build Long tensors that cannot meet float masses.
+    object.__setattr__(self, "masses", tuple(float(m) for m in self.masses))
     for values in (self.masses, self.seeds, self.lifecycles):
       if not values or len(values) != len(set(values)):
         raise ValueError("cohort axes must be nonempty and unique")
