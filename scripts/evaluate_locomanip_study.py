@@ -38,6 +38,9 @@ def main() -> None:
   parser.add_argument("--pd-telemetry", action="store_true")
   parser.add_argument("--scenario", choices=sorted(scenarios()))
   parser.add_argument(
+    "--console-output", choices=("none", "single", "all"), default="none"
+  )
+  parser.add_argument(
     "--pd-rate-trace",
     action="append",
     default=[],
@@ -121,6 +124,7 @@ def main() -> None:
           pd_rate_ids=frozenset(args.pd_rate_trace),
           pd_rate_prefix=args.output / label,
           scenario=scenario,
+          console_output=args.console_output,
         )
         write_json(args.output / f"{label}.json", result)
         for row in result["rows"]:

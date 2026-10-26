@@ -54,6 +54,7 @@ def run_study_conditions(
   names_path: Path | None = None,
   scenario: Scenario | None = None,
   handover_at_hold: bool = False,
+  console_output: str = "none",
 ) -> dict:
   """Evaluate one arm, applying no policy during a recycled row's warm-up."""
   if not rows or workers < 1:
@@ -67,7 +68,7 @@ def run_study_conditions(
   cfg.observations["actor"].enable_corruption = False
   action_cfg = cast(McRtcResidualActionCfg, cfg.actions[accessors.ACTION_NAME])
   action_cfg.num_workers = min(workers, len(rows))
-  action_cfg.console_output = "none"
+  action_cfg.console_output = console_output  # ty: ignore[invalid-assignment]
   payload = cfg.events["cart_payload"]
   cfg.events.pop("encoder_bias", None)
   cfg.events["cart_payload"] = EventTermCfg(
