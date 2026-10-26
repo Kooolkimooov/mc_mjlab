@@ -36,7 +36,8 @@ class GroupedResidualJointPositionAction(McRtcResidualJointPositionAction):
   def __init__(
     self, cfg: GroupedResidualJointPositionActionCfg, env: ManagerBasedRlEnv
   ) -> None:
-    # Before the base: action_dim reads it.
+    # mjlab's base sizes joint buffers from action_dim; stay joint-level until grouped.
+    self._group_index: torch.Tensor | None = None
     self._num_groups = len(cfg.residual_groups)
     super().__init__(cfg, env)
     owners = group_of_joint(self.residual_names, cfg.residual_groups)
@@ -47,6 +48,7 @@ class GroupedResidualJointPositionAction(McRtcResidualJointPositionAction):
 
   def process_actions(self, actions: torch.Tensor) -> None:
     """Copy each group's output onto its joints, then process joint requests."""
+    assert self._group_index is not None
     groups = actions[:, : self._num_groups]
     self._policy_actions.copy_(groups)
     expanded = torch.cat(
@@ -56,10 +58,13 @@ class GroupedResidualJointPositionAction(McRtcResidualJointPositionAction):
 
   def expand(self, groups: torch.Tensor) -> torch.Tensor:
     """Joint-level normalized requests for group-level outputs."""
+    assert self._group_index is not None
     return groups[:, self._group_index]
 
   @property
   def action_dim(self) -> int:
+    if self._group_index is None:
+      return self._action_dim
     return self._num_groups + self._action_dim - self._residual_action_dim
 
   @property
@@ -70,6 +75,7 @@ class GroupedResidualJointPositionAction(McRtcResidualJointPositionAction):
   @property
   def group_index(self) -> torch.Tensor:
     """Policy output feeding each residual joint, in residual column order."""
+    assert self._group_index is not None
     return self._group_index
 
 
