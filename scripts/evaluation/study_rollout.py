@@ -27,6 +27,7 @@ from evaluation.pd_demand import PdDemandSummary
 from evaluation.rollout import managed_env, reset_done
 from evaluation.study_io import write_json
 from evaluation.study_trace import StudyTrace
+from mc_mjlab.actions.grouped_residual_action import GroupedResidualJointPositionAction
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionCfg
 from mc_mjlab.rl.controller_provenance import collect_controller_provenance
 from mc_mjlab.robots.pd_telemetry import instrument_pd
@@ -126,11 +127,25 @@ class ConstantRequest:
   def __init__(self, env: Any, groups: tuple[str, ...], level: float) -> None:
     if not -1.0 <= level <= 1.0:
       raise ValueError("constant requests are normalized actions in [-1, 1]")
+    term = accessors.residual_action(env)
+    joints = torch.zeros(1, len(term.residual_names), device=env.device)
+    for group in groups:
+      joints[:, group_columns(env, group)] = level
     self.action = torch.zeros(
       env.num_envs, env.action_manager.total_action_dim, device=env.device
     )
-    for group in groups:
-      self.action[:, group_columns(env, group)] = level
+    if not isinstance(term, GroupedResidualJointPositionAction):
+      self.action[:, : joints.shape[1]] = joints
+      return
+
+    # Each output takes its first joint's request; the expansion must reproduce all.
+    first = [
+      term.group_index.tolist().index(g) for g in range(term.policy_action.shape[1])
+    ]
+    outputs = joints[:, first]
+    if not torch.equal(term.expand(outputs), joints):
+      raise ValueError(f"{groups} at {level} is not expressible by this grouping")
+    self.action[:, : outputs.shape[1]] = outputs
 
   def __call__(self, observations: Any) -> torch.Tensor:
     del observations

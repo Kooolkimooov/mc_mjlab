@@ -9,19 +9,25 @@ from mc_mjlab.tasks.evaluation import register_evaluation
 from mc_mjlab.tasks.locomanip.evaluation import LOCOMANIP_EVALUATION
 from mc_mjlab.tasks.locomanip.locomanip_ppo_cfg import locomanip_ppo_cfg
 from mc_mjlab.tasks.locomanip.profiles import HRP5P
-from mc_mjlab.tasks.locomanip_study.config import study_control_cfg
+from mc_mjlab.tasks.locomanip_study.config import CONTROL, SPECS, study_cfg
 from mc_mjlab.tasks.naming import get_task_name
 from mc_mjlab.utils.controller_install import controller_is_installed
 
 MC_RTC_YAML = HRP5P.mc_rtc_yaml
-CONTROL_TASK_ID = get_task_name("locomanip_study", MC_RTC_YAML, "control")
+TASK_IDS = {
+  spec.suffix: get_task_name("locomanip_study", MC_RTC_YAML, spec.suffix)
+  for spec in SPECS
+}
+CONTROL_TASK_ID = TASK_IDS[CONTROL.suffix]
 
 if controller_is_installed("LocomanipController"):
-  register_mjlab_task(
-    task_id=CONTROL_TASK_ID,
-    env_cfg=study_control_cfg(),
-    play_env_cfg=study_control_cfg(play=True),
-    rl_cfg=locomanip_ppo_cfg(experiment_name=CONTROL_TASK_ID),
-    runner_cls=McRtcResidualOnPolicyRunner,
-  )
-  register_evaluation(CONTROL_TASK_ID, LOCOMANIP_EVALUATION)
+  for spec in SPECS:
+    task_id = TASK_IDS[spec.suffix]
+    register_mjlab_task(
+      task_id=task_id,
+      env_cfg=study_cfg(spec),
+      play_env_cfg=study_cfg(spec, play=True),
+      rl_cfg=locomanip_ppo_cfg(experiment_name=task_id),
+      runner_cls=McRtcResidualOnPolicyRunner,
+    )
+    register_evaluation(task_id, LOCOMANIP_EVALUATION)

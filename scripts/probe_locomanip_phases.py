@@ -15,7 +15,7 @@ from evaluation.study_rollout import ReferenceUnavailable, run_study_conditions
 from freeze_locomanip_references import file_identity, revision
 
 from mc_mjlab.tasks.locomanip import RESIDUAL_TASK_IDS
-from mc_mjlab.tasks.locomanip_study import CONTROL_TASK_ID
+from mc_mjlab.tasks.locomanip_study import CONTROL_TASK_ID, TASK_IDS
 
 PRODUCTION_TASK_ID = RESIDUAL_TASK_IDS["HRP5P"]
 #: Which scale profile each frozen reference was trained under.
@@ -24,7 +24,7 @@ REFERENCE_TASKS = {
   "no_magnitude": CONTROL_TASK_ID,
   "arms_2x": PRODUCTION_TASK_ID,
 }
-PROFILE_TASKS = {"control": CONTROL_TASK_ID, "production": PRODUCTION_TASK_ID}
+PROFILE_TASKS = {**TASK_IDS, "production": PRODUCTION_TASK_ID}
 CONSTANT_GROUPS = {
   "arms": ("arms",),
   "waist": ("waist",),
