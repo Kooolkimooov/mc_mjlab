@@ -539,10 +539,15 @@ change.
   12/12 records measured, evaluator exit 0, and outcomes agree with the earlier
   zero runs (8 sources, displacement spread 0.017 m, time 0.06 s). The first
   harness attempt crashed on `/proc` names with spaces and is not a result.
-- 2026-10-26 16:17- — scenario smoke, zero versus `original` at 650 kg fresh
-  (`docs/locomanip-study-scenario-smoke.json`, one condition, so no rate is
-  estimated): installed gains x0.9 make `original` fall (46.1 s); 10 ms delay and
-  foot friction x1.1 leave it completing; cart friction x0.9 lets zero complete.
+- 2026-10-26 16:17-17:04 — scenario smoke (`8f81e2b`), zero versus `original`
+  at 650 kg fresh (`docs/locomanip-study-scenario-smoke.json`; one condition each,
+  so no rate is estimated). `original` completes (49.3 s) under 10 ms delay, foot
+  friction x1.1, cart friction x0.9, IMU pitch +2 deg, velocity bias x +0.05 m/s,
+  velocity error 0.05 m/s/0.5 s and white noise; installed gains x0.9 make it fall
+  (46.1 s). Zero ignores observations, so the observation scenarios leave it at
+  its nominal collapse (47.7-48.0 s); cart friction x0.9 lets zero complete. Each
+  run's `applied` record shows the change installed (friction 1.0 -> scaled on
+  both feet and the terrain; cart pair tangential [0.5, 0.05]).
 
 ## identification
 
