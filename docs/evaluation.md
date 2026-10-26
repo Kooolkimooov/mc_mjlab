@@ -18,6 +18,9 @@ never import a script. The machinery the scripts share lives in
 | `qualification_strata` | per-stratum accounting, formerly shipped inside the task package |
 | `reward_audit` | the live reward audit, formerly shipped inside the task package |
 | `disturbances`, `scenarios` | the shared scenario definitions both samplers draw from |
+| `study_cohort`, `study_rollout`, `study_trace`, `study_statistics`, `study_io` | the locomanip study's separate-arm matched rollouts and paired outcome statistics |
+| `pd_demand`, `phase_windows`, `phase_summary` | per-group PD demand and raw-phase event windows over study traces |
+| `objective_audit`, `study_scenarios`, `study_repeatability` | objective replay, robustness scenarios and zero-run agreement |
 
 Comparison and qualification share `rollout` and nothing else. They are
 different experimental designs — different sampling, statistics and episode
@@ -28,6 +31,15 @@ records — and merging their record types would make one of them silently wrong
 and `probe_walking_reference.py` (their subjects were removed), plus the
 evaluator options that drove them. Each has a `Retired:` section in the doc that
 covered it, keeping the measurements verbatim.
+
+## Locomanip study scripts
+
+`freeze_locomanip_references.py`, `evaluate_locomanip_study.py`,
+`compare_study_runs.py`, `probe_locomanip_phases.py`,
+`summarize_locomanip_phases.py`, `audit_locomanip_objective.py`,
+`check_worker_replacement.py` and `identify_joint_dynamics.py` serve the
+safe-completion campaign; [locomanip-study-plan.md](locomanip-study-plan.md)
+records what each measured and the commands that produced it.
 
 ## Why the training curves cannot answer it
 
