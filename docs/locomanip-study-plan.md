@@ -36,7 +36,7 @@ configuration and original provenance; never bypass provenance enforcement.
 
 **History:**
 - 2026-10-26 — approved campaign transcribed here. October 26 measurements in
-  [locomanip.md](locomanip.md#position_residual_scale) found improved DCM from
+  [locomanip.md](locomanip.md#residual_scale_gains) found improved DCM from
   doubled arm authority without establishing a completion improvement. Preserve
   the original measurements and sample sizes in that topic note.
 
@@ -294,3 +294,21 @@ continuation path.
 ## Amendments
 
 None. Original decisions are preserved above.
+
+## S1 implementation record
+
+**Current:** `locomanip_study` registers an independent original-scale control;
+production and frozen safety are untouched. `freeze_locomanip_references.py`
+records exact checkpoint/configuration hashes, dependency revisions and external
+controller provenance without constructing an environment. Provenance comparison
+does not count as a successful runner load.
+
+**Re-measure if:** references, installed controller inputs or dependencies change.
+
+**History:**
+- 2026-10-26 — `uv run pytest -q tests/test_locomanip_study.py`: 1 passed;
+  original authority and both production robot registrations checked. Targeted
+  Ruff passed. Plan commit: `a707545`. Existing tmux `mc_mjlab_training:1.1` is
+  TensorBoard, not training; `mc_mjlab_training:2.1` is an idle shell. No campaign
+  job launched. Next: freeze inventory, then validate actual runner loads with
+  separate-arm S2 rollouts.

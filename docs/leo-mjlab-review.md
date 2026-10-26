@@ -32,6 +32,27 @@ using manager-based rewards and curricula.
 
 ## Scope and reading rule
 
+### October 26 focused extension
+
+The new campaign reviews the methods in `579183f..c750d1f`, with source inspection
+of `demand_walking.py`, `robust_probe.py`, `hold_action.py`, `lowlevel_frf.py`,
+the full-history change `1c72721`, and the tracking configuration's robustness
+and low-level-model interfaces. This is a focused methods review, not a claim
+that all intervening upstream changes have been exhaustively audited.
+
+The [locomanip campaign](locomanip-study-plan.md) adopts phase-resolved pre-clamp
+demand, coherent history, isolated perturbations, delivered-action feedback
+during holds, and dynamics-identification methods. It adds outcome qualification
+and focused exploration suited to heavy-cart residual control. History is trained
+from scratch; actor/optimizer surgery is not adopted. RHPS1 delay, stiffness,
+spring and gait constants are not transferable measurements. Calibration models
+must be bound to this robot's measured artifacts, and the controller already
+running in the environment must not be approximated a second time.
+
+The source probes sometimes disable terminations or omit terminal frames when
+masking fallen rows. S2/S3 instead retain terminal samples and distinguish
+operating peaks from fall transients; S8 retains fault containment throughout.
+
 The range adds about 1.19 million lines, but 1.18 million are three committed
 trainer logs. The reusable substance is in nine experiment notes, 25 automation
 scripts, the RHPS1 ablation matrix, and changes to rewards, observations,
