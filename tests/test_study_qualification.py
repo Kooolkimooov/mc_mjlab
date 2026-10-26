@@ -49,6 +49,7 @@ def test_timeouts_are_measured_and_not_promoted() -> None:
     ("robot_displacement_m", float("nan")),
     ("actual_mass_kg", float("inf")),
     ("warmup_failed", True),
+    ("controller_start_failure", True),
   ],
 )
 def test_missing_measurements_cannot_pass(field: str, value: object) -> None:

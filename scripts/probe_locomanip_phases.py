@@ -175,7 +175,11 @@ def run_arm(
     write_json(args.output / f"{label}-attempt-{attempt}.json", result)
     for row in result["rows"]:
       latest[row["condition_id"]] = row
-    retry = {row["condition_id"] for row in result["rows"] if row["worker_failure"]}
+    retry = {
+      row["condition_id"]
+      for row in result["rows"]
+      if row["worker_failure"] or row["controller_start_failure"]
+    }
     pending = [row for row in pending if row["condition_id"] in retry]
     print(f"[phases] {arm.name} attempt {attempt}: {len(retry)} worker failures")
     if not pending:

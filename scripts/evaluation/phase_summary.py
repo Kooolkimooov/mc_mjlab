@@ -14,7 +14,9 @@ GROUP_METRICS = ("max_executed_rad", "mean_tracking_error_rad", "saturated_joint
 
 
 def outcome_label(episode: dict) -> str:
-  """C complete, T timeout, F tilt fall, X collapse, E other controller failure."""
+  """C complete, T timeout, F tilt fall, X collapse, E controller, S start failure."""
+  if episode.get("controller_start_failure"):
+    return "S"
   if episode["complete"]:
     return "C"
   if "fell_over" in episode["terminations"]:

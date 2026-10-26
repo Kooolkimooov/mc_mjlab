@@ -111,7 +111,11 @@ class StudyTrace:
     metrics = metric_snapshot(env, ids)
     for offset, i in enumerate(ids.tolist()):
       flags = frame["terminations"][i]
-      failed = any(
+      # A QP failure on the first step precedes any residual reaching mc_rtc.
+      start = bool(flags.get("controller_failed")) and frame["time_s"][i] <= (
+        1.5 * env.step_dt
+      )
+      failed = not start and any(
         flags.get(n, False) for n in (*accessors.FALL_TERMINATIONS, "controller_failed")
       )
       worker = bool(flags.get("controller_worker_failed", False))
@@ -124,8 +128,9 @@ class StudyTrace:
         "observed": valid,
         "warmup_failed": warmup_failed,
         "worker_failure": worker,
+        "controller_start_failure": start,
         "combined_failure": failed,
-        "complete": complete,
+        "complete": complete and not start,
         "timeout": bool(flags.get("time_out", False)) and not complete,
         "terminations": flags,
         "time_s": frame["time_s"][i],

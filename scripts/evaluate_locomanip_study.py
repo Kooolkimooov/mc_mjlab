@@ -129,8 +129,18 @@ def main() -> None:
         write_json(args.output / f"{label}.json", result)
         for row in result["rows"]:
           latest[row["condition_id"]] = row
-        retry = {row["condition_id"] for row in result["rows"] if row["worker_failure"]}
-        history.append({"label": label, "worker_failures": sorted(retry)})
+        workers = {r["condition_id"] for r in result["rows"] if r["worker_failure"]}
+        starts = {
+          r["condition_id"] for r in result["rows"] if r["controller_start_failure"]
+        }
+        retry = workers | starts
+        history.append(
+          {
+            "label": label,
+            "worker_failures": sorted(workers),
+            "controller_start_failures": sorted(starts),
+          }
+        )
         pending = [row for row in pending if row["condition_id"] in retry]
         print(
           f"[study] {label}: {len(latest)} records, {len(pending)} worker failures",

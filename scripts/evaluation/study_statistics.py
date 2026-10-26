@@ -17,6 +17,7 @@ def measured(row: dict | None) -> TypeGuard[dict]:
     row is not None
     and row.get("observed") is True
     and row.get("worker_failure") is False
+    and row.get("controller_start_failure", False) is False
     and row.get("warmup_failed", False) is False
     and all(
       isinstance(row.get(key), bool)
@@ -85,6 +86,9 @@ def summarize(rows: list[dict], cohort: StudyCohort, samples: int = 10000) -> di
     "complete_matched_data": complete,
     "unmeasured_conditions": missing,
     "worker_failures": sum(bool(row.get("worker_failure")) for row in rows),
+    "controller_start_failures": sum(
+      bool(row.get("controller_start_failure")) for row in rows
+    ),
     "per_mass": per_mass,
     "full_range_standardized": _standardized(
       pairs, cohort.masses, cohort.lifecycles, samples, cohort.nominal

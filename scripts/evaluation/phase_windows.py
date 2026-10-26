@@ -139,6 +139,7 @@ def analyze_episode(
     for key in ("arm", "condition_id", "mass_kg", "lifecycle", "complete", "timeout")
   } | {
     "combined_failure": record["combined_failure"],
+    "controller_start_failure": record.get("controller_start_failure", False),
     "terminations": [name for name, hit in record["terminations"].items() if hit],
     "event_time_s": {
       name: None if index is None else steps[index]["time_s"]
