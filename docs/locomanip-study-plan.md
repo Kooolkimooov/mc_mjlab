@@ -11,10 +11,10 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | S1 references | active | Inventory frozen at `f577463`; `original` loads through the provenance-checking runner into the study control | `original` fails 700 kg nominal (`collapsed`, 47.6-47.7 s) | `logs/locomanip-study/references.json`, `phase-smoke/` | `no_magnitude` and `arms_2x` loads run in the S4 nominal probe | 2026-10-26 15:20 +09:00 |
 | S2 qualification | complete | Mass dtype fix `bb98c3b`; `compare_study_runs.py`; six zero sources over batch 6/reversed batch 3 with recycled partial resets | zero vs zero: no outcome disagreement; spreads 0.0135 m, 0.04 s | `zero-smoke/`, `zero-reordered/`, `zero-plain-timed/`, `zero-repeatability.json` | Validation/held-out cohorts once candidates exist | 2026-10-26 15:20 +09:00 |
 | S3 PD telemetry | complete | `pd_telemetry` `f963cb2`: motor table and chain trajectory identical, stepped-only samples, partial resets (7 tests) | live: no outcome disagreement, spread 0.017 m; +3% step time; rate traces sum exactly | `zero-telemetry/`, `zero-telemetry-rate/` | Used by S4 | 2026-10-26 15:20 +09:00 |
-| S4 phase diagnosis | active | `probe_locomanip_phases.py` `8184e6e`: constant arms, raw-phase windows (3 tests); 700 kg smoke segmented 6/6 episodes | pending | `phase-smoke/` | Nominal probe: 16 arms x 600-900 kg x fresh/recycled | 2026-10-26 15:20 +09:00 |
+| S4 phase diagnosis | active | nominal probe `868cffb`: 16 arms x 6 masses x 2 lifecycles, 192/192 segmented | combined arms+waist -1 completes 600-900 kg; references stop at 650; all failures 1.4-4.7 s after the scheduled release | `phase-nominal/summary.json` | Matched encoder draws running (`phase-encoder/`) | 2026-10-26 16:55 +09:00 |
 | S5 focused exploration | active | `StudySpec` arms-waist/coordinated `071c50c`, init fix `ed098ff`; live: level-0 requests equal zero and identical joint requests agree across all three tasks | not trained | `s5-mapping/` | Training needs approval (S9 items 2-3) | 2026-10-26 16:50 +09:00 |
 | S6 observation history | active | history-10/20 `6287f6f`: all continuous actor channels and critic copies; phase/completion instantaneous; original checkpoint rejected live | pending | none | Family smoke, then training needs approval | 2026-10-26 15:55 +09:00 |
-| S7 objective audit | active | `audit_locomanip_objective.py` `059681f` (3 tests): matched ranking under current/alive, with and without residual costs | smoke: failures outrank constant-arm successes only through exploration cost | `phase-smoke/objective.json` | Run on S4 nominal traces | 2026-10-26 15:55 +09:00 |
+| S7 objective audit | rejected (current evidence) | `059681f`; audit of 541 matched failure/success pairs from S4 nominal | current defect 354/541 (discounted); candidate leaves 312/541, 0/541 only without residual costs | `phase-nominal/objective.json` | Re-run when learned policies complete heavy loads | 2026-10-26 16:55 +09:00 |
 | S8 robustness/transitions | active | 38 typed scenarios `97244ba` (3 tests); Hold handover `579fbec`; worker-replacement check `da810e5` | pending | none | Live scenario smoke and worker kill once a pane is free | 2026-10-26 15:55 +09:00 |
 | S9 campaign | planned | No new training launched | pending | none | S2 qualification and family smoke tests first | 2026-10-26 14:20 +09:00 |
 | S10 identification | active | `mc_mjlab.identification` `57c92d8`: shared log, fits within synthetic tolerances (6 tests), robot-only hashed calibration gate | simulator 700 kg trace fitted on first half, held-out RMSE recorded; no robot data | `identification/zero-700-fresh.json` | Calibration procedure note; robot data external | 2026-10-26 15:55 +09:00 |
@@ -395,6 +395,66 @@ actuator configs change.
   13 x 53 samples spanning 0-46.179 s of the 46.18 s terminal episode, so final
   substeps are included; P + D + feed-forward equals raw demand exactly and
   clipped equals clamp(raw) on every sample. About 59 MB per file.
+
+## Phase-resolved authority
+
+**Current:** Nominal probe `logs/locomanip-study/phase-nominal` (`868cffb`;
+masses 600, 650, 700, 750, 800, 900 kg; fresh and recycled; seed 1001, one
+nominal draw; 192 episodes, all segmented). Outcome per mass, fresh|recycled
+(C complete, F tilt fall, X collapse):
+
+| Arm | 600 | 650 | 700 | 750 | 800 | 900 |
+| --- | --- | --- | --- | --- | --- | --- |
+| zero | CC | XX | FF | FF | FF | FF |
+| original / arms_2x | CC | CC | XX | FF | FF | FF |
+| no_magnitude | CC | CC | FF | FF | FF | FF |
+| arms -1 | CC | CC | CC | CC | CC | XX |
+| arms -0.5 | CC | CC | CC | CX | FF | FF |
+| waist -1 | CC | CC | CC | XX | FF | FF |
+| waist -0.5 | CC | CC | XX | FF | FF | FF |
+| combined -1 | CC | CC | CC | CC | CC | CC |
+| combined -0.5 | CC | CC | CC | CC | CC | FF |
+| any +0.5 / +1 | FF | -- | FF | FF | FF | FF |
+
+(waist +0.5 alone completes 600 kg; every other positive request fails
+everywhere.) The controller timeline is identical in every arm: fresh bilateral
+Hold at 11.42-11.46 s, release at 44.44-44.46 s (medians). All 127 failures end
+after the scheduled release, 1.44-4.66 s (median 1.70 s); none before it.
+Sustained-Hold peak tilt separates outcomes almost completely (successes median
+0.110 rad, range 0.066-0.214; failures 0.602, 0.210-0.608), as does cart error
+(0.391 m, 0.280-0.576 against 0.983 m, 0.564-1.066). Against matched zero, arms -1
+lowers sustained-Hold cart error by 0.353 m and tilt by 0.342 rad on average; the
+references by 0.06-0.09 m and 0.07-0.09 rad. These are interventions on the
+request, but the leaning-on-the-cart mechanism they suggest is a correlation,
+not an established cause. Useful groups: arms and waist, negative direction;
+legs and wrists moved nothing in the earlier authority probe (`8ac6bb0`).
+
+**Re-measure if:** the controller's manipulation schedule, scales or payload
+model change.
+
+**History:**
+- 2026-10-26 15:16-16:50 — command: `uv run python
+  scripts/probe_locomanip_phases.py --output logs/locomanip-study/phase-nominal
+  --references logs/locomanip-study/references.json --workers 4`
+  (`mc_mjlab_training:study`). All three references loaded through the runner.
+
+## Objective ranking audit
+
+**Current:** On the S4 nominal traces (541 matched failure/success pairs, no
+timeouts without completion), failures score at least the matched success in
+220/541 pairs undiscounted and 354/541 discounted from the start under the
+current objective: a consistent defect. Without residual costs it persists
+(411/541 discounted), so the DCM term itself prefers the failing runs. The
+candidate (DCM replaced by `is_alive` at 1.0, costs kept) still leaves 312/541;
+without residual costs it leaves 0/541 on every measure. The remaining defect
+comes from the saturation-level residual cost the constant-request successes
+pay (about -24.6 per episode for arms -1), which a learned success would not
+necessarily pay. Under the plan's rule (the candidate as specified must clear
+the defect) the objective experiment is **rejected on this evidence**; no term
+was added.
+
+**Re-measure if:** learned policies complete the heavy cohort, giving
+successful traces without saturation-level requests; or rewards change.
 
 ## locomanip_study variants
 
