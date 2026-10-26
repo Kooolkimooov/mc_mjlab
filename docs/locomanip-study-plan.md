@@ -12,7 +12,7 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | S2 qualification | complete | Mass dtype fix `bb98c3b`; `compare_study_runs.py`; six zero sources over batch 6/reversed batch 3 with recycled partial resets | zero vs zero: no outcome disagreement; spreads 0.0135 m, 0.04 s | `zero-smoke/`, `zero-reordered/`, `zero-plain-timed/`, `zero-repeatability.json` | Validation/held-out cohorts once candidates exist | 2026-10-26 15:20 +09:00 |
 | S3 PD telemetry | complete | `pd_telemetry` `f963cb2`: motor table and chain trajectory identical, stepped-only samples, partial resets (7 tests) | live: no outcome disagreement, spread 0.017 m; +3% step time; rate traces sum exactly | `zero-telemetry/`, `zero-telemetry-rate/` | Used by S4 | 2026-10-26 15:20 +09:00 |
 | S4 phase diagnosis | active | `probe_locomanip_phases.py` `8184e6e`: constant arms, raw-phase windows (3 tests); 700 kg smoke segmented 6/6 episodes | pending | `phase-smoke/` | Nominal probe: 16 arms x 600-900 kg x fresh/recycled | 2026-10-26 15:20 +09:00 |
-| S5 focused exploration | active | `StudySpec` arms-waist (13 joints) and coordinated (2 outputs) `071c50c`; grouped-term init fix `ed098ff`; config tests 5 | pending | `s5-mapping/` | Live zero equivalence and arm-request mapping probe; training needs approval | 2026-10-26 15:55 +09:00 |
+| S5 focused exploration | active | `StudySpec` arms-waist/coordinated `071c50c`, init fix `ed098ff`; live: level-0 requests equal zero and identical joint requests agree across all three tasks | not trained | `s5-mapping/` | Training needs approval (S9 items 2-3) | 2026-10-26 16:50 +09:00 |
 | S6 observation history | active | history-10/20 `6287f6f`: all continuous actor channels and critic copies; phase/completion instantaneous; original checkpoint rejected live | pending | none | Family smoke, then training needs approval | 2026-10-26 15:55 +09:00 |
 | S7 objective audit | active | `audit_locomanip_objective.py` `059681f` (3 tests): matched ranking under current/alive, with and without residual costs | smoke: failures outrank constant-arm successes only through exploration cost | `phase-smoke/objective.json` | Run on S4 nominal traces | 2026-10-26 15:55 +09:00 |
 | S8 robustness/transitions | active | 38 typed scenarios `97244ba` (3 tests); Hold handover `579fbec`; worker-replacement check `da810e5` | pending | none | Live scenario smoke and worker kill once a pane is free | 2026-10-26 15:55 +09:00 |
@@ -416,6 +416,16 @@ dict shapes differ).
 history semantics change.
 
 **History:**
+- 2026-10-26 15:54-16:47 — `s5-mapping` (`ed098ff`, 700/800 kg, fresh and
+  recycled, nominal, 4 conditions per arm): level 0 on arms-waist and on
+  coordinated matches zero (identical outcomes; displacement within 0.0123 and
+  0.0115 m, time within 0.04 s, inside the zero-run spread); arms -1 through
+  control, arms-waist and coordinated agree to 0.0012 m and 0.02 s; waist -1
+  through control and coordinated to 0.0108 m. Command: `uv run python
+  scripts/probe_locomanip_phases.py --output logs/locomanip-study/s5-mapping
+  --masses 700,800 --lifecycles fresh,recycled --profiles
+  control,arms-waist,coordinated --groups arms,waist --levels 0,-1 --arms
+  zero,control/arms/-1,control/waist/-1,arms-waist/arms/0,arms-waist/arms/-1,coordinated/arms/0,coordinated/arms/-1,coordinated/waist/-1`.
 - 2026-10-26 15:48 — first live build of the coordinated term failed: mjlab's
   `BaseAction` sized buffers from `action_dim` before grouping existed
   (`AttributeError: _residual_action_dim`). Fixed in `ed098ff`; config tests could
@@ -461,6 +471,18 @@ not rotated.
 
 **Re-measure if:** observation terms, actuator configs or contact definitions
 change.
+
+**History:**
+- 2026-10-26 15:57-16:15 — `check_worker_replacement.py` (`d8df874`): SIGKILL
+  of worker `0_1_0` 60 s into the reference arm of the smoke cohort; exactly its
+  two 400 kg conditions reported worker failures and were retried in attempt 1;
+  12/12 records measured, evaluator exit 0, and outcomes agree with the earlier
+  zero runs (8 sources, displacement spread 0.017 m, time 0.06 s). The first
+  harness attempt crashed on `/proc` names with spaces and is not a result.
+- 2026-10-26 16:17- — scenario smoke, zero versus `original` at 650 kg fresh
+  (`docs/locomanip-study-scenario-smoke.json`, one condition, so no rate is
+  estimated): installed gains x0.9 make `original` fall (46.1 s); 10 ms delay and
+  foot friction x1.1 leave it completing; cart friction x0.9 lets zero complete.
 
 ## identification
 
