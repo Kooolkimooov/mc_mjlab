@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -10,6 +11,7 @@ from evaluation.locomanip_inputs import assert_payload_masses, draw_encoder_bias
 from evaluation.study_cohort import StudyCohort
 from evaluation.study_repeatability import compare_sources
 from evaluation.study_statistics import measured, summarize
+from evaluation.study_trace import StudyTrace
 
 
 def records(cohort: StudyCohort) -> list[dict]:
@@ -49,7 +51,6 @@ def test_timeouts_are_measured_and_not_promoted() -> None:
     ("robot_displacement_m", float("nan")),
     ("actual_mass_kg", float("inf")),
     ("warmup_failed", True),
-    ("controller_start_failure", True),
   ],
 )
 def test_missing_measurements_cannot_pass(field: str, value: object) -> None:
@@ -97,6 +98,53 @@ def test_corrupt_identity_and_duplicate_arms_are_rejected() -> None:
   changed[0]["mass_kg"] = 700
   with pytest.raises(ValueError, match="metadata"):
     summarize(changed, cohort)
+
+
+def test_first_step_controller_failure_is_a_measured_failure() -> None:
+  cohort = StudyCohort(masses=(600,), seeds=(1001,), draws=1)
+  rows = records(cohort)
+  rows[0].update(controller_start_failure=True, combined_failure=True, timeout=False)
+  assert measured(rows[0])
+  report = summarize(rows, cohort, samples=100)
+  assert report["complete_matched_data"]
+  assert report["per_mass"][0]["reference"]["combined_failure"] == 1
+
+
+def test_terminal_capture_keeps_first_step_qp_and_physical_failures(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  robot = SimpleNamespace(
+    data=SimpleNamespace(
+      root_link_pos_w=torch.zeros(2, 3), encoder_bias=torch.zeros(2, 1)
+    )
+  )
+  env = SimpleNamespace(
+    num_envs=2,
+    device="cpu",
+    scene={"robot": robot},
+    step_dt=0.02,
+    reward_manager=SimpleNamespace(_episode_sums={}),
+  )
+  monkeypatch.setattr("evaluation.study_trace.metric_snapshot", lambda env, ids: {})
+  monkeypatch.setattr(
+    "evaluation.study_trace.accessors.object_mass_kg",
+    lambda env: torch.full((2,), 600.0),
+  )
+  trace = StudyTrace(env, [{}, {}], None)
+  frame = {
+    "terminations": [
+      {"controller_failed": True},
+      {"controller_failed": True, "fell_over": True},
+    ],
+    "time_s": [0.02, 0.02],
+    "phase_left": [0, 0],
+    "phase_right": [0, 0],
+  }
+  trace.finish(torch.tensor([0, 1]), frame)
+  assert all(
+    row is not None and row["combined_failure"] and not row["complete"]
+    for row in trace.results
+  )
 
 
 def test_integer_json_masses_keep_float_identities() -> None:

@@ -14,9 +14,7 @@ GROUP_METRICS = ("max_executed_rad", "mean_tracking_error_rad", "saturated_joint
 
 
 def outcome_label(episode: dict) -> str:
-  """C complete, T timeout, F tilt fall, X collapse, E controller, S start failure."""
-  if episode.get("controller_start_failure"):
-    return "S"
+  """C complete, T timeout, F tilt fall, X collapse and E controller failure."""
   if episode["complete"]:
     return "C"
   if "fell_over" in episode["terminations"]:
@@ -58,7 +56,12 @@ def zero_contrasts(phases: list[dict], zero: str = "zero") -> dict[str, Any]:
   deltas: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
   for episode in phases:
     base = reference.get(episode["condition_id"])
-    if episode["arm"] == zero or base is None:
+    if (
+      episode["arm"] == zero
+      or base is None
+      or episode.get("worker_failure")
+      or base.get("worker_failure")
+    ):
       continue
     arm = deltas[episode["arm"]]
     arm["completion"].append(float(episode["complete"]) - float(base["complete"]))

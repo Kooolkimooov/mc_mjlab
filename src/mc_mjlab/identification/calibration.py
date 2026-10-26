@@ -20,9 +20,16 @@ class JointCalibration:
   stiffness_nm_per_rad: float | None = None
 
   def __post_init__(self) -> None:
-    if self.delay_s < 0 or self.tau_s <= 0:
+    if (
+      not math.isfinite(self.delay_s)
+      or not math.isfinite(self.tau_s)
+      or self.delay_s < 0
+      or self.tau_s <= 0
+    ):
       raise ValueError("calibration needs delay >= 0 and tau > 0")
-    if self.stiffness_nm_per_rad is not None and self.stiffness_nm_per_rad <= 0:
+    if self.stiffness_nm_per_rad is not None and (
+      not math.isfinite(self.stiffness_nm_per_rad) or self.stiffness_nm_per_rad <= 0
+    ):
       raise ValueError("calibrated stiffness must be positive")
 
 
@@ -62,10 +69,18 @@ class LagCompliance:
     dt: float,
     device: str = "cpu",
   ) -> None:
+    if not math.isfinite(dt) or dt <= 0:
+      raise ValueError("finite positive timestep required")
+    if num_envs < 1 or not joint_names or len(set(joint_names)) != len(joint_names):
+      raise ValueError("positive environment count and unique nonempty joints required")
     self.enabled = artifact is not None
     self.artifact = artifact
     if artifact is None:
       return
+
+    verified = load_calibration(Path(artifact.path), artifact.sha256)
+    if verified != artifact:
+      raise ValueError("calibration differs from the verified robot artifact")
 
     missing = [name for name in joint_names if name not in artifact.joints]
     if missing:
@@ -74,7 +89,7 @@ class LagCompliance:
     self._lags = [round(c.delay_s / dt) for c in calibrations]
     # Exact discretization: 0 < alpha < 1 for every tau > 0, so never unstable.
     self._alpha = torch.tensor(
-      [1.0 - math.exp(-dt / c.tau_s) for c in calibrations], device=device
+      [-math.expm1(-dt / c.tau_s) for c in calibrations], device=device
     )
     self._compliance = torch.tensor(
       [

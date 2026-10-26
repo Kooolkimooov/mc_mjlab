@@ -109,11 +109,14 @@ def main() -> None:
       print(f"[phases] {arm.name} unavailable: {error}")
     write_json(args.output / "episodes.json", records)
 
-  episodes = load_traces(traces)
-  names = json.loads((args.output / "names.json").read_text())
-  dt = names.pop("step_dt")
+  episodes = load_traces(traces, records)
   phases = [
-    analyze_episode(episodes[(r["arm"], r["condition_id"])], r, names, dt)
+    analyze_episode(
+      episodes[(r["arm"], r["condition_id"])],
+      r,
+      r["trace_names"],
+      r["trace_names"]["step_dt"],
+    )
     for r in records
     if r["observed"] and (r["arm"], r["condition_id"]) in episodes
   ]
@@ -167,7 +170,7 @@ def run_arm(
       trace_path=trace,
       pd_telemetry=True,
       constant=(arm.groups, arm.level) if arm.groups else None,
-      names_path=args.output / "names.json",
+      names_path=args.output / f"{label}-names.json",
       handover_at_hold=arm.handover_at_hold,
       scenario=args.scenario,
     )
@@ -175,11 +178,7 @@ def run_arm(
     write_json(args.output / f"{label}-attempt-{attempt}.json", result)
     for row in result["rows"]:
       latest[row["condition_id"]] = row
-    retry = {
-      row["condition_id"]
-      for row in result["rows"]
-      if row["worker_failure"] or row["controller_start_failure"]
-    }
+    retry = {row["condition_id"] for row in result["rows"] if row["worker_failure"]}
     pending = [row for row in pending if row["condition_id"] in retry]
     print(
       f"[phases] {arm.name} attempt {attempt}: {len(retry)} infrastructure failures"

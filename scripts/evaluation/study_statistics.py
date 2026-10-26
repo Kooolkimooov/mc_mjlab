@@ -17,7 +17,6 @@ def measured(row: dict | None) -> TypeGuard[dict]:
     row is not None
     and row.get("observed") is True
     and row.get("worker_failure") is False
-    and row.get("controller_start_failure", False) is False
     and row.get("warmup_failed", False) is False
     and all(
       isinstance(row.get(key), bool)

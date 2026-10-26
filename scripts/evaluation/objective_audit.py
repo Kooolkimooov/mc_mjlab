@@ -33,7 +33,7 @@ MEASURES = (
 
 def category(record: dict) -> str:
   """Safe success, physical/controller failure, or survival without completion."""
-  if record.get("controller_start_failure") or record.get("worker_failure"):
+  if record.get("worker_failure"):
     return "infrastructure"
   if record["combined_failure"]:
     return "failure"

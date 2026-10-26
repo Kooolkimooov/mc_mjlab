@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 import mujoco
 import torch
 import warp as wp
-from mjlab.utils.noise.noise_cfg import ConstantNoiseCfg, NoiseCfg, NoiseModelCfg
-from mjlab.utils.noise.noise_model import NoiseModel
+from mjlab.utils.noise.noise_cfg import ConstantNoiseCfg, NoiseCfg
 
+from evaluation.study_noise import KeyedNoiseCfg, bind_noise
 from mc_mjlab.tasks.locomanip.cart import CART_FLOOR_PAIR
 
 IMU_TERMS = ("base_lin_vel", "base_ang_vel", "projected_gravity")
@@ -33,10 +33,26 @@ class Scenario:
   foot_friction_scale: float = 1.0
   cart_friction_scale: float = 1.0
 
-  def configure(self, cfg: Any) -> None:
+  def configure(self, cfg: Any, rows: list[dict]) -> None:
     """Edit the environment config before it is built."""
     actor = cfg.observations["actor"]
-    corrupted = self._observation_noise(cfg.decimation * cfg.sim.mujoco.timestep)
+    dt = cfg.decimation * cfg.sim.mujoco.timestep
+    identities = tuple(row["input_id"] for row in rows)
+    samples = math.ceil(cfg.episode_length_s / dt) + 2
+    corrupted = self._observation_noise(dt, identities, samples)
+    if self.white_noise:
+      for name, term in actor.terms.items():
+        if term.noise is not None:
+          actor.terms[name] = replace(
+            term,
+            noise=KeyedNoiseCfg(
+              noise_cfg=term.noise,
+              input_ids=identities,
+              channel=name,
+              samples=samples,
+              step_dt=dt,
+            ),
+          )
     if self.white_noise or corrupted:
       actor.enable_corruption = True
     if corrupted and not self.white_noise:
@@ -56,6 +72,7 @@ class Scenario:
   def install(self, env: Any) -> dict[str, Any]:
     """Apply post-build model changes once; returns what was changed."""
     applied: dict[str, Any] = {}
+    bind_noise(env)
     if self.pd_gain_scale != 1.0:
       applied["pd_gains"] = _scale_installed_gains(env, self.pd_gain_scale)
     if self.foot_friction_scale != 1.0:
@@ -69,7 +86,9 @@ class Scenario:
       )
     return applied
 
-  def _observation_noise(self, step_dt: float) -> dict[str, Any]:
+  def _observation_noise(
+    self, step_dt: float, input_ids: tuple[str, ...], samples: int
+  ) -> dict[str, Any]:
     noise: dict[str, Any] = {}
     if self.velocity_bias is not None:
       noise["base_lin_vel"] = ConstantNoiseCfg(bias=self.velocity_bias)
@@ -78,8 +97,14 @@ class Scenario:
       noise |= dict.fromkeys(IMU_TERMS, rotation)
     if self.velocity_error is not None:
       rms, correlation = self.velocity_error
-      noise["base_lin_vel"] = CorrelatedNoiseModelCfg(
-        rms=rms, correlation_s=correlation, step_dt=step_dt
+      noise["base_lin_vel"] = KeyedNoiseCfg(
+        noise_cfg=ConstantNoiseCfg(),
+        input_ids=input_ids,
+        channel="base_lin_vel",
+        samples=samples,
+        rms=rms,
+        correlation_s=correlation,
+        step_dt=step_dt,
       )
     return noise
 
@@ -107,42 +132,6 @@ class RotationNoiseCfg(NoiseCfg):
       ]
     )
     return data @ (ry @ rx).T.to(data.device, data.dtype)
-
-
-class CorrelatedNoise(NoiseModel):
-  """Additive Ornstein-Uhlenbeck error, stationary from each row's reset."""
-
-  def __init__(
-    self, noise_model_cfg: CorrelatedNoiseModelCfg, num_envs: int, device: str
-  ) -> None:
-    super().__init__(noise_model_cfg, num_envs, device)
-    self._cfg = noise_model_cfg
-    self._decay = math.exp(-noise_model_cfg.step_dt / noise_model_cfg.correlation_s)
-    self._state: torch.Tensor | None = None
-
-  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
-    if self._state is None:
-      return
-    rows = slice(None) if env_ids is None else env_ids
-    self._state[rows] = torch.randn_like(self._state[rows]) * self._cfg.rms
-
-  def __call__(self, data: torch.Tensor) -> torch.Tensor:
-    if self._state is None:
-      self._state = torch.randn_like(data) * self._cfg.rms
-    innovation = torch.randn_like(data) * self._cfg.rms
-    self._state = self._decay * self._state + math.sqrt(1 - self._decay**2) * innovation
-    return data + self._state
-
-
-@dataclass(kw_only=True)
-class CorrelatedNoiseModelCfg(NoiseModelCfg, class_type=CorrelatedNoise):
-  """Per-axis RMS error with an exponential correlation time."""
-
-  rms: float
-  correlation_s: float
-  step_dt: float
-  # NoiseModel requires one; the model's own state replaces it.
-  noise_cfg: NoiseCfg = field(default_factory=ConstantNoiseCfg)
 
 
 def scenarios() -> dict[str, Scenario]:

@@ -133,7 +133,7 @@ def main() -> None:
         starts = {
           r["condition_id"] for r in result["rows"] if r["controller_start_failure"]
         }
-        retry = workers | starts
+        retry = workers
         history.append(
           {
             "label": label,

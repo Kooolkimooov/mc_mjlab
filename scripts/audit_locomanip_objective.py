@@ -25,13 +25,13 @@ def main() -> None:
   parser.add_argument("probe", type=Path, help="probe_locomanip_phases output")
   args = parser.parse_args()
 
-  names = json.loads((args.probe / "names.json").read_text())
   records = json.loads((args.probe / "episodes.json").read_text())
-  traces = load_traces(sorted(args.probe.glob("*-attempt-*.jsonl")))
+  traces = load_traces(sorted(args.probe.glob("*-attempt-*.jsonl")), records)
   gamma = locomanip_ppo_cfg().algorithm.gamma
 
   episodes = []
   for record in records:
+    names = record["trace_names"]
     steps = traces.get((record["arm"], record["condition_id"]))
     if not record["observed"] or not steps:
       continue

@@ -17,16 +17,27 @@ BEFORE_S, AFTER_S = 1.0, 2.0
 GROUPS = ("arms", "waist", "legs", "wrists")
 
 
-def load_traces(paths: list[Path]) -> dict[tuple[str, str], list[dict]]:
-  """Per-step lines grouped by (arm, condition) and ordered by episode time."""
+def load_traces(
+  paths: list[Path], records: list[dict] | None = None
+) -> dict[tuple[str, str], list[dict]]:
+  """Read only each retained outcome's attempt and reject ambiguous timelines."""
+  selected = (
+    None
+    if records is None
+    else {(row["arm"], row["condition_id"]): row["trace_file"] for row in records}
+  )
   episodes: dict[tuple[str, str], list[dict]] = defaultdict(list)
   for path in paths:
     with path.open() as stream:
       for line in stream:
         step = json.loads(line)
-        episodes[(step["arm"], step["condition_id"])].append(step)
+        key = (step["arm"], step["condition_id"])
+        if selected is None or selected.get(key) == path.name:
+          episodes[key].append(step)
   for steps in episodes.values():
     steps.sort(key=lambda step: step["time_s"])
+    if any(b["time_s"] <= a["time_s"] for a, b in zip(steps, steps[1:], strict=False)):
+      raise ValueError("duplicate trace timestamps: select the retained attempt")
   return dict(episodes)
 
 
@@ -90,6 +101,14 @@ def window_summary(
 ) -> dict[str, Any]:
   """Motion, contact, delivery, tracking, PD demand and reward over one window."""
   window = steps[lo : hi + 1]
+  for step in window:
+    for channel, labels in (
+      ("executed_residual_rad", "residual"),
+      ("joint_position_rad", "joints"),
+      ("joint_position_target_rad", "joints"),
+    ):
+      if len(step[channel]) != len(names[labels]):
+        raise ValueError(f"{channel} width disagrees with this arm's {labels} labels")
 
   def column(key: str) -> np.ndarray:
     return np.array([step[key] for step in window], dtype=float)
@@ -140,6 +159,7 @@ def analyze_episode(
   } | {
     "combined_failure": record["combined_failure"],
     "controller_start_failure": record.get("controller_start_failure", False),
+    "worker_failure": record.get("worker_failure", False),
     "terminations": [name for name, hit in record["terminations"].items() if hit],
     "event_time_s": {
       name: None if index is None else steps[index]["time_s"]

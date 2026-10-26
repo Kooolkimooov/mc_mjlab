@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from evaluation.phase_summary import outcome_matrix, zero_contrasts
 from evaluation.phase_windows import (
   GROUPS,
   find_events,
+  load_traces,
   segment_bounds,
   window_summary,
 )
@@ -80,6 +84,39 @@ def test_window_summary_groups_and_rewards() -> None:
   assert summary["reward"]["foot_slip"] == pytest.approx(-100 * DT)
   assert summary["max_hand_force_n"] == [10.0, 20.0]
   assert summary["min_foot_load_kn"] == 3.0
+
+
+def test_retry_trace_selection_and_ambiguous_timeline_rejection(tmp_path: Path) -> None:
+  paths = [tmp_path / f"attempt-{i}.jsonl" for i in range(2)]
+  for attempt, path in enumerate(paths):
+    path.write_text(
+      "\n".join(
+        json.dumps(
+          {
+            **step(i, 0),
+            "arm": "policy",
+            "condition_id": "one",
+            "reward/foot_slip": -10.0 if attempt == 0 else -1.0,
+          }
+        )
+        for i in range(3)
+      )
+      + "\n"
+    )
+  with pytest.raises(ValueError, match="duplicate"):
+    load_traces(paths)
+  records = [{"arm": "policy", "condition_id": "one", "trace_file": paths[1].name}]
+  retained = load_traces(paths, records)[("policy", "one")]
+  assert len(retained) == 3
+  assert window_summary(retained, 0, 2, NAMES, DT)["reward"][
+    "foot_slip"
+  ] == pytest.approx(-3 * DT)
+
+
+def test_mismatched_arm_labels_fail_instead_of_reading_other_joints() -> None:
+  names = {**NAMES, "residual": ["RSP"]}
+  with pytest.raises(ValueError, match="width"):
+    window_summary([step(0, 0)], 0, 0, names, DT)
 
 
 def test_outcomes_and_zero_contrasts_pair_by_condition() -> None:

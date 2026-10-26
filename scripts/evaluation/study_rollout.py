@@ -79,7 +79,7 @@ def run_study_conditions(
   if pd_telemetry:
     instrument_pd(cfg)
   if scenario is not None:
-    scenario.configure(cfg)
+    scenario.configure(cfg, rows)
   with managed_env(cfg, device) as env:
     applied = scenario.install(env) if scenario is not None else {}
     wrapped = RslRlVecEnvWrapper(env)
@@ -107,8 +107,9 @@ def run_study_conditions(
         raise ValueError("a hold handover needs a policy to hand over to")
       policy = HoldHandover(env, policy)
     env.reset()
+    names = trace_names(env)
     if names_path is not None:
-      write_json(names_path, trace_names(env))
+      write_json(names_path, names)
     pd = (
       PdDemandSummary(env, rows, pd_rate_ids, pd_rate_prefix) if pd_telemetry else None
     )
@@ -119,6 +120,10 @@ def run_study_conditions(
     finally:
       trace.close()
     elapsed = time.perf_counter() - start
+    for row in trace.results:
+      assert row is not None
+      row["trace_file"] = trace_path.name if trace_path else None
+      row["trace_names"] = names
     return {
       "task": task,
       "checkpoint": str(checkpoint) if checkpoint else None,
@@ -131,6 +136,7 @@ def run_study_conditions(
       "rollout_wall_s": elapsed,
       "env_steps": steps,
       "rows": trace.results,
+      "trace_names": names,
     }
 
 

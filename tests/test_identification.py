@@ -11,7 +11,12 @@ import numpy as np
 import pytest
 import torch
 
-from mc_mjlab.identification.calibration import LagCompliance, load_calibration
+from mc_mjlab.identification.calibration import (
+  CalibrationArtifact,
+  JointCalibration,
+  LagCompliance,
+  load_calibration,
+)
 from mc_mjlab.identification.fits import (
   first_order_response,
   fit_delay_lag,
@@ -25,6 +30,35 @@ from mc_mjlab.identification.fits import (
 from mc_mjlab.identification.log import IdentificationLog
 
 DT = 0.001
+
+
+@pytest.mark.parametrize("field", ["delay_s", "tau_s", "stiffness_nm_per_rad"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_nonfinite_calibration_rejected_through_loader(
+  tmp_path: Path, field: str, value: float
+) -> None:
+  joint = {"delay_s": 0.0, "tau_s": 0.01, "stiffness_nm_per_rad": 1000.0, field: value}
+  path = tmp_path / "calibration.json"
+  path.write_text(json.dumps({"source": "robot", "joints": {"RSP": joint}}))
+  with pytest.raises(ValueError):
+    load_calibration(path, hashlib.sha256(path.read_bytes()).hexdigest())
+
+
+@pytest.mark.parametrize("dt", [0.0, -1.0, float("nan"), float("inf")])
+def test_invalid_model_timestep_rejected(dt: float) -> None:
+  with pytest.raises(ValueError, match="timestep"):
+    LagCompliance(None, ("RSP",), 1, dt)
+
+
+def test_unverified_artifact_cannot_enable_model(tmp_path: Path) -> None:
+  artifact = CalibrationArtifact(
+    str(tmp_path / "missing.json"),
+    "0" * 64,
+    "robot",
+    {"RSP": JointCalibration(0.0, 0.01)},
+  )
+  with pytest.raises(FileNotFoundError):
+    LagCompliance(artifact, ("RSP",), 1, DT)
 
 
 def test_delay_and_lag_recovered_and_predict_a_held_out_segment() -> None:

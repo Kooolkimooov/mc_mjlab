@@ -8,6 +8,7 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | Stage/substep ID | Status | Implementation/validation evidence | Experiment outcome | Artifacts | Next action/blocker | Last updated |
 | --- | --- | --- | --- | --- | --- | --- |
 | S0 plan | complete | Complete approved plan transcribed before source changes; commit containing this entry | not measured | this document | Freeze references | 2026-10-26 14:20 +09:00 |
+| R1 review corrections (S2/S4/S8/S10) | active | 47 targeted tests passed, including retry selection, label-width rejection, keyed noise and nonfinite calibration; strict prose passed | pending live revalidation | corrected reports will preserve originals | Commit, regenerate archived reports, then live noisy/reordered smoke | 2026-10-26 20:17 +09:00 |
 | S1 references | complete | Inventory frozen at `f577463`; `original`, `no_magnitude` (study control) and `arms_2x` (production) all load through the provenance-checking runner; no reference unavailable | nominal: each completes 600-650 kg, fails 700+ | `references.json`, `phase-nominal/` | none | 2026-10-26 16:58 +09:00 |
 | S2 qualification | complete | Mass dtype fix `bb98c3b`; `compare_study_runs.py`; six zero sources over batch 6/reversed batch 3 with recycled partial resets | zero vs zero: no outcome disagreement; spreads 0.0135 m, 0.04 s | `zero-smoke/`, `zero-reordered/`, `zero-plain-timed/`, `zero-repeatability.json` | Validation/held-out cohorts once candidates exist | 2026-10-26 15:20 +09:00 |
 | S3 PD telemetry | complete | `pd_telemetry` `f963cb2`: motor table and chain trajectory identical, stepped-only samples, partial resets (7 tests) | live: no outcome disagreement, spread 0.017 m; +3% step time; rate traces sum exactly | `zero-telemetry/`, `zero-telemetry-rate/` | Used by S4 | 2026-10-26 15:20 +09:00 |
@@ -16,7 +17,7 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | S6 observation history | active | history-10/20 `6287f6f`; live family smoke: both build, recycle and match zero at level 0 (0.0042 m, 0.06 s); `model_1180` rejected | not trained | `history-smoke/` | Training needs approval (S9 items 4-5) | 2026-10-26 17:45 +09:00 |
 | S7 objective audit | rejected (current evidence) | `059681f`; audit of 541 matched failure/success pairs from S4 nominal | current defect 354/541 (discounted); candidate leaves 312/541, 0/541 only without residual costs | `phase-nominal/objective.json` | Re-run when learned policies complete heavy loads | 2026-10-26 16:55 +09:00 |
 | S8 robustness/transitions | active | scenarios `97244ba`; worker replacement passed; handover passed; recycled episodes throughout; first-step QP failures reclassified `5913f0c` | references fail every mass with gains x0.9, gain +10% helps; delay 10 ms, friction, observation corruption leave nominal limits; combined -1 robust to all tested | `scenario-smoke/`, `sensitivity/`, `worker-replacement/` | Robustness training branches only after S9 action variants (needs approval) | 2026-10-26 19:05 +09:00 |
-| S9 campaign | blocked | Family smokes passed (control, arms-waist, coordinated, history-10/20); defaults equal the budget | not launched | launch commands in Experiment ledger | Needs explicit approval to train | 2026-10-26 17:45 +09:00 |
+| S9 campaign | active | User instructed review fixes and continuation; family smokes already passed | not launched | launch commands in Experiment ledger | Commit fixes, live regression, then seed-42 fresh control with periodic validation | 2026-10-26 20:17 +09:00 |
 | S10 identification | active | `mc_mjlab.identification` `57c92d8`: shared log, fits within synthetic tolerances (6 tests), robot-only hashed calibration gate | simulator 700 kg trace fitted on first half, held-out RMSE recorded; no robot data | `identification/zero-700-fresh.json` | Calibration procedure note; robot data external | 2026-10-26 15:55 +09:00 |
 
 ## Decisions and starting evidence
@@ -281,12 +282,12 @@ continuation path.
 
 ## Experiment ledger
 
-**Current:** No training launched; every run so far is an evaluation of frozen
-references, zero or constant requests (sections above). Training runs (S9) wait
-for explicit approval. Existing measurements remain in
+**Current:** Training is authorized by the user's instruction to address the
+review and continue the plan. No training has launched yet; review fixes and
+live regressions precede the fresh control. Existing measurements remain in
 [locomanip.md](locomanip.md); they motivate the campaign, not its qualification.
 
-S9 launch commands, once approved, in `mc_mjlab_training:2.1` (task defaults
+S9 launch commands in `mc_mjlab_training:2.1` (task defaults
 already equal the budget: 256 envs, 64 steps, 2,000 iterations, saves every 20,
 seed 42; about 6.4 h each from the 2x-arm run's 2,000 iterations in 6:24):
 
@@ -317,6 +318,21 @@ Item 7 (objective variant) is skipped: S7 rejected the candidate. Items 6, 8 and
   scheduling jobs. Local `pyproject.toml` dependency override is pre-existing.
 
 ## Amendments
+
+- 2026-10-26 20:17 — S2/S4/S8/S10 review corrections: supersede the 18:25
+  classification amendment below. Every QP failure counts as a controller
+  failure, including the first policy step (ten controller periods can already
+  observe residual-driven motion). Early timing is diagnostic only; retries are
+  worker-only. Retained outcomes select one attempt's trace and per-arm column
+  metadata. White and OU observation errors become condition/term/time keyed;
+  old noisy comparisons are sensitivity observations, not matched evidence.
+  Calibration rejects nonfinite parameters/timesteps and revalidates its artifact
+  before enabling a model. Existing artifacts remain intact; corrected reports
+  go in separate reanalysis directories. S2/S4 completion claims above refer to
+  the earlier measurements and are under revalidation; no policy is promoted.
+- 2026-10-26 20:17 — S9: the user's continuation instruction removes the previous
+  session's approval blocker. The original 13-run limit and conditional branches
+  remain. Begin with one fresh seed-42 control after the fixes are verified.
 
 - 2026-10-26 18:25 — S2, S4 (classification, not a decision change): a
   `controller_failed` reported on the first policy step is recorded as

@@ -11,6 +11,7 @@ import torch
 
 from evaluation.pd_demand import PdDemandSummary
 from evaluation.rollout import metric_snapshot
+from evaluation.study_noise import KeyedNoise
 from mc_mjlab.tasks.locomanip.mdp import accessors, observations
 
 
@@ -78,6 +79,11 @@ class StudyTrace:
     )
     self.tilt[active] = torch.maximum(self.tilt[active], tilt[active])
     frame = {key: value.cpu().tolist() for key, value in values.items()}
+    for name, noise in env.observation_manager._group_obs_class_instances.get(
+      "actor", {}
+    ).items():
+      if isinstance(noise, KeyedNoise) and noise.last_noise is not None:
+        frame[f"observation_noise/{name}"] = noise.last_noise.cpu().tolist()
     rewards = env.reward_manager._step_reward.cpu().tolist()
     for column, name in enumerate(env.reward_manager.active_terms):
       frame[f"reward/{name}"] = [row[column] for row in rewards]
@@ -111,11 +117,11 @@ class StudyTrace:
     metrics = metric_snapshot(env, ids)
     for offset, i in enumerate(ids.tolist()):
       flags = frame["terminations"][i]
-      # A QP failure on the first step precedes any residual reaching mc_rtc.
+      # Timing is diagnostic; a policy step contains several residual-fed solves.
       start = bool(flags.get("controller_failed")) and frame["time_s"][i] <= (
         1.5 * env.step_dt
       )
-      failed = not start and any(
+      failed = any(
         flags.get(n, False) for n in (*accessors.FALL_TERMINATIONS, "controller_failed")
       )
       worker = bool(flags.get("controller_worker_failed", False))
