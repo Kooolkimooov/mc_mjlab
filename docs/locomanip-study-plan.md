@@ -448,10 +448,42 @@ request, but the leaning-on-the-cart mechanism they suggest is a correlation,
 not an established cause. Useful groups: arms and waist, negative direction;
 legs and wrists moved nothing in the earlier authority probe (`8ac6bb0`).
 
+Matched encoder draws (`phase-encoder/`, `62da14b`; seed 1001, two draws per
+mass, fresh|recycled, positive levels dropped after failing every nominal
+condition). Per mass, draw 0 then draw 1:
+
+| Arm | 600 | 650 | 700 | 750 | 800 | 900 |
+| --- | --- | --- | --- | --- | --- | --- |
+| zero | CF\|CF | FE\|FE | FF\|FF | FF\|FF | FF\|FF | FF\|FF |
+| original | CC\|CX | XE\|XE | FF\|FF | FF\|FF | FF\|FF | FF\|FF |
+| no_magnitude | CF\|CF | FE\|FE | FF\|FF | FF\|FF | FF\|FF | FF\|FF |
+| arms_2x | CC\|CC | XE\|XC | FF\|FF | FF\|FF | FF\|FF | FF\|FF |
+| arms -1 | CC\|CC | CE\|CE | CC\|CC | CC\|CC | CX\|CX | CC\|CC |
+| arms -0.5 | CC\|CC | CE\|CE | FX\|FX | FF\|FF | FF\|FF | FF\|FF |
+| waist -1 | CC\|CC | CE\|CE | FX\|FX | FF\|FF | FF\|FF | XF\|XF |
+| combined -1 | CC\|CC | CE\|CE | CC\|CC | CC\|CC | CC\|CC | CC\|CC |
+| combined -0.5 | CC\|CC | CE\|CE | FC\|FC | CC\|CC | FF\|FF | CC\|CC |
+
+E is a QP failure at the first step of every episode for draw 1 at 650 kg in 17
+of 18 arm-episodes; the same draw completes in a 2-row batch, so it is not a
+property of the bias alone (under investigation; see the next History entry).
+Encoder bias costs the references and zero their 600 kg margin on draw 1; combined
+-1 still completes every other condition from 600 to 900 kg.
+
 **Re-measure if:** the controller's manipulation schedule, scales or payload
 model change.
 
 **History:**
+- 2026-10-26 18:10 — draw 650/1 diagnosis: identical bias (max 0.0099 rad) and
+  payload completed under zero in a 2-row, 2-worker batch (`draw650-diagnosis/`);
+  stance joints sit at least 0.122 rad from their limits, so the bias cannot cross
+  one. A 24-row, 4-worker reproduction with full controller output is the next
+  check.
+- 2026-10-26 16:52-18:10 — command: `uv run python
+  scripts/probe_locomanip_phases.py --output logs/locomanip-study/phase-encoder
+  --references logs/locomanip-study/references.json --encoder-draws --seeds 1001
+  --draws 2 --groups arms,waist,combined --levels -1,-0.5 --arms
+  zero,original,no_magnitude,arms_2x,control/arms/-1,control/arms/-0.5,control/waist/-1,control/combined/-1,control/combined/-0.5`.
 - 2026-10-26 15:16-16:50 — command: `uv run python
   scripts/probe_locomanip_phases.py --output logs/locomanip-study/phase-nominal
   --references logs/locomanip-study/references.json --workers 4`
@@ -572,6 +604,11 @@ change.
   12/12 records measured, evaluator exit 0, and outcomes agree with the earlier
   zero runs (8 sources, displacement spread 0.017 m, time 0.06 s). The first
   harness attempt crashed on `/proc` names with spaces and is not a result.
+- 2026-10-26 17:05-18:10 — remaining sensitivity (`sensitivity/`, one fresh
+  nominal condition per mass): 10 ms delay and foot friction x0.9 leave every arm
+  at its nominal limit (references 650 kg, combined -1 all of 600-800); velocity
+  bias x +/-0.05 m/s, IMU pitch +/-2 deg, velocity error 0.05 m/s/0.5 s and white
+  noise leave `original` and `arms_2x` completing 600 and 650 kg.
 - 2026-10-26 17:05- — gain sensitivity (`sensitivity/`, `51c3d61`, fresh,
   nominal, one condition per mass): installed gains x0.9 make zero and both
   references fail at every mass from 600 kg (nominally they complete 600, and the
