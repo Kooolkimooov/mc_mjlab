@@ -16,7 +16,7 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | S6 observation history | active | history-10/20 `6287f6f`; live family smoke: both build, recycle and match zero at level 0 (0.0042 m, 0.06 s); `model_1180` rejected | not trained | `history-smoke/` | Training needs approval (S9 items 4-5) | 2026-10-26 17:45 +09:00 |
 | S7 objective audit | rejected (current evidence) | `059681f`; audit of 541 matched failure/success pairs from S4 nominal | current defect 354/541 (discounted); candidate leaves 312/541, 0/541 only without residual costs | `phase-nominal/objective.json` | Re-run when learned policies complete heavy loads | 2026-10-26 16:55 +09:00 |
 | S8 robustness/transitions | active | 38 typed scenarios `97244ba` (3 tests); Hold handover `579fbec`; worker-replacement check `da810e5` | pending | none | Live scenario smoke and worker kill once a pane is free | 2026-10-26 15:55 +09:00 |
-| S9 campaign | planned | No new training launched | pending | none | S2 qualification and family smoke tests first | 2026-10-26 14:20 +09:00 |
+| S9 campaign | blocked | Family smokes passed (control, arms-waist, coordinated, history-10/20); defaults equal the budget | not launched | launch commands in Experiment ledger | Needs explicit approval to train | 2026-10-26 17:45 +09:00 |
 | S10 identification | active | `mc_mjlab.identification` `57c92d8`: shared log, fits within synthetic tolerances (6 tests), robot-only hashed calibration gate | simulator 700 kg trace fitted on first half, held-out RMSE recorded; no robot data | `identification/zero-700-fresh.json` | Calibration procedure note; robot data external | 2026-10-26 15:55 +09:00 |
 
 ## Decisions and starting evidence
@@ -281,12 +281,31 @@ continuation path.
 
 ## Experiment ledger
 
-**Current:** No campaign experiments launched. Existing measurements remain in
+**Current:** No training launched; every run so far is an evaluation of frozen
+references, zero or constant requests (sections above). Training runs (S9) wait
+for explicit approval. Existing measurements remain in
 [locomanip.md](locomanip.md); they motivate the campaign, not its qualification.
+
+S9 launch commands, once approved, in `mc_mjlab_training:2.1` (task defaults
+already equal the budget: 256 envs, 64 steps, 2,000 iterations, saves every 20,
+seed 42; about 6.4 h each from the 2x-arm run's 2,000 iterations in 6:24):
+
+1. `uv run train Mc-Mjlab-Locomanip-Study-Locomanipcontroller-Hrp5P-Control`
+2. `uv run train Mc-Mjlab-Locomanip-Study-Locomanipcontroller-Hrp5P-Arms-Waist`
+3. `uv run train Mc-Mjlab-Locomanip-Study-Locomanipcontroller-Hrp5P-Coordinated`
+4. `uv run train Mc-Mjlab-Locomanip-Study-Locomanipcontroller-Hrp5P-History-10`
+5. `uv run train Mc-Mjlab-Locomanip-Study-Locomanipcontroller-Hrp5P-History-20`
+
+Item 7 (objective variant) is skipped: S7 rejected the candidate. Items 6, 8 and
+9 depend on validation results of 1-5.
 
 **Re-measure if:** any reference or evaluator semantics change.
 
 **History:**
+- 2026-10-26 14:30-17:45 — evaluation-only runs in `mc_mjlab_training`
+  windows `2.1`, `study` and `checks` (zero smoke, telemetry, S4 probes, S5/S6
+  smokes, handover, worker replacement, scenarios). Window `1.1` remains
+  TensorBoard.
 - 2026-10-26 14:20 +09:00 — source inspection only. Initial tmux inventory was
   inaccessible inside the sandbox; inventory requires local socket access before
   scheduling jobs. Local `pyproject.toml` dependency override is pre-existing.
