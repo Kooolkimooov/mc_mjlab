@@ -423,11 +423,45 @@ push would state that requirement without going through the PD gains, and a
 gains-file change would not silently move them. The cost: they stop scaling
 with `TORQUE_FRACTION`, and the per-joint torque comparability is lost.
 
-**Re-measure if:** a run with the gains finishes (compare against `model_1180`
-with the same nominal protocol, [POSITION_REQUEST_WEIGHT](#position_request_weight)),
-or the probe's group table changes.
+**Measured, run `2026-10-23_17-39-18_arm-scale-2x`.** Best checkpoint `model_1280`
+(smoothed `safe_completion` 0.642, against 0.619 for `model_1180` and 0.625 for
+`model_1660`). `compare_to_baseline.py --nominal --num-envs 384 --num-workers 30
+--minutes 40`: 192 envs per arm, 4 episodes each, the first skipped, so 576
+episodes per arm. Baselines are pooled over the three comparisons (1824; this
+run's own baseline is homogeneous with the other two, CMH p = 0.85 and 0.32). The
+50%-completion mass is a logistic fit on 600-760 kg with a bootstrap 95% CI. The
+mass-standardized delta is against the pooled baseline:
+
+| checkpoint | 50% mass | standardized delta | 650-700 kg | `contact_dcm_stability` | `collapsed` |
+| --- | --- | --- | --- | --- | --- |
+| baseline | 640 kg [639, 641] | -- | 0.0% | 0.457 | 2.5% |
+| `model_1180` (push-friction) | 682 kg [680, 682] | +7.1%, CMH p = 3e-24 | 64.0% | 0.500 | 3.3% |
+| `model_1660` (no magnitude cost) | 671 kg [669, 673] | +5.3%, p = 3e-17 | 43.6% | 0.523 | 3.4% |
+| `model_1280` (arms 2x) | 687 kg [684, 689] | +7.8%, p = 7e-28 | 65.6% | 0.576 | 5.9% |
+
+Head to head with `model_1180`, completion is unchanged: +0.2% mass-standardized,
+CMH p = 0.86, and 65.6% against 64.0% at 650-700 kg. Above 700 kg, every
+policy and the baseline complete 0%, although the arms alone at a constant
+-1.0 carry 800 kg. The doubled range moved the edge by about 5 kg at most, and
+it did not make the policy use the authority the probe found. What did change:
+`contact_dcm_stability` +0.076 (p = 6e-226), `zmp_error` 0.121 m against 0.134 m,
+and `collapsed` 5.9% against 3.3%. One training seed per configuration.
+
+The same run's last checkpoint, `model_1999`, was scored with the same protocol
+(576 episodes per arm). Its completion edge fell to 672 kg [671, 674]. Against
+`model_1280` it is -2.2% mass-standardized (CMH p = 0.016), and 43.1% against
+65.6% at 650-700 kg (Fisher p = 0.023). Stability kept rising:
+`contact_dcm_stability` 0.726 against 0.576, `zmp_error` 0.073 m against 0.121 m.
+`task_success` halved (2.95% against 5.90%, p = 0.015). Late training traded
+completion at the edge for the stability reward, the pattern `model_1660` showed
+against `model_1180`.
+
+**Re-measure if:** the probe's group table changes, or a run changes how the
+policy reaches its range.
 
 **History:**
+- 2026-10-26 -- measured: completion edge 687 kg against 682 kg for the
+  hardware scale, not a detectable change.
 - 2026-10-23 -- added at 2x on HRP5P's arms, from the joint-group probe.
 
 ## Retired object tracking width
