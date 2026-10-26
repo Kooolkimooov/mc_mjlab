@@ -181,7 +181,9 @@ def run_arm(
       if row["worker_failure"] or row["controller_start_failure"]
     }
     pending = [row for row in pending if row["condition_id"] in retry]
-    print(f"[phases] {arm.name} attempt {attempt}: {len(retry)} worker failures")
+    print(
+      f"[phases] {arm.name} attempt {attempt}: {len(retry)} infrastructure failures"
+    )
     if not pending:
       break
   return list(latest.values())
