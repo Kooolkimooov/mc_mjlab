@@ -12,6 +12,9 @@ from mc_mjlab.actions.grouped_residual_action import (
   GroupedResidualJointPositionActionCfg,
   group_of_joint,
 )
+from mc_mjlab.actions.mc_rtc_residual_joint_position_actions import (
+  McRtcResidualJointPositionActionCfg,
+)
 from mc_mjlab.bridge.config import get_main_robot_name
 from mc_mjlab.tasks.locomanip import RESIDUAL_TASK_IDS
 from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
@@ -20,7 +23,7 @@ from mc_mjlab.tasks.locomanip.locomanip_residual_env_cfg import (
 from mc_mjlab.tasks.locomanip.mdp.accessors import ACTION_NAME
 from mc_mjlab.tasks.locomanip.profiles import HRP5P, PROFILES
 from mc_mjlab.tasks.locomanip_study import CONTROL_TASK_ID, TASK_IDS
-from mc_mjlab.tasks.locomanip_study.config import STUDY_GROUPS
+from mc_mjlab.tasks.locomanip_study.config import INSTANTANEOUS_TERMS, STUDY_GROUPS
 
 pytestmark = requires_controller(HRP5P.mc_rtc_yaml)
 
@@ -41,7 +44,9 @@ def test_study_control_preserves_production_and_hardware_authority() -> None:
 
 def test_study_variants_change_only_the_residual_joints() -> None:
   control = load_env_cfg(CONTROL_TASK_ID)
-  residual = control.actions[ACTION_NAME].residual_actuator_names
+  original = control.actions[ACTION_NAME]
+  assert isinstance(original, McRtcResidualJointPositionActionCfg)
+  residual = original.residual_actuator_names
   assert residual is not None
   expected = [
     n for n in residual if any(re.fullmatch(p, n) for p in STUDY_GROUPS.values())
@@ -50,12 +55,13 @@ def test_study_variants_change_only_the_residual_joints() -> None:
   for suffix in ("arms-waist", "coordinated"):
     variant = load_env_cfg(TASK_IDS[suffix])
     action = variant.actions[ACTION_NAME]
+    assert isinstance(action, McRtcResidualJointPositionActionCfg)
     patterns = action.residual_actuator_names
     assert patterns is not None
     assert [
       n for n in residual if any(re.fullmatch(p, n) for p in patterns)
     ] == expected
-    assert action.scale == control.actions[ACTION_NAME].scale
+    assert action.scale == original.scale
     assert variant.rewards == control.rewards
     assert variant.observations == control.observations
     assert variant.events == control.events
@@ -72,3 +78,23 @@ def test_grouping_rejects_gaps_and_overlaps() -> None:
     group_of_joint(names, ((STUDY_GROUPS["arms"],),))
   with pytest.raises(ValueError, match="two"):
     group_of_joint(names, ((".*",), ("WP",)))
+
+
+@pytest.mark.parametrize("frames", [10, 20])
+def test_history_variants_share_channels_and_keep_discrete_terms_instant(
+  frames: int,
+) -> None:
+  control = load_env_cfg(CONTROL_TASK_ID)
+  variant = load_env_cfg(TASK_IDS[f"history-{frames}"])
+  assert variant.actions == control.actions and variant.rewards == control.rewards
+  actor = variant.observations["actor"].terms
+  critic = variant.observations["critic"].terms
+  assert list(actor) == list(control.observations["actor"].terms)
+  for name, term in actor.items():
+    original = control.observations["actor"].terms[name].history_length
+    expected = original if name in INSTANTANEOUS_TERMS else frames
+    assert term.history_length == expected, name
+    assert critic[name].history_length == term.history_length, name
+    assert term.noise == control.observations["actor"].terms[name].noise
+  for name in critic.keys() - actor.keys():
+    assert critic[name] == control.observations["critic"].terms[name]
