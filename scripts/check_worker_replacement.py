@@ -38,8 +38,12 @@ def main() -> None:
     str(args.output),
   ]
   evaluator = subprocess.Popen(command)
-  victim = _kill_first_worker(evaluator.pid, args.kill_after_s)
-  code = evaluator.wait()
+  try:
+    victim = _kill_first_worker(evaluator.pid, args.kill_after_s)
+    code = evaluator.wait()
+  finally:
+    if evaluator.poll() is None:
+      evaluator.terminate()
   report = _audit(args.output, victim, code)
   (args.output / "worker_replacement.json").write_text(json.dumps(report, indent=2))
   print(json.dumps(report, indent=2))
@@ -65,11 +69,12 @@ def _workers(parent: int) -> list[tuple[int, str]]:
     if not entry.name.isdigit():
       continue
     try:
-      stat = (entry / "stat").read_text().split()
+      # The command name may contain spaces; fields after its closing paren are fixed.
+      stat = (entry / "stat").read_text().rsplit(")", 1)[1].split()
       args = (entry / "cmdline").read_bytes().split(b"\0")
     except OSError:
       continue
-    if int(stat[3]) == parent and args[0].endswith(WORKER.encode()):
+    if int(stat[1]) == parent and args[0].endswith(WORKER.encode()):
       endpoint = args[args.index(b"--endpoint") + 1].decode()
       found.append((int(entry.name), endpoint.rsplit("/", 1)[-1]))
   return found
