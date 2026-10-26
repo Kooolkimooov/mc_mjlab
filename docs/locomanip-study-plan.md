@@ -11,11 +11,11 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | S1 references | complete | Inventory frozen at `f577463`; `original`, `no_magnitude` (study control) and `arms_2x` (production) all load through the provenance-checking runner; no reference unavailable | nominal: each completes 600-650 kg, fails 700+ | `references.json`, `phase-nominal/` | none | 2026-10-26 16:58 +09:00 |
 | S2 qualification | complete | Mass dtype fix `bb98c3b`; `compare_study_runs.py`; six zero sources over batch 6/reversed batch 3 with recycled partial resets | zero vs zero: no outcome disagreement; spreads 0.0135 m, 0.04 s | `zero-smoke/`, `zero-reordered/`, `zero-plain-timed/`, `zero-repeatability.json` | Validation/held-out cohorts once candidates exist | 2026-10-26 15:20 +09:00 |
 | S3 PD telemetry | complete | `pd_telemetry` `f963cb2`: motor table and chain trajectory identical, stepped-only samples, partial resets (7 tests) | live: no outcome disagreement, spread 0.017 m; +3% step time; rate traces sum exactly | `zero-telemetry/`, `zero-telemetry-rate/` | Used by S4 | 2026-10-26 15:20 +09:00 |
-| S4 phase diagnosis | active | nominal probe `868cffb`: 16 arms x 6 masses x 2 lifecycles, 192/192 segmented | combined arms+waist -1 completes 600-900 kg; references stop at 650; all failures 1.4-4.7 s after the scheduled release | `phase-nominal/summary.json` | Matched encoder draws running (`phase-encoder/`) | 2026-10-26 16:55 +09:00 |
+| S4 phase diagnosis | complete | nominal (192 episodes) and matched encoder draws (216, 650 kg rerun with retries); raw-phase windows; handover | arms/waist useful only in the negative direction; combined -1 completes every measured condition 600-900 kg; failures follow the scheduled release by 1.4-4.7 s after high sustained-Hold tilt (correlation) | `phase-nominal/`, `phase-encoder/`, `phase-encoder-650/`, `handover/` | Feeds S5 group choice | 2026-10-26 19:05 +09:00 |
 | S5 focused exploration | active | `StudySpec` arms-waist/coordinated `071c50c`, init fix `ed098ff`; live: level-0 requests equal zero and identical joint requests agree across all three tasks | not trained | `s5-mapping/` | Training needs approval (S9 items 2-3) | 2026-10-26 16:50 +09:00 |
 | S6 observation history | active | history-10/20 `6287f6f`; live family smoke: both build, recycle and match zero at level 0 (0.0042 m, 0.06 s); `model_1180` rejected | not trained | `history-smoke/` | Training needs approval (S9 items 4-5) | 2026-10-26 17:45 +09:00 |
 | S7 objective audit | rejected (current evidence) | `059681f`; audit of 541 matched failure/success pairs from S4 nominal | current defect 354/541 (discounted); candidate leaves 312/541, 0/541 only without residual costs | `phase-nominal/objective.json` | Re-run when learned policies complete heavy loads | 2026-10-26 16:55 +09:00 |
-| S8 robustness/transitions | active | 38 typed scenarios `97244ba` (3 tests); Hold handover `579fbec`; worker-replacement check `da810e5` | pending | none | Live scenario smoke and worker kill once a pane is free | 2026-10-26 15:55 +09:00 |
+| S8 robustness/transitions | active | scenarios `97244ba`; worker replacement passed; handover passed; recycled episodes throughout; first-step QP failures reclassified `5913f0c` | references fail every mass with gains x0.9, gain +10% helps; delay 10 ms, friction, observation corruption leave nominal limits; combined -1 robust to all tested | `scenario-smoke/`, `sensitivity/`, `worker-replacement/` | Robustness training branches only after S9 action variants (needs approval) | 2026-10-26 19:05 +09:00 |
 | S9 campaign | blocked | Family smokes passed (control, arms-waist, coordinated, history-10/20); defaults equal the budget | not launched | launch commands in Experiment ledger | Needs explicit approval to train | 2026-10-26 17:45 +09:00 |
 | S10 identification | active | `mc_mjlab.identification` `57c92d8`: shared log, fits within synthetic tolerances (6 tests), robot-only hashed calibration gate | simulator 700 kg trace fitted on first half, held-out RMSE recorded; no robot data | `identification/zero-700-fresh.json` | Calibration procedure note; robot data external | 2026-10-26 15:55 +09:00 |
 
@@ -489,8 +489,15 @@ model change.
   A 24-row, 4-worker rerun with full controller output (`encoder24-diagnosis/`)
   failed it in 2 of 4 episodes with `[error] QP failed to run()` right after
   `LMC::Initial_`: intermittent and policy independent, so classified as an
-  infrastructure start failure (see Amendments). 650 kg rerun with retries:
-  `phase-encoder-650/`.
+  infrastructure start failure (see Amendments).
+- 2026-10-26 18:26-19:03 — 650 kg rerun with retries (`phase-encoder-650/`,
+  `5913f0c`), draw 0 then draw 1, fresh|recycled: zero FC|FS, original XC|XS,
+  no_magnitude XC|FC, arms_2x XC|XS, arms -1 CC|CS, arms -0.5, waist -1, combined
+  -1 and combined -0.5 all CC|CC. Draw 1 completes for every arm once mc_rtc
+  starts; 4 of 36 rows (draw 1, recycled: zero, original, arms_2x, arms -1)
+  still failed the first solve after three attempts and stay unmeasured. The
+  start failure is frequent for this initial condition, not random noise; it is
+  a controller start fragility to report, not a policy outcome.
 - 2026-10-26 16:52-18:10 — command: `uv run python
   scripts/probe_locomanip_phases.py --output logs/locomanip-study/phase-encoder
   --references logs/locomanip-study/references.json --encoder-draws --seeds 1001
