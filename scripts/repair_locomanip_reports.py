@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import cast
 
 import mjlab  # noqa: F401
 from evaluation.objective_audit import (
@@ -20,6 +21,7 @@ from freeze_locomanip_references import file_identity, revision
 from mjlab.tasks.registry import load_env_cfg
 from mjlab.utils.lab_api.string import resolve_matching_names
 
+from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionCfg
 from mc_mjlab.tasks.locomanip.locomanip_ppo_cfg import locomanip_ppo_cfg
 from mc_mjlab.tasks.locomanip.mdp.accessors import ACTION_NAME
 
@@ -140,7 +142,11 @@ def recover_names(batch: dict, base: dict) -> dict:
     patterns = config["residual_actuator_names"]
   else:
     cfg = load_env_cfg(batch["task"])
-    patterns = cfg.actions[ACTION_NAME].residual_actuator_names
+    patterns = cast(
+      McRtcResidualActionCfg, cfg.actions[ACTION_NAME]
+    ).residual_actuator_names
+  if patterns is None:
+    raise ValueError("archived action does not declare residual joint patterns")
   _, residual = resolve_matching_names(patterns, base["joints"])
   return {**base, "residual": residual}
 
