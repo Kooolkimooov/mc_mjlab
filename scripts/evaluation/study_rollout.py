@@ -53,6 +53,7 @@ def run_study_conditions(
   constant: tuple[tuple[str, ...], float] | None = None,
   names_path: Path | None = None,
   scenario: Scenario | None = None,
+  handover_at_hold: bool = False,
 ) -> dict:
   """Evaluate one arm, applying no policy during a recycled row's warm-up."""
   if not rows or workers < 1:
@@ -100,6 +101,10 @@ def run_study_conditions(
       manifest = runner._effective_manifest
     elif constant is not None:
       policy = ConstantRequest(env, *constant)
+    if handover_at_hold:
+      if policy is None:
+        raise ValueError("a hold handover needs a policy to hand over to")
+      policy = HoldHandover(env, policy)
     env.reset()
     if names_path is not None:
       write_json(names_path, trace_names(env))
@@ -120,11 +125,30 @@ def run_study_conditions(
       "effective_manifest": manifest,
       "pd_telemetry": pd_telemetry,
       "constant": None if constant is None else list(constant),
+      "handover_at_hold": handover_at_hold,
       "scenario": None if scenario is None else asdict(scenario) | {"applied": applied},
       "rollout_wall_s": elapsed,
       "env_steps": steps,
       "rows": trace.results,
     }
+
+
+class HoldHandover:
+  """Zero until a row's first fresh bilateral Hold, then the wrapped policy."""
+
+  def __init__(self, env: Any, policy: Any) -> None:
+    self.env, self.policy = env, policy
+    self.engaged = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+
+  def __call__(self, observations: Any) -> torch.Tensor:
+    term = accessors.residual_action(self.env)
+    fresh = term._datastore_output_fresh
+    self.engaged |= accessors.holding(self.env).bool() & fresh
+    return self.policy(observations) * self.engaged.unsqueeze(1)
+
+  def reset(self, dones: torch.Tensor) -> None:
+    self.engaged[dones] = False
+    self.policy.reset(dones)
 
 
 class ConstantRequest:

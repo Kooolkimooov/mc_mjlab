@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 import mjlab  # noqa: F401
@@ -41,6 +41,7 @@ class ProbeArm:
   checkpoint: str | None = None
   groups: tuple[str, ...] = ()
   level: float = 0.0
+  handover_at_hold: bool = False
 
 
 def main() -> None:
@@ -57,6 +58,9 @@ def main() -> None:
   parser.add_argument("--profiles", default="control")
   parser.add_argument("--references", type=Path)
   parser.add_argument("--arms", help="comma-separated arm names to run")
+  parser.add_argument(
+    "--handover", action="store_true", help="add hold-handover copies of policy arms"
+  )
   parser.add_argument("--workers", type=int, default=4)
   parser.add_argument("--max-retries", type=int, choices=(0, 1, 2), default=2)
   parser.add_argument("--device", default="cuda:0")
@@ -130,6 +134,12 @@ def probe_arms(args: argparse.Namespace) -> list[ProbeArm]:
             level=level,
           )
         )
+  if args.handover:
+    arms += [
+      replace(arm, name=f"handover/{arm.name}", handover_at_hold=True)
+      for arm in arms
+      if arm.checkpoint or arm.groups
+    ]
   return arms
 
 
@@ -152,6 +162,7 @@ def run_arm(
       pd_telemetry=True,
       constant=(arm.groups, arm.level) if arm.groups else None,
       names_path=args.output / "names.json",
+      handover_at_hold=arm.handover_at_hold,
     )
     traces.append(trace)
     write_json(args.output / f"{label}-attempt-{attempt}.json", result)
