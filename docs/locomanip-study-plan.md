@@ -302,6 +302,12 @@ Item 7 (objective variant) is skipped: S7 rejected the candidate. Items 6, 8 and
 **Re-measure if:** any reference or evaluator semantics change.
 
 **History:**
+- 2026-10-26 19:05 — session end: no job running; `mc_mjlab_training` windows
+  `2` (training), `3` (study) and `4` (checks) are idle shells, `1` is
+  TensorBoard. Exact next action: obtain approval, then launch S9 item 1
+  (`uv run train Mc-Mjlab-Locomanip-Study-Locomanipcontroller-Hrp5P-Control`) in
+  `mc_mjlab_training:2.1`; evaluate every 200 iterations with
+  `scripts/evaluate_locomanip_study.py` on the validation cohort.
 - 2026-10-26 14:30-17:45 — evaluation-only runs in `mc_mjlab_training`
   windows `2.1`, `study` and `checks` (zero smoke, telemetry, S4 probes, S5/S6
   smokes, handover, worker replacement, scenarios). Window `1.1` remains
