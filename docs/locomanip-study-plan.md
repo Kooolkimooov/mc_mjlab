@@ -312,7 +312,16 @@ Item 7 (objective variant) is skipped: S7 rejected the candidate. Items 6, 8 and
 
 ## Amendments
 
-None. Original decisions are preserved above.
+- 2026-10-26 18:25 — S2, S4 (classification, not a decision change): a
+  `controller_failed` reported on the first policy step is recorded as
+  `controller_start_failure`, retried at most twice like a worker failure and
+  reported separately, because mc_rtc's first solve after a reset sees no
+  residual. Evidence: draw 650/1 failed `QP failed to run()` right after
+  `LMC::Initial_` in 17/18 probe episodes across all arms, 0/1 in a 2-row batch
+  and 2/4 in a 24-row rerun with identical bias (max 0.0099 rad) and payload.
+  Original rule: "Report worker failures separately and retry infrastructure
+  failures at most twice"; it now names both kinds. Applied from `5913f0c`;
+  records before it carry the failure as `E` (controller) outcomes.
 
 ## Reference identities and first evaluator milestone
 
@@ -464,9 +473,9 @@ condition). Per mass, draw 0 then draw 1:
 | combined -1 | CC\|CC | CE\|CE | CC\|CC | CC\|CC | CC\|CC | CC\|CC |
 | combined -0.5 | CC\|CC | CE\|CE | FC\|FC | CC\|CC | FF\|FF | CC\|CC |
 
-E is a QP failure at the first step of every episode for draw 1 at 650 kg in 17
-of 18 arm-episodes; the same draw completes in a 2-row batch, so it is not a
-property of the bias alone (under investigation; see the next History entry).
+E is a QP failure at the first step for draw 1 at 650 kg in 17 of 18
+arm-episodes; it is intermittent and precedes any residual, so it is now an
+infrastructure start failure (see Amendments) and the 650 kg column is rerun.
 Encoder bias costs the references and zero their 600 kg margin on draw 1; combined
 -1 still completes every other condition from 600 to 900 kg.
 
@@ -474,11 +483,14 @@ Encoder bias costs the references and zero their 600 kg margin on draw 1; combin
 model change.
 
 **History:**
-- 2026-10-26 18:10 — draw 650/1 diagnosis: identical bias (max 0.0099 rad) and
-  payload completed under zero in a 2-row, 2-worker batch (`draw650-diagnosis/`);
-  stance joints sit at least 0.122 rad from their limits, so the bias cannot cross
-  one. A 24-row, 4-worker reproduction with full controller output is the next
-  check.
+- 2026-10-26 18:10-18:24 — draw 650/1 diagnosis: identical bias (max 0.0099 rad)
+  and payload completed under zero in a 2-row, 2-worker batch
+  (`draw650-diagnosis/`); stance joints sit at least 0.122 rad from their limits.
+  A 24-row, 4-worker rerun with full controller output (`encoder24-diagnosis/`)
+  failed it in 2 of 4 episodes with `[error] QP failed to run()` right after
+  `LMC::Initial_`: intermittent and policy independent, so classified as an
+  infrastructure start failure (see Amendments). 650 kg rerun with retries:
+  `phase-encoder-650/`.
 - 2026-10-26 16:52-18:10 — command: `uv run python
   scripts/probe_locomanip_phases.py --output logs/locomanip-study/phase-encoder
   --references logs/locomanip-study/references.json --encoder-draws --seeds 1001
