@@ -1,0 +1,7 @@
+{
+  "masses": [650],
+  "seeds": [1001],
+  "draws": 1,
+  "lifecycles": ["fresh"],
+  "nominal": true
+}
