@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 from dataclasses import asdict
 from pathlib import Path
 
 import mjlab  # noqa: F401
 from evaluation.study_cohort import StudyCohort
+from evaluation.study_io import write_json
 from evaluation.study_rollout import run_study_conditions
 from evaluation.study_statistics import summarize
 from freeze_locomanip_references import file_identity, revision
@@ -90,7 +90,7 @@ def main() -> None:
     if args.cohort
     else "validation",
   }
-  _write(args.output / "cohort.json", manifest)
+  write_json(args.output / "cohort.json", manifest)
   all_rows = []
   history = []
   for arm in ("reference", "candidate"):
@@ -113,7 +113,7 @@ def main() -> None:
           pd_rate_ids=frozenset(args.pd_rate_trace),
           pd_rate_prefix=args.output / label,
         )
-        _write(args.output / f"{label}.json", result)
+        write_json(args.output / f"{label}.json", result)
         for row in result["rows"]:
           latest[row["condition_id"]] = row
         retry = {row["condition_id"] for row in result["rows"] if row["worker_failure"]}
@@ -126,27 +126,13 @@ def main() -> None:
         if not pending:
           break
       all_rows.extend(latest.values())
-      _write(args.output / "episodes.json", all_rows)
-      _write(args.output / "retry_history.json", history)
+      write_json(args.output / "episodes.json", all_rows)
+      write_json(args.output / "retry_history.json", history)
   report = summarize(all_rows, cohort)
   report["reference_checkpoint"] = manifest["reference"]["checkpoint"]
   report["candidate_checkpoint"] = manifest["candidate"]["checkpoint"]
-  _write(args.output / "report.json", report)
+  write_json(args.output / "report.json", report)
   print(json.dumps(report, indent=2))
-
-
-def _write(path: Path, value: object) -> None:
-  path.write_text(json.dumps(_finite_json(value), indent=2, allow_nan=False) + "\n")
-
-
-def _finite_json(value: object) -> object:
-  if isinstance(value, float) and not math.isfinite(value):
-    return None
-  if isinstance(value, dict):
-    return {key: _finite_json(item) for key, item in value.items()}
-  if isinstance(value, (list, tuple)):
-    return [_finite_json(item) for item in value]
-  return value
 
 
 if __name__ == "__main__":

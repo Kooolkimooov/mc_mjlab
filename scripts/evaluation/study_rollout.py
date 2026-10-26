@@ -17,6 +17,7 @@ from mjlab.managers.event_manager import (
 from mjlab.rl import RslRlVecEnvWrapper
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 
+from evaluation.locomanip_authority import group_columns
 from evaluation.locomanip_inputs import (
   assert_payload_masses,
   draw_encoder_bias,
@@ -24,6 +25,7 @@ from evaluation.locomanip_inputs import (
 )
 from evaluation.pd_demand import PdDemandSummary
 from evaluation.rollout import managed_env, reset_done
+from evaluation.study_io import write_json
 from evaluation.study_trace import StudyTrace
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionCfg
 from mc_mjlab.rl.controller_provenance import collect_controller_provenance
@@ -42,10 +44,14 @@ def run_study_conditions(
   pd_telemetry: bool = False,
   pd_rate_ids: frozenset[str] = frozenset(),
   pd_rate_prefix: Path | None = None,
+  constant: tuple[tuple[str, ...], float] | None = None,
+  names_path: Path | None = None,
 ) -> dict:
   """Evaluate one arm, applying no policy during a recycled row's warm-up."""
   if not rows or workers < 1:
     raise ValueError("nonempty rows and positive workers required")
+  if constant is not None and checkpoint is not None:
+    raise ValueError("an arm is either a checkpoint or a constant request")
   cfg = load_env_cfg(task)
   cfg.seed = rows[0]["seed"]
   cfg.scene.num_envs = len(rows)
@@ -79,7 +85,11 @@ def run_study_conditions(
       )
       policy = runner.get_inference_policy(device=device)
       manifest = runner._effective_manifest
+    elif constant is not None:
+      policy = ConstantRequest(env, *constant)
     env.reset()
+    if names_path is not None:
+      write_json(names_path, trace_names(env))
     pd = (
       PdDemandSummary(env, rows, pd_rate_ids, pd_rate_prefix) if pd_telemetry else None
     )
@@ -96,10 +106,41 @@ def run_study_conditions(
       "controller_provenance": collect_controller_provenance(wrapped),
       "effective_manifest": manifest,
       "pd_telemetry": pd_telemetry,
+      "constant": None if constant is None else list(constant),
       "rollout_wall_s": elapsed,
       "env_steps": steps,
       "rows": trace.results,
     }
+
+
+class ConstantRequest:
+  """A fixed normalized request on named residual groups, zero elsewhere."""
+
+  def __init__(self, env: Any, groups: tuple[str, ...], level: float) -> None:
+    if not -1.0 <= level <= 1.0:
+      raise ValueError("constant requests are normalized actions in [-1, 1]")
+    self.action = torch.zeros(
+      env.num_envs, env.action_manager.total_action_dim, device=env.device
+    )
+    for group in groups:
+      self.action[:, group_columns(env, group)] = level
+
+  def __call__(self, observations: Any) -> torch.Tensor:
+    del observations
+    return self.action
+
+  def reset(self, dones: torch.Tensor) -> None:
+    del dones
+
+
+def trace_names(env: Any) -> dict[str, Any]:
+  """Column names the per-step trace arrays are ordered by."""
+  return {
+    "joints": list(env.scene["robot"].joint_names),
+    "residual": list(accessors.residual_action(env).residual_names),
+    "rewards": list(env.reward_manager.active_terms),
+    "step_dt": env.step_dt,
+  }
 
 
 @requires_model_fields(

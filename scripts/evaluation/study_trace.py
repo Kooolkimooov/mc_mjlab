@@ -11,7 +11,7 @@ import torch
 
 from evaluation.pd_demand import PdDemandSummary
 from evaluation.rollout import metric_snapshot
-from mc_mjlab.tasks.locomanip.mdp import accessors
+from mc_mjlab.tasks.locomanip.mdp import accessors, observations
 
 
 class StudyTrace:
@@ -62,6 +62,8 @@ class StudyTrace:
       "controller_q": term.controller_reference("q"),
       "joint_position_rad": robot.joint_pos,
       "joint_velocity_rad_s": robot.joint_vel,
+      "joint_position_target_rad": robot.joint_pos_target,
+      "foot_force_kn": observations.foot_normal_forces(env),
       "requested_action": term.requested_normalized_action,
       "executed_residual_rad": term.executed_physical_action,
       "cart_error_m": accessors.object_position_error(env),
@@ -76,6 +78,9 @@ class StudyTrace:
     )
     self.tilt[active] = torch.maximum(self.tilt[active], tilt[active])
     frame = {key: value.cpu().tolist() for key, value in values.items()}
+    rewards = env.reward_manager._step_reward.cpu().tolist()
+    for column, name in enumerate(env.reward_manager.active_terms):
+      frame[f"reward/{name}"] = [row[column] for row in rewards]
     names = env.termination_manager.active_terms
     flags = (
       torch.stack([env.termination_manager.get_term(n) for n in names], dim=1)

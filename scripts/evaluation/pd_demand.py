@@ -80,13 +80,13 @@ class PdDemandSummary:
       )
     episode["saturated_s"] += window["saturated_s"] * rows
     self._keep_rate(active)
-    return {
-      f"pd_window_peak_nm/{group}": window["peak_abs_nm"][:, columns]
-      .amax(dim=1)
-      .cpu()
-      .tolist()
-      for group, columns in self.columns.items()
-    }
+    frame = {}
+    for group, columns in self.columns.items():
+      peak = window["peak_abs_nm"][:, columns].amax(dim=1)
+      saturated = window["saturated_s"][:, columns].sum(dim=1)
+      frame[f"pd_window_peak_nm/{group}"] = peak.cpu().tolist()
+      frame[f"pd_window_saturated_s/{group}"] = saturated.cpu().tolist()
+    return frame
 
   def result(self, i: int) -> dict[str, Any]:
     """Per-group episode peak with its contributions, saturation and rate-trace path."""
