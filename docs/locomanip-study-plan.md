@@ -533,6 +533,16 @@ not rotated.
 change.
 
 **History:**
+- 2026-10-26 16:48-17:06 — Hold handover (`handover/`, `07b2f84`, 700/800 kg,
+  fresh and recycled, nominal): executed residual is exactly 0 before fresh
+  bilateral Hold in every handover episode. Arms -1 from Hold entry only
+  completes all four conditions (sustained-Hold tilt 0.084-0.137 rad, against
+  0.594-0.602 for zero); `original` from Hold entry reproduces its nominal
+  outcomes (700 kg collapse, 800 kg tilt fall). Command: `uv run python
+  scripts/probe_locomanip_phases.py --output logs/locomanip-study/handover
+  --masses 700,800 --lifecycles fresh,recycled --references
+  logs/locomanip-study/references.json --groups arms --levels -1 --handover
+  --arms zero,handover/control/arms/-1,handover/original`.
 - 2026-10-26 15:57-16:15 — `check_worker_replacement.py` (`d8df874`): SIGKILL
   of worker `0_1_0` 60 s into the reference arm of the smoke cohort; exactly its
   two 400 kg conditions reported worker failures and were retried in attempt 1;
