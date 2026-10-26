@@ -12,12 +12,12 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | S2 qualification | complete | Mass dtype fix `bb98c3b`; `compare_study_runs.py`; six zero sources over batch 6/reversed batch 3 with recycled partial resets | zero vs zero: no outcome disagreement; spreads 0.0135 m, 0.04 s | `zero-smoke/`, `zero-reordered/`, `zero-plain-timed/`, `zero-repeatability.json` | Validation/held-out cohorts once candidates exist | 2026-10-26 15:20 +09:00 |
 | S3 PD telemetry | complete | `pd_telemetry` `f963cb2`: motor table and chain trajectory identical, stepped-only samples, partial resets (7 tests) | live: no outcome disagreement, spread 0.017 m; +3% step time; rate traces sum exactly | `zero-telemetry/`, `zero-telemetry-rate/` | Used by S4 | 2026-10-26 15:20 +09:00 |
 | S4 phase diagnosis | active | `probe_locomanip_phases.py` `8184e6e`: constant arms, raw-phase windows (3 tests); 700 kg smoke segmented 6/6 episodes | pending | `phase-smoke/` | Nominal probe: 16 arms x 600-900 kg x fresh/recycled | 2026-10-26 15:20 +09:00 |
-| S5 focused exploration | planned | none | pending | none | Measured groups from S4; typed study tasks | 2026-10-26 14:20 +09:00 |
-| S6 observation history | planned | none | pending | none | Isolated 10/20-frame variants | 2026-10-26 14:20 +09:00 |
-| S7 objective audit | planned | none | pending | none | Recorded matched trajectories and ranking defect gate | 2026-10-26 14:20 +09:00 |
-| S8 robustness/transitions | planned | none | pending | none | Isolated scenarios, then justified training branches | 2026-10-26 14:20 +09:00 |
+| S5 focused exploration | active | `StudySpec` arms-waist (13 joints) and coordinated (2 outputs) `071c50c`; grouped-term init fix `ed098ff`; config tests 5 | pending | `s5-mapping/` | Live zero equivalence and arm-request mapping probe; training needs approval | 2026-10-26 15:55 +09:00 |
+| S6 observation history | active | history-10/20 `6287f6f`: all continuous actor channels and critic copies; phase/completion instantaneous; original checkpoint rejected live | pending | none | Family smoke, then training needs approval | 2026-10-26 15:55 +09:00 |
+| S7 objective audit | active | `audit_locomanip_objective.py` `059681f` (3 tests): matched ranking under current/alive, with and without residual costs | smoke: failures outrank constant-arm successes only through exploration cost | `phase-smoke/objective.json` | Run on S4 nominal traces | 2026-10-26 15:55 +09:00 |
+| S8 robustness/transitions | active | 38 typed scenarios `97244ba` (3 tests); Hold handover `579fbec`; worker-replacement check `da810e5` | pending | none | Live scenario smoke and worker kill once a pane is free | 2026-10-26 15:55 +09:00 |
 | S9 campaign | planned | No new training launched | pending | none | S2 qualification and family smoke tests first | 2026-10-26 14:20 +09:00 |
-| S10 identification | planned | No robot calibration data supplied | not measured | none | Shared log, synthetic/simulator validation, opt-in models | 2026-10-26 14:20 +09:00 |
+| S10 identification | active | `mc_mjlab.identification` `57c92d8`: shared log, fits within synthetic tolerances (6 tests), robot-only hashed calibration gate | simulator 700 kg trace fitted on first half, held-out RMSE recorded; no robot data | `identification/zero-700-fresh.json` | Calibration procedure note; robot data external | 2026-10-26 15:55 +09:00 |
 
 ## Decisions and starting evidence
 
@@ -395,6 +395,98 @@ actuator configs change.
   13 x 53 samples spanning 0-46.179 s of the 46.18 s terminal episode, so final
   substeps are included; P + D + feed-forward equals raw demand exactly and
   clipped equals clamp(raw) on every sample. About 59 MB per file.
+
+## locomanip_study variants
+
+**Current:** `StudySpec` registers five ids through `get_task_name`: control,
+arms-waist, coordinated, history-10 and history-20, each one change from the
+original-scale control. Arms-waist narrows `residual_actuator_names` to
+`[LR](S[CPRY]|EP)` and `W[PRY]` (13 of 35 joints); the rest track mc_rtc.
+Coordinated keeps those joints behind two outputs (shared arm, shared waist):
+`GroupedResidualJointPositionAction` copies each output onto its joints before the
+shared scale and projection, so costs see the expanded joint requests and the
+actor the executed joint residuals. History variants give every continuous actor
+channel and its critic copy 10 or 20 frames; `manipulation_phase` and
+`task_complete` stay instantaneous and privileged critic terms are unchanged.
+mjlab applies noise before history and resets history per row. Loading
+`model_1180` into history-10 or arms-waist raises `ReferenceUnavailable` (state
+dict shapes differ).
+
+**Re-measure if:** joint names, residual joints, the observation set or mjlab's
+history semantics change.
+
+**History:**
+- 2026-10-26 15:48 — first live build of the coordinated term failed: mjlab's
+  `BaseAction` sized buffers from `action_dim` before grouping existed
+  (`AttributeError: _residual_action_dim`). Fixed in `ed098ff`; config tests could
+  not reach it because the term needs live controllers.
+
+## objective_audit
+
+**Current:** `audit_locomanip_objective.py <probe>` ranks matched episodes per
+condition: safe successes against failures and timeouts without completion, by
+undiscounted total, discounted return from the start and from fresh bilateral
+Hold, each with and without a steady-state bootstrap on truncated endings
+(completion and time limit are both `time_out=True`). Objectives: current,
+candidate (DCM replaced by `is_alive` at 1.0), and both without residual costs.
+Admission rule: a defect in more than half of the pairs of some measure under the
+current objective, and none left under the candidate. The termination penalty is
+scaled by the 0.02 s step: one fall costs -4.0, not -200.
+
+**Re-measure if:** reward terms, weights, step size, gamma (0.997) or the
+termination time-out flags change.
+
+**History:**
+- 2026-10-26 — on `phase-smoke` (700 kg), zero and `original` failures outrank
+  constant arms -1 successes under both objectives because the constant request
+  pays -24.6 residual magnitude over 49 s; without residual costs the current
+  objective still prefers the failures on every discounted measure while the
+  alive objective does not. Constant requests are not a learned policy; the
+  verdict waits for the S4 nominal traces.
+
+## study_scenarios
+
+**Current:** `--scenario` applies one sensitivity setting to both arms: encoder
+bias (with encoder-draw cohorts), actor white noise, both, base-velocity bias
+(+/-0.02, +/-0.05 m/s per axis), IMU mounting rotation of base velocities and
+gravity (+/-1, +/-2 deg roll or pitch), Ornstein-Uhlenbeck velocity error
+(0.02/0.05 m/s RMS, 0.1/0.5 s), installed PD gains x0.9/1.1 (scaled once after
+the action term installs `PDgains_sim`, never the armature defaults), actuator
+delay 2/4/10 ms, foot friction x0.9/1.1 (foot geoms and floor together, since
+contacts take the larger coefficient) and cart pair friction x0.9/1.1.
+Observation corruption is declared through `noise`, which the policy interface
+excludes, so checkpoints still validate. White and correlated noise use the
+global generator and are not condition keyed. The controller's own IMU feed is
+not rotated.
+
+**Re-measure if:** observation terms, actuator configs or contact definitions
+change.
+
+## identification
+
+**Current:** `IdentificationLog` is the shared format (seconds, radians, N m;
+`joint_names` fixes column order; frames declared; strict validation;
+compressed `.npz` with a JSON header). Fits: whole-sample delay plus first-order
+lag (grid then local refinement), free-decay frequency and damping, static-push
+stiffness, single-frequency gain and phase; step and sine probe generators;
+held-out prediction error. Synthetic recovery within 1 ms delay, 10% lag, 2%
+frequency, 10% damping. `LagCompliance` stays the identity unless given a
+calibration whose SHA-256 matches and whose `source` is `robot`; its lag uses
+exact discretization (stable for every tau > 0) and compliance subtracts
+effort/stiffness from the motor angle. Simulator check on the 700 kg zero trace
+(`identify_joint_dynamics.py`, first half fitted, second half predicted): delays
+0-4 ms, several time constants at the 0.43 ms floor, held-out RMSE 0.007-0.078
+rad, dominated by load droop a pure lag cannot represent.
+
+**Re-measure if:** a robot log is supplied, or the PD path or physics step
+changes.
+
+Calibration procedure (not performed; no robot data exists): record each joint
+with `step_probe`/`sine_probe` residuals of a few hundredths of a radian while
+the robot stands supported, in the shared log with motor and, where available,
+link encoders; fit on alternate segments and accept only if held-out RMSE stays
+within the fit RMSE; write `{"source": "robot", "joints": {...}}`, hash it and pass
+the hash to `load_calibration`.
 
 ## S1 implementation record
 
