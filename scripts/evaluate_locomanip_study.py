@@ -11,6 +11,7 @@ import mjlab  # noqa: F401
 from evaluation.study_cohort import StudyCohort
 from evaluation.study_io import write_json
 from evaluation.study_rollout import run_study_conditions
+from evaluation.study_scenarios import scenarios
 from evaluation.study_statistics import summarize
 from freeze_locomanip_references import file_identity, revision
 
@@ -35,6 +36,7 @@ def main() -> None:
   parser.add_argument("--trace", action="store_true")
   parser.add_argument("--reverse", action="store_true")
   parser.add_argument("--pd-telemetry", action="store_true")
+  parser.add_argument("--scenario", choices=sorted(scenarios()))
   parser.add_argument(
     "--pd-rate-trace",
     action="append",
@@ -49,6 +51,7 @@ def main() -> None:
     parser.error("a custom cohort cannot be combined with preset modifiers")
   if args.pd_rate_trace and not args.pd_telemetry:
     parser.error("--pd-rate-trace requires --pd-telemetry")
+  scenario = scenarios()[args.scenario] if args.scenario else None
   if args.cohort:
     fields = json.loads(args.cohort.read_text())
     for key in ("masses", "seeds", "lifecycles"):
@@ -61,6 +64,10 @@ def main() -> None:
       draws=32 if args.held_out else 8,
       nominal=args.nominal,
     )
+  if scenario is not None and scenario.encoder_bias == cohort.nominal:
+    parser.error(
+      "encoder-bias scenarios need encoder draws; all others a nominal cohort"
+    )
   args.output.mkdir(parents=True, exist_ok=False)
   manifest = {
     "cohort": asdict(cohort),
@@ -69,7 +76,8 @@ def main() -> None:
     "batch_size": args.batch_size,
     "max_retries": args.max_retries,
     "action_mode": "deterministic",
-    "actor_white_noise": False,
+    "actor_white_noise": bool(scenario and scenario.white_noise),
+    "scenario": asdict(scenario) if scenario else None,
     "pd_telemetry": args.pd_telemetry,
     "pd_rate_trace": sorted(args.pd_rate_trace),
     "candidate": {
@@ -112,6 +120,7 @@ def main() -> None:
           pd_telemetry=args.pd_telemetry,
           pd_rate_ids=frozenset(args.pd_rate_trace),
           pd_rate_prefix=args.output / label,
+          scenario=scenario,
         )
         write_json(args.output / f"{label}.json", result)
         for row in result["rows"]:

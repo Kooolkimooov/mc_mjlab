@@ -67,6 +67,10 @@ def cart_cfg(init_x: float) -> EntityCfg:
   )
 
 
+#: The cart-ground contact pair carrying its directional friction.
+CART_FLOOR_PAIR = "cart_floor"
+
+
 def cart_floor_contact(
   spec: mujoco.MjSpec,  # ty: ignore[unresolved-attribute]
   push_friction: float = ASSET_PUSH_FRICTION,
@@ -80,7 +84,7 @@ def cart_floor_contact(
   if len(planes) != 1:
     raise ValueError("Locomanip requires exactly one scene ground plane")
   spec.add_pair(
-    name="cart_floor",
+    name=CART_FLOOR_PAIR,
     geomname1="cart/cart_box",
     geomname2=planes[0].name,
     condim=3,

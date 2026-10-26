@@ -26,6 +26,7 @@ from evaluation.locomanip_inputs import (
 from evaluation.pd_demand import PdDemandSummary
 from evaluation.rollout import managed_env, reset_done
 from evaluation.study_io import write_json
+from evaluation.study_scenarios import Scenario
 from evaluation.study_trace import StudyTrace
 from mc_mjlab.actions.grouped_residual_action import GroupedResidualJointPositionAction
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionCfg
@@ -51,6 +52,7 @@ def run_study_conditions(
   pd_rate_prefix: Path | None = None,
   constant: tuple[tuple[str, ...], float] | None = None,
   names_path: Path | None = None,
+  scenario: Scenario | None = None,
 ) -> dict:
   """Evaluate one arm, applying no policy during a recycled row's warm-up."""
   if not rows or workers < 1:
@@ -74,7 +76,10 @@ def run_study_conditions(
   )
   if pd_telemetry:
     instrument_pd(cfg)
+  if scenario is not None:
+    scenario.configure(cfg)
   with managed_env(cfg, device) as env:
+    applied = scenario.install(env) if scenario is not None else {}
     wrapped = RslRlVecEnvWrapper(env)
     policy = None
     manifest = None
@@ -115,6 +120,7 @@ def run_study_conditions(
       "effective_manifest": manifest,
       "pd_telemetry": pd_telemetry,
       "constant": None if constant is None else list(constant),
+      "scenario": None if scenario is None else asdict(scenario) | {"applied": applied},
       "rollout_wall_s": elapsed,
       "env_steps": steps,
       "rows": trace.results,
