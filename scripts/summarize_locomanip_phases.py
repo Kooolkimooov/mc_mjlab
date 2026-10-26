@@ -29,9 +29,14 @@ def main() -> None:
   write_json(args.probe / "summary.json", summary)
 
   masses = sorted({m for row in summary["outcomes"].values() for m in row}, key=float)
-  print("arm".ljust(26) + "".join(m.rjust(6) for m in masses) + "  (fresh|recycled)")
+  width = max(
+    6, *(len(c) + 1 for r in summary["outcomes"].values() for c in r.values())
+  )
+  print(
+    "arm".ljust(26) + "".join(m.rjust(width) for m in masses) + "  (fresh|recycled)"
+  )
   for arm, row in summary["outcomes"].items():
-    print(arm.ljust(26) + "".join(row.get(m, "--").rjust(6) for m in masses))
+    print(arm.ljust(26) + "".join(row.get(m, "--").rjust(width) for m in masses))
   for item in summary["unavailable"]:
     print(f"unavailable {item['arm']}: {item['reason'][:160]}")
 

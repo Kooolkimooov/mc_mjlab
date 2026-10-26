@@ -27,18 +27,27 @@ def outcome_label(episode: dict) -> str:
 
 
 def outcome_matrix(phases: list[dict]) -> dict[str, dict[str, str]]:
-  """Per arm, one label string per mass in fresh-then-recycled order."""
-  cells: dict[str, dict[str, dict[str, str]]] = defaultdict(lambda: defaultdict(dict))
+  """Per arm and mass, every draw's label: fresh draws, then recycled ones."""
+  cells: dict[str, dict[str, dict[str, list]]] = defaultdict(
+    lambda: defaultdict(lambda: defaultdict(list))
+  )
   for episode in phases:
     mass = f"{episode['mass_kg']:g}"
-    cells[episode["arm"]][mass][episode["lifecycle"]] = outcome_label(episode)
-  return {
-    arm: {
-      mass: by_life.get("fresh", "-") + by_life.get("recycled", "-")
-      for mass, by_life in sorted(masses.items(), key=lambda item: float(item[0]))
-    }
-    for arm, masses in cells.items()
-  }
+    draw = (episode["condition_id"], outcome_label(episode))
+    cells[episode["arm"]][mass][episode["lifecycle"]].append(draw)
+
+  def labels(draws: list) -> str:
+    return "".join(label for _, label in sorted(draws)) or "-"
+
+  matrix = {}
+  for arm, masses in cells.items():
+    row = {}
+    for mass, lives in sorted(masses.items(), key=lambda item: float(item[0])):
+      fresh, recycled = labels(lives["fresh"]), labels(lives["recycled"])
+      many = max(len(lives["fresh"]), len(lives["recycled"])) > 1
+      row[mass] = f"{fresh}|{recycled}" if many else fresh + recycled
+    matrix[arm] = row
+  return matrix
 
 
 def zero_contrasts(phases: list[dict], zero: str = "zero") -> dict[str, Any]:
