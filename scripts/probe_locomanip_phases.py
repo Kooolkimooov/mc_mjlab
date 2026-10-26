@@ -12,6 +12,7 @@ from evaluation.phase_windows import analyze_episode, load_traces
 from evaluation.study_cohort import StudyCohort
 from evaluation.study_io import write_json
 from evaluation.study_rollout import ReferenceUnavailable, run_study_conditions
+from evaluation.study_scenarios import scenarios
 from freeze_locomanip_references import file_identity, revision
 
 from mc_mjlab.tasks.locomanip import RESIDUAL_TASK_IDS
@@ -64,7 +65,9 @@ def main() -> None:
   parser.add_argument("--workers", type=int, default=4)
   parser.add_argument("--max-retries", type=int, choices=(0, 1, 2), default=2)
   parser.add_argument("--device", default="cuda:0")
+  parser.add_argument("--scenario", choices=sorted(scenarios()))
   args = parser.parse_args()
+  args.scenario = scenarios()[args.scenario] if args.scenario else None
 
   cohort = StudyCohort(
     masses=tuple(float(m) for m in args.masses.split(",")),
@@ -73,6 +76,8 @@ def main() -> None:
     lifecycles=tuple(args.lifecycles.split(",")),
     nominal=not args.encoder_draws,
   )
+  if args.scenario is not None and args.scenario.encoder_bias == cohort.nominal:
+    parser.error("encoder-bias scenarios need --encoder-draws; all others must omit it")
   arms = probe_arms(args)
   if args.arms:
     keep = set(args.arms.split(","))
@@ -83,6 +88,7 @@ def main() -> None:
     {
       "cohort": asdict(cohort),
       "source": revision(Path(__file__).resolve().parents[1]),
+      "scenario": asdict(args.scenario) if args.scenario else None,
       "arms": [
         asdict(arm)
         | {
@@ -163,6 +169,7 @@ def run_arm(
       constant=(arm.groups, arm.level) if arm.groups else None,
       names_path=args.output / "names.json",
       handover_at_hold=arm.handover_at_hold,
+      scenario=args.scenario,
     )
     traces.append(trace)
     write_json(args.output / f"{label}-attempt-{attempt}.json", result)
