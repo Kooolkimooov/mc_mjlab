@@ -34,11 +34,21 @@ def main() -> None:
   parser.add_argument("--device", default="cuda:0")
   parser.add_argument("--trace", action="store_true")
   parser.add_argument("--reverse", action="store_true")
+  parser.add_argument("--pd-telemetry", action="store_true")
+  parser.add_argument(
+    "--pd-rate-trace",
+    action="append",
+    default=[],
+    metavar="CONDITION_ID",
+    help="full-rate PD trace for this condition (repeatable)",
+  )
   args = parser.parse_args()
   if args.batch_size < 1 or args.workers < 1:
     parser.error("positive batch size and worker count required")
   if args.cohort and (args.held_out or args.nominal):
     parser.error("a custom cohort cannot be combined with preset modifiers")
+  if args.pd_rate_trace and not args.pd_telemetry:
+    parser.error("--pd-rate-trace requires --pd-telemetry")
   if args.cohort:
     fields = json.loads(args.cohort.read_text())
     for key in ("masses", "seeds", "lifecycles"):
@@ -60,6 +70,8 @@ def main() -> None:
     "max_retries": args.max_retries,
     "action_mode": "deterministic",
     "actor_white_noise": False,
+    "pd_telemetry": args.pd_telemetry,
+    "pd_rate_trace": sorted(args.pd_rate_trace),
     "candidate": {
       "task": args.candidate_task,
       "checkpoint": file_identity(args.candidate_checkpoint)
@@ -97,6 +109,9 @@ def main() -> None:
           workers=args.workers,
           device=args.device,
           trace_path=args.output / f"{label}.jsonl" if args.trace else None,
+          pd_telemetry=args.pd_telemetry,
+          pd_rate_ids=frozenset(args.pd_rate_trace),
+          pd_rate_prefix=args.output / label,
         )
         _write(args.output / f"{label}.json", result)
         for row in result["rows"]:

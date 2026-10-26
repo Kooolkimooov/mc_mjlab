@@ -9,6 +9,7 @@ from typing import Any
 
 import torch
 
+from evaluation.pd_demand import PdDemandSummary
 from evaluation.rollout import metric_snapshot
 from mc_mjlab.tasks.locomanip.mdp import accessors
 
@@ -16,8 +17,14 @@ from mc_mjlab.tasks.locomanip.mdp import accessors
 class StudyTrace:
   """Capture selected diagnostic traces and outcomes before any manager reset."""
 
-  def __init__(self, env: Any, rows: list[dict], path: Path | None) -> None:
-    self.env, self.rows = env, rows
+  def __init__(
+    self,
+    env: Any,
+    rows: list[dict],
+    path: Path | None,
+    pd: PdDemandSummary | None = None,
+  ) -> None:
+    self.env, self.rows, self.pd = env, rows, pd
     self.finished = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
     self.valid = torch.ones_like(self.finished)
     self.start = env.scene["robot"].data.root_link_pos_w[:, 0].clone()
@@ -35,6 +42,8 @@ class StudyTrace:
     self.tilt[ids] = 0
     for i in ids.tolist():
       self.exposure[i].clear()
+    if self.pd is not None:
+      self.pd.begin(ids)
 
   def update(self, active: torch.Tensor) -> dict:
     """Retain raw phases, freshness, motion and residual delivery at the last substep."""
@@ -74,6 +83,8 @@ class StudyTrace:
       .tolist()
     )
     frame["terminations"] = [dict(zip(names, row, strict=True)) for row in flags]
+    if self.pd is not None:
+      frame.update(self.pd.update(active))
     for i in active.nonzero().flatten().tolist():
       key = f"{frame['phase_left'][i]:g}/{frame['phase_right'][i]:g}/fresh={frame['datastore_fresh'][i]}"
       self.exposure[i][key] += env.step_dt
@@ -128,6 +139,8 @@ class StudyTrace:
           for name, value in env.reward_manager._episode_sums.items()
         },
       }
+      if self.pd is not None:
+        self.results[i]["pd_demand"] = self.pd.result(i)
     self.finished[ids] = True
 
   def close(self) -> None:

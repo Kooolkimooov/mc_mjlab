@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, cast
@@ -21,10 +22,12 @@ from evaluation.locomanip_inputs import (
   draw_encoder_bias,
   fixed_payloads,
 )
+from evaluation.pd_demand import PdDemandSummary
 from evaluation.rollout import managed_env, reset_done
 from evaluation.study_trace import StudyTrace
 from mc_mjlab.actions.mc_rtc_residual_action import McRtcResidualActionCfg
 from mc_mjlab.rl.controller_provenance import collect_controller_provenance
+from mc_mjlab.robots.pd_telemetry import instrument_pd
 from mc_mjlab.tasks.locomanip.cart import cart_nominal_mass_kg
 from mc_mjlab.tasks.locomanip.mdp import accessors
 
@@ -36,6 +39,9 @@ def run_study_conditions(
   workers: int = 4,
   device: str = "cuda:0",
   trace_path: Path | None = None,
+  pd_telemetry: bool = False,
+  pd_rate_ids: frozenset[str] = frozenset(),
+  pd_rate_prefix: Path | None = None,
 ) -> dict:
   """Evaluate one arm, applying no policy during a recycled row's warm-up."""
   if not rows or workers < 1:
@@ -55,6 +61,8 @@ def run_study_conditions(
     mode="reset",
     params={"rows": rows, "asset_cfg": payload.params["asset_cfg"]},
   )
+  if pd_telemetry:
+    instrument_pd(cfg)
   with managed_env(cfg, device) as env:
     wrapped = RslRlVecEnvWrapper(env)
     policy = None
@@ -72,16 +80,24 @@ def run_study_conditions(
       policy = runner.get_inference_policy(device=device)
       manifest = runner._effective_manifest
     env.reset()
-    trace = StudyTrace(env, rows, trace_path)
+    pd = (
+      PdDemandSummary(env, rows, pd_rate_ids, pd_rate_prefix) if pd_telemetry else None
+    )
+    trace = StudyTrace(env, rows, trace_path, pd)
+    start = time.perf_counter()
     try:
-      _rollout(env, wrapped, policy, trace, rows)
+      steps = _rollout(env, wrapped, policy, trace, rows)
     finally:
       trace.close()
+    elapsed = time.perf_counter() - start
     return {
       "task": task,
       "checkpoint": str(checkpoint) if checkpoint else None,
       "controller_provenance": collect_controller_provenance(wrapped),
       "effective_manifest": manifest,
+      "pd_telemetry": pd_telemetry,
+      "rollout_wall_s": elapsed,
+      "env_steps": steps,
       "rows": trace.results,
     }
 
@@ -116,11 +132,11 @@ def study_inputs(
 
 def _rollout(
   env: Any, wrapped: Any, policy: Any, trace: StudyTrace, rows: list[dict]
-) -> None:
+) -> int:
   zeros = torch.zeros(
     env.num_envs, env.action_manager.total_action_dim, device=env.device
   )
-  for _ in range(2 * math.ceil(env.cfg.episode_length_s / env.step_dt) + 2):
+  for step in range(2 * math.ceil(env.cfg.episode_length_s / env.step_dt) + 2):
     action = zeros.clone()
     live = ~trace.finished
     active = env._study_active & live
@@ -148,7 +164,7 @@ def _rollout(
       else:
         trace.finish(torch.tensor([i], device=env.device), frame, warmup_failed=True)
     if trace.finished.all():
-      return
+      return step + 1
     if done.any():
       env._study_active[ready] = True
       if policy is not None:
@@ -161,3 +177,4 @@ def _rollout(
           accessors.object_mass_kg(env)[ids], [rows[i] for i in ready]
         )
   trace.finish((~trace.finished).nonzero().flatten(), frame, observed=False)
+  return step + 1
