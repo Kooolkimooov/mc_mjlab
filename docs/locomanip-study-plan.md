@@ -8,10 +8,10 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | Stage/substep ID | Status | Implementation/validation evidence | Experiment outcome | Artifacts | Next action/blocker | Last updated |
 | --- | --- | --- | --- | --- | --- | --- |
 | S0 plan | complete | Complete approved plan transcribed before source changes; commit containing this entry | not measured | this document | Freeze references | 2026-10-26 14:20 +09:00 |
-| S1 references | active | Starting HEAD `5cba058b71b1c3cc67d3bb0272744238f7bfb999`; local mjlab override present | pending | pending inventory | Hash inputs and resolve matching configurations | 2026-10-26 14:20 +09:00 |
-| S2 qualification | active | Separate-arm rollout and paired outcome statistics; 10 targeted tests passed | pending | `scripts/evaluate_locomanip_study.py` | Live zero/zero smoke, reordered batches, historical runner loads | 2026-10-26 14:30 +09:00 |
-| S3 PD telemetry | planned | none | pending | none | Exact delayed pre-clamp instrumented actuator | 2026-10-26 14:20 +09:00 |
-| S4 phase diagnosis | planned | none | pending | none | Depends on S2/S3 | 2026-10-26 14:20 +09:00 |
+| S1 references | active | Inventory frozen at `f577463`; `original` loads through the provenance-checking runner into the study control | `original` fails 700 kg nominal (`collapsed`, 47.6-47.7 s) | `logs/locomanip-study/references.json`, `phase-smoke/` | `no_magnitude` and `arms_2x` loads run in the S4 nominal probe | 2026-10-26 15:20 +09:00 |
+| S2 qualification | complete | Mass dtype fix `bb98c3b`; `compare_study_runs.py`; six zero sources over batch 6/reversed batch 3 with recycled partial resets | zero vs zero: no outcome disagreement; spreads 0.0135 m, 0.04 s | `zero-smoke/`, `zero-reordered/`, `zero-plain-timed/`, `zero-repeatability.json` | Validation/held-out cohorts once candidates exist | 2026-10-26 15:20 +09:00 |
+| S3 PD telemetry | complete | `pd_telemetry` `f963cb2`: motor table and chain trajectory identical, stepped-only samples, partial resets (7 tests) | live: no outcome disagreement, spread 0.017 m; +3% step time; rate traces sum exactly | `zero-telemetry/`, `zero-telemetry-rate/` | Used by S4 | 2026-10-26 15:20 +09:00 |
+| S4 phase diagnosis | active | `probe_locomanip_phases.py` `8184e6e`: constant arms, raw-phase windows (3 tests); 700 kg smoke segmented 6/6 episodes | pending | `phase-smoke/` | Nominal probe: 16 arms x 600-900 kg x fresh/recycled | 2026-10-26 15:20 +09:00 |
 | S5 focused exploration | planned | none | pending | none | Measured groups from S4; typed study tasks | 2026-10-26 14:20 +09:00 |
 | S6 observation history | planned | none | pending | none | Isolated 10/20-frame variants | 2026-10-26 14:20 +09:00 |
 | S7 objective audit | planned | none | pending | none | Recorded matched trajectories and ranking defect gate | 2026-10-26 14:20 +09:00 |
@@ -344,7 +344,9 @@ zero-policy sources, `zero-smoke` (batch 6) and `zero-reordered` (`--reverse
 --batch-size 3`) with two arms each, agree on every outcome and termination
 label. 400 kg completes at 49.26-49.28 s; 700 and 900 kg end `fell_over` at
 46.18-46.22 s in both lifecycles. Spreads across the four sources: displacement
-<= 0.0109 m, end time <= 0.040 s. Runs are not bitwise repeatable, so live
+<= 0.0109 m, end time <= 0.040 s; adding `zero-plain-timed` (`cc7a8a2`, batch 6)
+as two more sources keeps every outcome and widens displacement to 0.0135 m.
+Runs are not bitwise repeatable, so live
 equivalence checks are judged against these spreads. Report:
 `logs/locomanip-study/zero-repeatability.json`, from `uv run python
 scripts/compare_study_runs.py logs/locomanip-study/zero-smoke
@@ -359,6 +361,40 @@ controller change.
   the applied float mass. Fixed in `bb98c3b`; the failed directory is kept as
   `zero-smoke-failed-long-mass`.
 - 2026-10-26 14:35-14:50 — the two runs above, in `mc_mjlab_training:2.1`.
+
+## pd_telemetry
+
+**Current:** `instrument_pd` replaces the 53 per-joint `IdealPdActuatorCfg`s with
+one `InstrumentedPdActuator`. Its motors are created in the parts' order with
+each part's limit/armature/friction (HRP5P motor table identical, test-checked),
+and its torque is bitwise the ideal law (chain trajectory test). A sample counts
+only in `update()`, after `sim.step()`, so the extra `write_data_to_sim` of a
+reset never enters a window; windows open on each policy step's first substep and
+episode resets clear only their rows. The evaluator flag `--pd-telemetry` adds
+per-group (arms, waist, legs, wrists) episode peaks, contributions at the peak,
+independent P/D maxima, saturation joint-seconds and longest run;
+`--pd-rate-trace` saves one condition's full 1 kHz samples. Training keeps the
+fused path. Smoke cohort, zero policy, `f963cb2`: `zero-telemetry` versus
+`zero-plain-timed` has no outcome or termination disagreement, displacement
+spread 0.017 m and end-time spread 0.04 s (plain runs among themselves: 0.0135 m,
+0.04 s). Overhead 31.64 versus 30.70 ms per env step at 6 envs (9855/9856
+steps), +3%.
+
+**Re-measure if:** mjlab's actuator call order, the PD law, fusion or the
+actuator configs change.
+
+**History:**
+- 2026-10-26 — an earlier per-joint draft would have sampled reset-time writes
+  and cost ~37k kernel launches per policy step; replaced before any run.
+- 2026-10-26 14:57-15:02 — first zero-policy demand on the smoke cohort: at 700
+  kg LEP reaches 1.00x its limit near 38.5 s and LWRR 1.2x with ~1 s saturated
+  near 37.5 s, about 8 s before the 46.2 s fall; 900 kg arms reach 1.06x. 400 kg
+  stays below 0.38x on every group.
+- 2026-10-26 15:02-15:12 — `zero-telemetry-rate` (`--trace --pd-rate-trace
+  seed=1001/mass=700/repeat=0/lifecycle=fresh`): each arm's file holds 46,180 x
+  13 x 53 samples spanning 0-46.179 s of the 46.18 s terminal episode, so final
+  substeps are included; P + D + feed-forward equals raw demand exactly and
+  clipped equals clamp(raw) on every sample. About 59 MB per file.
 
 ## S1 implementation record
 

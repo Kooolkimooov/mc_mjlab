@@ -34,6 +34,10 @@ from mc_mjlab.tasks.locomanip.cart import cart_nominal_mass_kg
 from mc_mjlab.tasks.locomanip.mdp import accessors
 
 
+class ReferenceUnavailable(RuntimeError):
+  """A checkpoint whose recorded configuration or provenance does not load here."""
+
+
 def run_study_conditions(
   task: str,
   rows: list[dict],
@@ -80,9 +84,12 @@ def run_study_conditions(
       agent = asdict(load_rl_cfg(task))
       agent["seed"] = cfg.seed
       runner = runner_cls(wrapped, agent, device=device)
-      runner.load(
-        str(checkpoint), load_cfg={"actor": True}, strict=True, map_location=device
-      )
+      try:
+        runner.load(
+          str(checkpoint), load_cfg={"actor": True}, strict=True, map_location=device
+        )
+      except RuntimeError as error:
+        raise ReferenceUnavailable(f"{checkpoint}: {error}") from error
       policy = runner.get_inference_policy(device=device)
       manifest = runner._effective_manifest
     elif constant is not None:

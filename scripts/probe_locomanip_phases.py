@@ -11,7 +11,7 @@ import mjlab  # noqa: F401
 from evaluation.phase_windows import analyze_episode, load_traces
 from evaluation.study_cohort import StudyCohort
 from evaluation.study_io import write_json
-from evaluation.study_rollout import run_study_conditions
+from evaluation.study_rollout import ReferenceUnavailable, run_study_conditions
 from freeze_locomanip_references import file_identity, revision
 
 from mc_mjlab.tasks.locomanip import RESIDUAL_TASK_IDS
@@ -89,9 +89,14 @@ def main() -> None:
     },
   )
 
-  records, traces = [], []
+  records, traces, unavailable = [], [], []
   for arm in arms:
-    records.extend(run_arm(arm, cohort, args, traces))
+    try:
+      records.extend(run_arm(arm, cohort, args, traces))
+    except ReferenceUnavailable as error:
+      unavailable.append({"arm": arm.name, "reason": str(error)})
+      write_json(args.output / "unavailable.json", unavailable)
+      print(f"[phases] {arm.name} unavailable: {error}")
     write_json(args.output / "episodes.json", records)
 
   episodes = load_traces(traces)
