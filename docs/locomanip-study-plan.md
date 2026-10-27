@@ -17,7 +17,7 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | S6 observation history | active | history-10/20 `6287f6f`; live family smoke: both build, recycle and match zero at level 0 (0.0042 m, 0.06 s); `model_1180` rejected | not trained | `history-smoke/` | Train in S9 items 4-5 | 2026-10-26 20:27 +09:00 |
 | S7 objective audit | rejected (current evidence) | `059681f`; audit of 541 matched failure/success pairs from S4 nominal | current defect 354/541 (discounted); candidate leaves 312/541, 0/541 only without residual costs | `phase-nominal/objective.json` | Re-run when learned policies complete heavy loads | 2026-10-26 16:55 +09:00 |
 | S8 robustness/transitions | active | scenarios `97244ba`; worker replacement and handover passed; `df799f8` restores first-step QP failures and keys noise by condition/time | installed-gain sensitivity motivates later tests; old noisy comparisons are sensitivity observations, not matched evidence | `scenario-smoke/`, `sensitivity/`, `worker-replacement/`, `review-noise/` | Robustness training branches depend on S9 validation | 2026-10-26 20:27 +09:00 |
-| S9 campaign | active | Full control at `4bd39ac` in tmux `2.1`; iteration 294 reached; checkpoint-200 validation launched automatically at 09:46:55; 64/960 episode records saved | training and validation active; no completed full validation yet | `campaign-control-s42/status.json`, `validation-200/` beneath that directory | Complete validation-200; subsequent milestones queued while training continues | 2026-10-27 10:10 +09:00 |
+| S9 campaign | active | Full control at `4bd39ac` in tmux `2.1`; iteration 1569 reached; checkpoint-200 validation complete (960/960 valid records), checkpoint-400 validation running | checkpoint 200 rejected: completion -6.04 percentage points, CI excludes zero; failure/incomplete gates fail | `campaign-control-s42/status.json`, `validation-200/report.json`, `validation-400/` beneath that directory | Finish healthy control budget and queued validation; no checkpoint selected | 2026-10-27 15:31 +09:00 |
 | S10 identification | active | `mc_mjlab.identification` `57c92d8`: shared log, fits within synthetic tolerances (6 tests), robot-only hashed calibration gate | simulator 700 kg trace fitted on first half, held-out RMSE recorded; no robot data | `identification/zero-700-fresh.json` | Calibration procedure note; robot data external | 2026-10-26 15:55 +09:00 |
 
 ## Decisions and starting evidence
@@ -284,7 +284,9 @@ continuation path.
 
 **Current:** The full-budget seed-42 control is running in
 `mc_mjlab_training:2.1`, launched on 2026-10-27 at 09:02 +09:00. Review fixes,
-live regressions and the control initialization smoke passed. Existing measurements remain in
+live regressions and the control initialization smoke passed. Checkpoint-200
+validation finished at 15:06 +09:00 and rejects that checkpoint; checkpoint-400
+validation is running alongside continued training. Existing measurements remain in
 [locomanip.md](locomanip.md); they motivate the campaign, not its qualification.
 
 S9 launch commands in `mc_mjlab_training:2.1` (task defaults
@@ -485,6 +487,75 @@ draws retrospectively.
   failures, no final report yet. Training continues concurrently; its printed
   ETA is about 6.5 hours, subject to evaluation contention. This remains the
   first control run; action/history comparisons and final qualification remain.
+- 2026-10-27 15:31 — checkpoint-200 validation finished at 15:06:24, exit 0;
+  checkpoint-400 validation launched automatically at 15:06:26. Training is at
+  iteration 1569, latest throughput 1,022 steps/s. Pane `2.1` owns both jobs;
+  `3.1`/`4.1` are idle, `1.1` is TensorBoard. Keep the healthy training run
+  through 2,000 iterations; reject checkpoint 200 without extrapolating to later
+  checkpoints. Next: inspect validation-400 and remaining queued milestones,
+  then neighbouring saved checkpoints around the best eligible interval.
+
+## validation-200
+
+**Current:** The first full validation rejects the fresh-control checkpoint at
+iteration 200. This is an early checkpoint result, not the final control-run
+verdict. Compared with original-scale model_1180, it completes fewer cases and
+fails both empirical failure/incomplete regression gates. Walking displacement
+on jointly completed cases is preserved (ratio 1.00335), which does not offset
+the failed safety/completion gates. No candidate is promoted.
+
+Evaluation ran 2026-10-27 09:46:55-15:06:24 +09:00, exit 0, under source
+`4bd39ac`. Its command, cohort and provenance are retained in
+`logs/locomanip-study/campaign-control-s42/status.json` and
+`validation-200/cohort.json`/per-batch records. Cohort: all 15 masses, seeds
+1001-1002, eight encoder draws each, fresh/recycled; 480 episodes per arm,
+240 independent input-draw clusters per arm with lifecycle repeats clustered.
+Deterministic actions, actor white noise disabled; no exclusions or missing
+measurements, no worker failures and no timeouts. Four early controller
+failures per arm remain measured failures.
+
+| Quantity | Original reference | Fresh control at 200 |
+| --- | --- | --- |
+| Completed / episodes | 235 / 480 (48.96%) | 206 / 480 (42.92%) |
+| Physical/controller failures | 245 / 480 | 274 / 480 |
+| Tilt falls | 202 | 251 |
+| Collapses | 39 | 19 |
+| Controller failures | 4 | 4 |
+
+Full-range-standardized completion difference: -6.0417 percentage points,
+paired cluster-bootstrap 95% interval [-8.9583, -3.3333]. Equal-transition-weight
+difference: -10.0694 points, interval [-14.9306, -5.5556]. No supported monotonic
+completion boundary is reported. Counts per mass below combine both lifecycle
+cohorts (32 episodes per arm per mass); the raw report retains each lifecycle.
+
+| Mass kg | Reference completions | Control-200 completions |
+| --- | --- | --- |
+| 400 / 450 / 500 / 550 (each) | 32 / 32 | 32 / 32 |
+| 600 | 28 / 32 | 28 / 32 |
+| 625 | 29 / 32 | 22 / 32 |
+| 650 | 14 / 32 | 9 / 32 |
+| 675 | 16 / 32 | 12 / 32 |
+| 700 | 7 / 32 | 2 / 32 |
+| 725 | 9 / 32 | 2 / 32 |
+| 750 | 4 / 32 | 3 / 32 |
+| 775 / 800 / 850 / 900 (each) | 0 / 32 | 0 / 32 |
+
+Artifact: `logs/locomanip-study/campaign-control-s42/validation-200/report.json`,
+SHA-256 `f428a488f695e217e020fb8fc3783f0cf0148f39337369988c72a3c46cf132a5`.
+Candidate checkpoint SHA-256
+`13475cff188e04eba0db6bf7f4058f6f9381c246655cdd4b258f829ff39be521`;
+reference SHA-256
+`dd5530445dfa2f6e49e03a42ddd5687e637f9bacce069fe438e22e0640df6300`.
+The report's generic `campaign_gates_pending` verdict does not override its
+measured negative completion interval and failed regression gates. Zero
+reference, physical-limit checks, held-out data and additional training seeds
+remain required for any later eligible checkpoint.
+
+**Re-measure if:** provenance, cohort inputs, evaluation semantics or checkpoint
+identity changes. Do not replace this result with a later checkpoint's result.
+
+**History:** First full validation of the fresh seed-42 control; previous small
+smokes verified mechanisms and checkpoint compatibility only.
 
 ## Amendments
 
