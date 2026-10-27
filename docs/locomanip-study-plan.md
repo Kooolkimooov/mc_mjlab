@@ -8,7 +8,7 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | Stage/substep ID | Status | Implementation/validation evidence | Experiment outcome | Artifacts | Next action/blocker | Last updated |
 | --- | --- | --- | --- | --- | --- | --- |
 | S0 plan | complete | Complete approved plan transcribed before source changes; commit containing this entry | not measured | this document | Freeze references | 2026-10-26 14:20 +09:00 |
-| R1 review corrections (S2/S4/S8/S10) | active | `df799f8`; 47 targeted tests and full precommit suite passed; four archived probes repaired; live OU same-policy traces agree on 14,305 frames | passed same-batch noise matching; reordered run pending | `review-reanalysis/`, `review-noise/`, `review-noise-reordered/` | Finish reordered live regression | 2026-10-26 20:27 +09:00 |
+| R1 review corrections (S2/S4/S8/S10) | complete | `df799f8`, `0f3f29a`; targeted/full Python tests, 17 native tests, lint, architecture and strict prose passed; four archived probes repaired | same-batch 14,305 frames; reordered 14,300 per arm: exact noise agreement; all six outcomes agree | `review-reanalysis/`, `review-noise/`, `review-noise-reordered/`, `review-noise-repeatability.json` | Use corrected evaluator for training validation | 2026-10-27 09:04 +09:00 |
 | S1 references | complete | Inventory frozen at `f577463`; `original`, `no_magnitude` (study control) and `arms_2x` (production) all load through the provenance-checking runner; no reference unavailable | nominal: each completes 600-650 kg, fails 700+ | `references.json`, `phase-nominal/` | none | 2026-10-26 16:58 +09:00 |
 | S2 qualification | complete | Mass dtype fix `bb98c3b`; `compare_study_runs.py`; six zero sources over batch 6/reversed batch 3 with recycled partial resets | zero vs zero: no outcome disagreement; spreads 0.0135 m, 0.04 s | `zero-smoke/`, `zero-reordered/`, `zero-plain-timed/`, `zero-repeatability.json` | Validation/held-out cohorts once candidates exist | 2026-10-26 15:20 +09:00 |
 | S3 PD telemetry | complete | `pd_telemetry` `f963cb2`: motor table and chain trajectory identical, stepped-only samples, partial resets (7 tests) | live: no outcome disagreement, spread 0.017 m; +3% step time; rate traces sum exactly | `zero-telemetry/`, `zero-telemetry-rate/` | Used by S4 | 2026-10-26 15:20 +09:00 |
@@ -17,7 +17,7 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | S6 observation history | active | history-10/20 `6287f6f`; live family smoke: both build, recycle and match zero at level 0 (0.0042 m, 0.06 s); `model_1180` rejected | not trained | `history-smoke/` | Train in S9 items 4-5 | 2026-10-26 20:27 +09:00 |
 | S7 objective audit | rejected (current evidence) | `059681f`; audit of 541 matched failure/success pairs from S4 nominal | current defect 354/541 (discounted); candidate leaves 312/541, 0/541 only without residual costs | `phase-nominal/objective.json` | Re-run when learned policies complete heavy loads | 2026-10-26 16:55 +09:00 |
 | S8 robustness/transitions | active | scenarios `97244ba`; worker replacement and handover passed; `df799f8` restores first-step QP failures and keys noise by condition/time | installed-gain sensitivity motivates later tests; old noisy comparisons are sensitivity observations, not matched evidence | `scenario-smoke/`, `sensitivity/`, `worker-replacement/`, `review-noise/` | Robustness training branches depend on S9 validation | 2026-10-26 20:27 +09:00 |
-| S9 campaign | active | User instructed review fixes and continuation; family smokes already passed | not launched | launch commands in Experiment ledger | Commit fixes, live regression, then seed-42 fresh control with periodic validation | 2026-10-26 20:17 +09:00 |
+| S9 campaign | active | `0f3f29a` coordinator; control initialization/PPO smoke completed two iterations; prior family/reset smokes passed | full run pending launch | `review-train-smoke/`; launch commands below | Launch seed-42 control with periodic validation | 2026-10-27 09:04 +09:00 |
 | S10 identification | active | `mc_mjlab.identification` `57c92d8`: shared log, fits within synthetic tolerances (6 tests), robot-only hashed calibration gate | simulator 700 kg trace fitted on first half, held-out RMSE recorded; no robot data | `identification/zero-700-fresh.json` | Calibration procedure note; robot data external | 2026-10-26 15:55 +09:00 |
 
 ## Decisions and starting evidence
@@ -283,8 +283,8 @@ continuation path.
 ## Experiment ledger
 
 **Current:** Training is authorized by the user's instruction to address the
-review and continue the plan. No training has launched yet; review fixes and
-live regressions precede the fresh control. Existing measurements remain in
+review and continue the plan. Review fixes, live regressions and the control
+initialization smoke passed; launch the fresh full-budget control next. Existing measurements remain in
 [locomanip.md](locomanip.md); they motivate the campaign, not its qualification.
 
 S9 launch commands in `mc_mjlab_training:2.1` (task defaults
@@ -351,8 +351,13 @@ This completed with valid matched data, no worker/early-controller failures and
 14,305 common trace frames whose `observation_noise/*` arrays agree exactly.
 Six conditions per arm cover 400/700/900 kg fresh and recycled; this tests
 reproducibility, not independent statistical improvement. The reordered run
-uses the same command with `--batch-size 3 --reverse` and output
+used the same command with `--batch-size 3 --reverse` and output
 `logs/locomanip-study/review-noise-reordered`, in `mc_mjlab_training:3.1`.
+It completed with valid matched data and no worker/early-controller failures.
+Each reordered arm matches 14,300 common baseline frames exactly on all noise
+channels. All six conditions retain their completion/failure/timeout outcomes
+across all four arms; maximum time spread is 0.120003 s and displacement spread
+0.018695 m. `review-noise-repeatability.json` preserves per-condition counts.
 
 The bounded coordinator `scripts/run_locomanip_study.py` launches one standard
 train command and validates checkpoints 200 through 1800 every 200 iterations,
@@ -365,12 +370,23 @@ Neighbouring checkpoints, zero-reference checks and held-out qualification
 remain subsequent selection work. Three coordinator tests verify backlog
 draining, missing checkpoints and ambiguous run-directory rejection.
 
-After committing this coordinator and completing the live regression, run a
-two-iteration initialization/reset smoke in `mc_mjlab_training:2.1`:
+The two-iteration initialization/PPO smoke completed in
+`mc_mjlab_training:2.1` at 2026-10-27 09:01, using source `0f3f29a`:
 
 ```sh
 uv run --no-sync train Mc-Mjlab-Locomanip-Study-Locomanipcontroller-Hrp5P-Control --env.scene.num-envs 4 --env.actions.mc-rtc-residual.num-workers 2 --agent.max-iterations 2 --agent.logger tensorboard --log-root logs/locomanip-study/review-train-smoke --agent.run-name control-s42-smoke
 ```
+
+The run is `review-train-smoke/Mc-Mjlab-Locomanip-Study-Locomanipcontroller-Hrp5P-Control/2026-10-27_09-01-21_control-s42-smoke`,
+512 transitions, actor 531/critic 660 observations, 35 action outputs. It saved
+`model_1.pt`, SHA-256
+`3455368fcbc1e3ad28f7a18faec631db4d75c3868bf52d64c171a0dd76ca1fc5`;
+effective manifest hash
+`ef44981d3d50558a1e1639bc1472efee7cdaf0159d9701ea4ef2cb6ef92e3bec`;
+base-controller manifest hash
+`8170dc0981c52225d31a0292c1091cba17ff38dd73dac09adf7aca234e64cbdf`.
+This short smoke verifies initialization and PPO only; the earlier family
+smokes and recycled evaluation cover episode reset behavior.
 
 Then launch the fresh control in the same pane:
 
@@ -391,6 +407,15 @@ could overstate completion and distort reward/phase summaries. The original
 universal-completion statement is preserved in earlier commits and superseded
 by the counts above. The earlier noise outcomes cannot be repaired into matched
 draws retrospectively.
+
+- 2026-10-27 09:04 — full precommit Python tests passed on both fix commits;
+  `cmake --build build --target check-native`: 17/17 passed;
+  `uv run --no-sync ruff check`, architecture `--check`, strict prose passed.
+  Full `ty check` retains 165 diagnostics; the new coordinator, repair and
+  coordinator tests pass targeted type checking. No new source changes since
+  these checks. All study panes are idle following completed regressions/smoke;
+  `mc_mjlab_training:1.1` remains TensorBoard. Next: launch the command above in
+  pane `2.1`, inspect initialization/checkpoint 0, record the actual run identity.
 
 ## Amendments
 
