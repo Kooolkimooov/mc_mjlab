@@ -17,7 +17,7 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | S6 observation history | active | history-10/20 `6287f6f`; live family smoke: both build, recycle and match zero at level 0 (0.0042 m, 0.06 s); `model_1180` rejected | not trained | `history-smoke/` | Train in S9 items 4-5 | 2026-10-26 20:27 +09:00 |
 | S7 objective audit | rejected (current evidence) | `059681f`; audit of 541 matched failure/success pairs from S4 nominal | current defect 354/541 (discounted); candidate leaves 312/541, 0/541 only without residual costs | `phase-nominal/objective.json` | Re-run when learned policies complete heavy loads | 2026-10-26 16:55 +09:00 |
 | S8 robustness/transitions | active | scenarios `97244ba`; worker replacement and handover passed; `df799f8` restores first-step QP failures and keys noise by condition/time | installed-gain sensitivity motivates later tests; old noisy comparisons are sensitivity observations, not matched evidence | `scenario-smoke/`, `sensitivity/`, `worker-replacement/`, `review-noise/` | Robustness training branches depend on S9 validation | 2026-10-26 20:27 +09:00 |
-| S9 campaign | active | `0f3f29a` coordinator; initialization/PPO smoke passed; full control launched at `4bd39ac` in tmux `2.1`; checkpoint 0 finite; fresh checkpoint loads in evaluator | training; no validation result yet | `campaign-control-s42/status.json`, `review-train-smoke/`, `review-checkpoint-load/` | First automatic validation at iteration 200 | 2026-10-27 09:08 +09:00 |
+| S9 campaign | active | `0f3f29a` coordinator; full control at `4bd39ac` in tmux `2.1`; iteration 82 reached, checkpoint 80 saved; new-checkpoint evaluator smoke finished with all 12 records measured | training; no full validation result yet | `campaign-control-s42/status.json`, `review-train-smoke/`, `review-checkpoint-load/` | First automatic validation at iteration 200 | 2026-10-27 09:21 +09:00 |
 | S10 identification | active | `mc_mjlab.identification` `57c92d8`: shared log, fits within synthetic tolerances (6 tests), robot-only hashed calibration gate | simulator 700 kg trace fitted on first half, held-out RMSE recorded; no robot data | `identification/zero-700-fresh.json` | Calibration procedure note; robot data external | 2026-10-26 15:55 +09:00 |
 
 ## Decisions and starting evidence
@@ -430,9 +430,13 @@ uv run --no-sync python scripts/evaluate_locomanip_study.py --cohort docs/locoma
 
 This verifies evaluator compatibility with newly trained checkpoints; its
 two-iteration candidate cannot establish a training improvement. Both the
-reference and fresh candidate have loaded through provenance/interface
-validation; the six reference outcomes are recorded, candidate rollout report
-pending. Only audit-only payload-event/cart-source differences were reported;
+reference and fresh candidate loaded through provenance/interface validation;
+all 12 episode records are measured, with no worker or early-controller
+failures. Each completes both 400 kg conditions and fails both 700/900 kg
+conditions; failure subtype differs on the fresh 700 kg case (reference
+collapse, candidate tilt fall). Report SHA-256:
+`9dd4cb602f21fdc4f529c8828210ccd7671140028e61ffb699d6d7468334551d`.
+Only audit-only payload-event/cart-source differences were reported;
 the enforced policy interface and controller provenance matched.
 
 **Re-measure if:** evaluator, corruption clock, action mapping, runtime or
@@ -463,6 +467,14 @@ draws retrospectively.
   validation finish, continue with the seed-42 arms-waist configuration through
   the same coordinator using a new output directory; retain the fixed budget,
   reference and checkpoints. No candidate has been selected or promoted.
+- 2026-10-27 09:21 — status inspection: iteration 82, 1,323 steps/s; latest
+  controller/worker failure rates 0. Checkpoint 80 SHA-256:
+  `9e7e66a59bd87e6b28e09b1e972d3e3e5bcd43d544b819dcc21cd18dd9ad36cf`.
+  This is the latest inspected saved checkpoint identity; only checkpoint 0 has
+  had a direct tensor-finiteness inspection. The compatibility smoke finished
+  as described above, so pane `4.1` is idle. Only control/coordinator `2.1` and
+  TensorBoard `1.1` remain active study jobs. Full validation is still pending
+  checkpoint 200; training episode metrics are not qualification evidence.
 
 ## Amendments
 
