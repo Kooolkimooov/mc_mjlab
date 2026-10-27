@@ -13,13 +13,14 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | S2 qualification | complete | Mass dtype fix `bb98c3b`; `compare_study_runs.py`; six zero sources over batch 6/reversed batch 3 with recycled partial resets | zero vs zero: no outcome disagreement; spreads 0.0135 m, 0.04 s | `zero-smoke/`, `zero-reordered/`, `zero-plain-timed/`, `zero-repeatability.json` | Validation/held-out cohorts once candidates exist | 2026-10-26 15:20 +09:00 |
 | S3 PD telemetry | complete | `pd_telemetry` `f963cb2`: motor table and chain trajectory identical, stepped-only samples, partial resets (7 tests) | live: no outcome disagreement, spread 0.017 m; +3% step time; rate traces sum exactly | `zero-telemetry/`, `zero-telemetry-rate/` | Used by S4 | 2026-10-26 15:20 +09:00 |
 | S4 phase diagnosis | complete | Corrected `df799f8` reports: nominal 192, encoder 216, encoder-650 36 episodes; one retained trace per outcome | combined -1: nominal 12/12 complete, encoder 22/24 complete with two controller failures; earlier universal completion claim withdrawn | `review-reanalysis/`; original raw traces preserved | Negative arm/waist direction remains useful; all failures count in selection | 2026-10-26 20:27 +09:00 |
-| S5 focused exploration | active | `StudySpec` arms-waist/coordinated `071c50c`, init fix `ed098ff`; live mapping/zero-equivalence checks passed; historical control reused by user decision | not trained | `s5-mapping/`, `review-reanalysis/s5-mapping/`, `reused-control.json` | Smoke and train arms-waist (S9 item 2) | 2026-10-27 16:10 +09:00 |
+| S5 focused exploration | active | Arms-waist PPO smoke passed; isolated seed-42 training running, checkpoint 0 finite; historical control reused | training; not yet evaluated | `campaign-arms-waist-s42/`, `arms-waist-train-smoke/`, `reused-control.json` | Automatic validation at iteration 200 | 2026-10-27 16:12 +09:00 |
 | S6 observation history | active | history-10/20 `6287f6f`; live family smoke: both build, recycle and match zero at level 0 (0.0042 m, 0.06 s); `model_1180` rejected | not trained | `history-smoke/` | Train in S9 items 4-5 | 2026-10-26 20:27 +09:00 |
 | S7 objective audit | rejected (current evidence) | `059681f`; audit of 541 matched failure/success pairs from S4 nominal | current defect 354/541 (discounted); candidate leaves 312/541, 0/541 only without residual costs | `phase-nominal/objective.json` | Re-run when learned policies complete heavy loads | 2026-10-26 16:55 +09:00 |
 | S8 robustness/transitions | active | scenarios `97244ba`; worker replacement and handover passed; `df799f8` restores first-step QP failures and keys noise by condition/time | installed-gain sensitivity motivates later tests; old noisy comparisons are sensitivity observations, not matched evidence | `scenario-smoke/`, `sensitivity/`, `worker-replacement/`, `review-noise/` | Robustness training branches depend on S9 validation | 2026-10-26 20:27 +09:00 |
-| S9 campaign | active | User accepts historical seed-42 control; exact training contracts and policy interfaces match; duplicate training/queued evaluation stopped with artifacts retained | duplicate checkpoint-200 result retained; no final duplicate-run verdict | `reused-control.json`, `campaign-control-s42/` | Launch isolated arms-waist after its PPO smoke | 2026-10-27 16:10 +09:00 |
+| S9 campaign | active | Historical control reused; duplicate stopped; arms-waist launched at `4fde1ed` in tmux `2.1`, first checkpoint finite | arms-waist training; duplicate checkpoint-200 result retained | `campaign-arms-waist-s42/status.json`, `reused-control.json`, `campaign-control-s42/` | Validate arms-waist at 200; no duplicate-control evaluation queue | 2026-10-27 16:12 +09:00 |
 | S9.1 seed-42 control | complete | Existing original run accepted; model_1180 provenance and policy interface validated; saved training contract identical to the duplicate | baseline available; not a new improvement experiment | October 21 run, `reused-control.json` | Reuse frozen model_1180 for variant comparisons | 2026-10-27 16:10 +09:00 |
 | S9.1a duplicate attempt | skipped | Stopped per user direction after iteration 1708; latest saved checkpoint 1700; coordinator/evaluator/worker group stopped | checkpoint 200 rejected; interrupted checkpoint 400 is not measured | `campaign-control-s42/status.json`, preserved snapshots and raw results | No queued duplicate-control evaluations | 2026-10-27 16:10 +09:00 |
+| S9.2 arms-waist | active | Source `4fde1ed`; two-iteration PPO smoke and finite full-run checkpoint 0; 13 actions, actor 421 / critic 550 inputs | pending validation | `campaign-arms-waist-s42/`, `arms-waist-train-smoke/` | Continue 2,000-iteration budget and automatic validation milestones | 2026-10-27 16:12 +09:00 |
 | S10 identification | active | `mc_mjlab.identification` `57c92d8`: shared log, fits within synthetic tolerances (6 tests), robot-only hashed calibration gate | simulator 700 kg trace fitted on first half, held-out RMSE recorded; no robot data | `identification/zero-700-fresh.json` | Calibration procedure note; robot data external | 2026-10-26 15:55 +09:00 |
 
 ## Decisions and starting evidence
@@ -289,7 +290,8 @@ accepted its recency and identical training contract; the duplicate control and
 its queued evaluations have been stopped. Checkpoint-200 validation remains a
 valid result for that duplicate snapshot; the interrupted checkpoint-400
 evaluation has no verdict. Next: arms-waist PPO smoke, then the first isolated
-training variant in `mc_mjlab_training:2.1`. Existing measurements remain in
+training variant in `mc_mjlab_training:2.1`. The smoke has now passed and that
+variant is running; its launch record is below. Existing measurements remain in
 [locomanip.md](locomanip.md); they motivate the campaign, not its qualification.
 
 S9 launch commands in `mc_mjlab_training:2.1` (task defaults
@@ -328,6 +330,9 @@ Item 7 (objective variant) is skipped: S7 rejected the candidate. Items 6, 8 and
 selects the retained attempt's trace, records per-arm channel names, keys
 observation corruption by condition/channel/episode time, and requires finite,
 verified calibration artifacts. No reference or production task changed.
+The duplicate-control launch/progress records in this section are historical:
+the 16:10 amendment stops that run and reuses the original control. Its commands
+remain for reproduction, not as instructions to launch another duplicate.
 
 Corrected archives are under `logs/locomanip-study/review-reanalysis/`; originals
 remain unchanged. For each of `phase-nominal`, `phase-encoder`,
@@ -497,6 +502,63 @@ draws retrospectively.
   through 2,000 iterations; reject checkpoint 200 without extrapolating to later
   checkpoints. Next: inspect validation-400 and remaining queued milestones,
   then neighbouring saved checkpoints around the best eligible interval.
+
+## campaign-arms-waist-s42
+
+**Current:** The first isolated action-space experiment is running in
+`mc_mjlab_training:2.1`, launched 2026-10-27 at 16:10 +09:00. The user-directed
+control reuse supersedes the duplicate-run completion dependency. Hypothesis:
+restricting exploration to individual shoulder/elbow/waist requests improves
+safe completion. Other joints follow mc_rtc. Original joint scales, rewards,
+PPO, encoder/payload sampling and observation histories are retained; action
+feedback width follows the 13 residual joints (actor 421, critic 550 inputs).
+Reference: frozen historical model_1180, not the stopped duplicate.
+
+PPO smoke source `4fde1ed`, command in the 16:10 amendment, four environments,
+two workers, two iterations/512 transitions. It finished successfully in
+`arms-waist-train-smoke/Mc-Mjlab-Locomanip-Study-Locomanipcontroller-Hrp5P-Arms-Waist/2026-10-27_16-09-56_arms-waist-s42-smoke`.
+Checkpoint `model_1.pt` SHA-256:
+`4bf07297db76c26ece9eca13464d727421b88ac596350abd04e2d5fe98b45223`;
+effective manifest hash:
+`afcf646604e60afca7b6837b61a9eaf0f662c60d0acd46d3503e346896d3ad78`.
+Earlier S5 mapping/full-cycle/recycling checks remain the mechanism evidence;
+this short smoke additionally checks PPO wiring.
+
+Full training source `4fde1ed36d1226bcbcee89c2acdf101caf6d2180`, mjlab
+`ba314ea2f37b724684af21b63a1c5dbe114a6cd7`, seed 42, 256 environments,
+64 steps/rollout, 2,000 iterations, checkpoints every 20. Exact train/evaluator
+commands and coordinator progress are in
+`logs/locomanip-study/campaign-arms-waist-s42/status.json`; console output is
+`train.log` in that directory. Only the machine-local dependency override was
+dirty at launch. Run identity:
+`campaign-arms-waist-s42/training/Mc-Mjlab-Locomanip-Study-Locomanipcontroller-Hrp5P-Arms-Waist/2026-10-27_16-10-36_study-arms-waist-s42`.
+
+At the first inspection, iteration 1 advanced at 1,413 steps/s with
+controller/worker termination rates 0 (too early for a performance conclusion).
+Latest inspected checkpoint 0 has finite actor (13 tensors) and critic
+(12 tensors); SHA-256
+`7c98debd84f275f90962f8c85c19dd8a8d0f86d19d1c6553081eac568093de47`.
+Full effective manifest hash:
+`d207bc7c42c10b230e0ab6d5958eb66370252b0b2f824a9d1977f47cc1963f16`;
+base-controller manifest hash (matches control):
+`8170dc0981c52225d31a0292c1091cba17ff38dd73dac09adf7aca234e64cbdf`.
+
+Next evaluation is checkpoint 200, full validation cohort (480 conditions per
+arm), deterministic actions, separate environments for the 13-action candidate
+and 35-action reference. No result yet. After the full budget and queued
+validation, inspect eligible intervals/neighbours and continue to coordinated
+actions. Keep the conditional branches and original promotion gates.
+
+**Re-measure if:** residual joint groups, checkpoint contract, external
+provenance or evaluator conditions change.
+
+**History:** At 16:12 +09:00, the old duplicate process group is confirmed empty;
+its stopped checkpoint-400 evaluation retains 160 reference records with no
+candidate records or final verdict. Pane `2.1` now owns only the arms-waist
+coordinator/trainer; `3.1`/`4.1` are idle and `1.1` is TensorBoard. All old raw
+results/checkpoints remain intact. Exact next action: inspect
+`campaign-arms-waist-s42/validation-200/report.json` when created; do not resume
+the redundant seed-42 control.
 
 ## validation-200
 
