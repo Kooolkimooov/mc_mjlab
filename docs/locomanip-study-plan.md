@@ -8,7 +8,7 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | Stage/substep ID | Status | Implementation/validation evidence | Experiment outcome | Artifacts | Next action/blocker | Last updated |
 | --- | --- | --- | --- | --- | --- | --- |
 | S0 plan | complete | Complete approved plan transcribed before source changes; commit containing this entry | not measured | this document | Freeze references | 2026-10-26 14:20 +09:00 |
-| R1 review corrections (S2/S4/S8/S10) | complete | `df799f8`, `0f3f29a`; targeted/full Python tests, 17 native tests, lint, architecture and strict prose passed; four archived probes repaired | same-batch 14,305 frames; reordered 14,300 per arm: exact noise agreement; all six outcomes agree | `review-reanalysis/`, `review-noise/`, `review-noise-reordered/`, `review-noise-repeatability.json` | Use corrected evaluator for training validation | 2026-10-27 09:04 +09:00 |
+| R1 review corrections (S2/S4/S8/S10) | complete | `df799f8`, `0f3f29a`; targeted/full Python tests, 17 native tests, lint, architecture and strict prose passed; four archived probes repaired | same-batch 14,305 frames; reordered 14,300 per arm: exact noise agreement; all six outcomes agree | `review-reanalysis/`, `review-noise/`, `review-noise-reordered/`, `review-noise-repeatability.json` | Use corrected evaluator for training validation | 2026-10-27 09:02 +09:00 |
 | S1 references | complete | Inventory frozen at `f577463`; `original`, `no_magnitude` (study control) and `arms_2x` (production) all load through the provenance-checking runner; no reference unavailable | nominal: each completes 600-650 kg, fails 700+ | `references.json`, `phase-nominal/` | none | 2026-10-26 16:58 +09:00 |
 | S2 qualification | complete | Mass dtype fix `bb98c3b`; `compare_study_runs.py`; six zero sources over batch 6/reversed batch 3 with recycled partial resets | zero vs zero: no outcome disagreement; spreads 0.0135 m, 0.04 s | `zero-smoke/`, `zero-reordered/`, `zero-plain-timed/`, `zero-repeatability.json` | Validation/held-out cohorts once candidates exist | 2026-10-26 15:20 +09:00 |
 | S3 PD telemetry | complete | `pd_telemetry` `f963cb2`: motor table and chain trajectory identical, stepped-only samples, partial resets (7 tests) | live: no outcome disagreement, spread 0.017 m; +3% step time; rate traces sum exactly | `zero-telemetry/`, `zero-telemetry-rate/` | Used by S4 | 2026-10-26 15:20 +09:00 |
@@ -17,7 +17,7 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | S6 observation history | active | history-10/20 `6287f6f`; live family smoke: both build, recycle and match zero at level 0 (0.0042 m, 0.06 s); `model_1180` rejected | not trained | `history-smoke/` | Train in S9 items 4-5 | 2026-10-26 20:27 +09:00 |
 | S7 objective audit | rejected (current evidence) | `059681f`; audit of 541 matched failure/success pairs from S4 nominal | current defect 354/541 (discounted); candidate leaves 312/541, 0/541 only without residual costs | `phase-nominal/objective.json` | Re-run when learned policies complete heavy loads | 2026-10-26 16:55 +09:00 |
 | S8 robustness/transitions | active | scenarios `97244ba`; worker replacement and handover passed; `df799f8` restores first-step QP failures and keys noise by condition/time | installed-gain sensitivity motivates later tests; old noisy comparisons are sensitivity observations, not matched evidence | `scenario-smoke/`, `sensitivity/`, `worker-replacement/`, `review-noise/` | Robustness training branches depend on S9 validation | 2026-10-26 20:27 +09:00 |
-| S9 campaign | active | `0f3f29a` coordinator; control initialization/PPO smoke completed two iterations; prior family/reset smokes passed | full run pending launch | `review-train-smoke/`; launch commands below | Launch seed-42 control with periodic validation | 2026-10-27 09:04 +09:00 |
+| S9 campaign | active | `0f3f29a` coordinator; initialization/PPO smoke passed; full control launched at `4bd39ac` in tmux `2.1` | training; no validation result yet | `campaign-control-s42/status.json`, `review-train-smoke/` | Inspect checkpoint 0; first automatic validation at iteration 200 | 2026-10-27 09:03 +09:00 |
 | S10 identification | active | `mc_mjlab.identification` `57c92d8`: shared log, fits within synthetic tolerances (6 tests), robot-only hashed calibration gate | simulator 700 kg trace fitted on first half, held-out RMSE recorded; no robot data | `identification/zero-700-fresh.json` | Calibration procedure note; robot data external | 2026-10-26 15:55 +09:00 |
 
 ## Decisions and starting evidence
@@ -282,9 +282,9 @@ continuation path.
 
 ## Experiment ledger
 
-**Current:** Training is authorized by the user's instruction to address the
-review and continue the plan. Review fixes, live regressions and the control
-initialization smoke passed; launch the fresh full-budget control next. Existing measurements remain in
+**Current:** The full-budget seed-42 control is running in
+`mc_mjlab_training:2.1`, launched on 2026-10-27 at 09:02 +09:00. Review fixes,
+live regressions and the control initialization smoke passed. Existing measurements remain in
 [locomanip.md](locomanip.md); they motivate the campaign, not its qualification.
 
 S9 launch commands in `mc_mjlab_training:2.1` (task defaults
@@ -388,7 +388,7 @@ base-controller manifest hash
 This short smoke verifies initialization and PPO only; the earlier family
 smokes and recycled evaluation cover episode reset behavior.
 
-Then launch the fresh control in the same pane:
+The fresh control was launched in the same pane at 09:02 +09:00:
 
 ```sh
 uv run --no-sync python scripts/run_locomanip_study.py --variant control --seed 42 --reference logs/rsl_rl/Mc-Mjlab-Locomanip-Locomanipcontroller-Hrp5P-Position-Residual/2026-10-21_10-52-44_push-friction/model_1180.pt --output logs/locomanip-study/campaign-control-s42
@@ -399,6 +399,39 @@ and both residual costs -0.05; no intended change from the approved control.
 Budget is 256 environments, 64 steps, 2,000 iterations, saves every 20. The
 other configurations remain unlaunched; the 13-full-run cap is unchanged.
 
+Run identity:
+`campaign-control-s42/training/Mc-Mjlab-Locomanip-Study-Locomanipcontroller-Hrp5P-Control/2026-10-27_09-02-25_study-control-s42`.
+Source is `4bd39accd58ba8b102330bd0dc1708ccdbb89343`; editable mjlab is
+`ba314ea2f37b724684af21b63a1c5dbe114a6cd7`. Only the machine-local dependency
+override was dirty at launch. Seed 42 is explicit; reward, scales, payload
+sampling, PPO and observations match the study control.
+
+At 09:04 +09:00, iteration 7 diagnostics were available (1,371 steps/s;
+worker/controller/fall/collapse termination rates 0 at that inspection; too
+early to assess performance). Checkpoint 0 loaded on CPU with finite actor
+(13 tensors) and critic (12 tensors). Its SHA-256 is
+`f48e5917a999815be7ca44e26448ea84f75b0e31b2df1d36bce7f46dab37b636`;
+effective manifest hash
+`1b7635d721366227b774ab6562f135d59c9a5ca5953f0e5eb151b01edf8ed12c`;
+base-controller manifest hash
+`8170dc0981c52225d31a0292c1091cba17ff38dd73dac09adf7aca234e64cbdf`.
+Latest inspected checkpoint: 0. Next automatic evaluation: 200, full validation
+cohort of 480 conditions per arm, deterministic actions, original checkpoint
+as reference. Check `campaign-control-s42/status.json`, `train.log`, and
+`validation-200.log`/`validation-200/report.json` when created. The coordinator
+keeps training healthy runs through the planned budget and records failures.
+
+A separate checkpoint-loading smoke runs in `mc_mjlab_training:4.1`, source
+`4bd39ac`, with command:
+
+```sh
+uv run --no-sync python scripts/evaluate_locomanip_study.py --cohort docs/locomanip-study-smoke.json --candidate-checkpoint logs/locomanip-study/review-train-smoke/Mc-Mjlab-Locomanip-Study-Locomanipcontroller-Hrp5P-Control/2026-10-27_09-01-21_control-s42-smoke/model_1.pt --reference-checkpoint logs/rsl_rl/Mc-Mjlab-Locomanip-Locomanipcontroller-Hrp5P-Position-Residual/2026-10-21_10-52-44_push-friction/model_1180.pt --batch-size 6 --workers 3 --output logs/locomanip-study/review-checkpoint-load
+```
+
+This verifies evaluator compatibility with newly trained checkpoints; its
+two-iteration candidate cannot establish a training improvement. The first arm
+has loaded through provenance/interface validation; final rollout report pending.
+
 **Re-measure if:** evaluator, corruption clock, action mapping, runtime or
 calibration validation changes.
 
@@ -408,7 +441,7 @@ universal-completion statement is preserved in earlier commits and superseded
 by the counts above. The earlier noise outcomes cannot be repaired into matched
 draws retrospectively.
 
-- 2026-10-27 09:04 — full precommit Python tests passed on both fix commits;
+- 2026-10-27 09:02 — full precommit Python tests passed on both fix commits;
   `cmake --build build --target check-native`: 17/17 passed;
   `uv run --no-sync ruff check`, architecture `--check`, strict prose passed.
   Full `ty check` retains 165 diagnostics; the new coordinator, repair and
@@ -595,16 +628,22 @@ condition). Per mass, draw 0 then draw 1:
 | combined -1 | CC\|CC | CE\|CE | CC\|CC | CC\|CC | CC\|CC | CC\|CC |
 | combined -0.5 | CC\|CC | CE\|CE | FC\|FC | CC\|CC | FF\|FF | CC\|CC |
 
-E is a QP failure at the first step for draw 1 at 650 kg in 17 of 18
-arm-episodes; it is intermittent and precedes any residual, so it is now an
-infrastructure start failure (see Amendments) and the 650 kg column is rerun.
-Encoder bias costs the references and zero their 600 kg margin on draw 1; combined
--1 still completes every other condition from 600 to 900 kg.
+E is a measured controller failure. The original inspection described 17 of
+18 arm-episodes at 650 kg/draw 1 as first-step failures; that timing diagnosis
+does not establish independence from residuals and does not justify exclusion.
+The corrected encoder report retains all 216 outcomes, including both combined
+-1 failures (22/24 complete). Encoder bias costs the references and zero their
+600 kg margin on draw 1. The separate 650 kg rerun retains six early failures
+among 36 outcomes; it does not replace the first cohort's failed measurements.
 
 **Re-measure if:** the controller's manipulation schedule, scales or payload
 model change.
 
 **History:**
+- 2026-10-27 — the following 650 kg start-failure classifications and retry-based
+  conclusions are superseded by R1. Counts and original interpretations remain
+  here to explain the change; every QP failure now counts as a policy/controller
+  outcome, and only worker failures are retried.
 - 2026-10-26 18:10-18:24 — draw 650/1 diagnosis: identical bias (max 0.0099 rad)
   and payload completed under zero in a 2-row, 2-worker batch
   (`draw650-diagnosis/`); stance joints sit at least 0.122 rad from their limits.
@@ -721,9 +760,11 @@ the action term installs `PDgains_sim`, never the armature defaults), actuator
 delay 2/4/10 ms, foot friction x0.9/1.1 (foot geoms and floor together, since
 contacts take the larger coefficient) and cart pair friction x0.9/1.1.
 Observation corruption is declared through `noise`, which the policy interface
-excludes, so checkpoints still validate. White and correlated noise use the
-global generator and are not condition keyed. The controller's own IMU feed is
-not rotated.
+excludes, so checkpoints still validate. White and correlated noise use immutable
+condition/channel streams indexed by episode time (`df799f8`); repeated reads,
+batch ordering and partial resets cannot advance surviving rows' noise. The
+controller's own IMU feed is not rotated. Earlier noisy sensitivity runs used
+the global generator and cannot establish matched-noise effects.
 
 **Re-measure if:** observation terms, actuator configs or contact definitions
 change.
