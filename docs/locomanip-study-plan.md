@@ -17,7 +17,7 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | S6 observation history | active | history-10/20 `6287f6f`; live family smoke: both build, recycle and match zero at level 0 (0.0042 m, 0.06 s); `model_1180` rejected | not trained | `history-smoke/` | Train in S9 items 4-5 | 2026-10-26 20:27 +09:00 |
 | S7 objective audit | rejected (current evidence) | `059681f`; audit of 541 matched failure/success pairs from S4 nominal | current defect 354/541 (discounted); candidate leaves 312/541, 0/541 only without residual costs | `phase-nominal/objective.json` | Re-run when learned policies complete heavy loads | 2026-10-26 16:55 +09:00 |
 | S8 robustness/transitions | active | scenarios `97244ba`; worker replacement and handover passed; `df799f8` restores first-step QP failures and keys noise by condition/time | installed-gain sensitivity motivates later tests; old noisy comparisons are sensitivity observations, not matched evidence | `scenario-smoke/`, `sensitivity/`, `worker-replacement/`, `review-noise/` | Robustness training branches depend on S9 validation | 2026-10-26 20:27 +09:00 |
-| S9 campaign | active | `0f3f29a` coordinator; initialization/PPO smoke passed; full control launched at `4bd39ac` in tmux `2.1` | training; no validation result yet | `campaign-control-s42/status.json`, `review-train-smoke/` | Inspect checkpoint 0; first automatic validation at iteration 200 | 2026-10-27 09:03 +09:00 |
+| S9 campaign | active | `0f3f29a` coordinator; initialization/PPO smoke passed; full control launched at `4bd39ac` in tmux `2.1`; checkpoint 0 finite; fresh checkpoint loads in evaluator | training; no validation result yet | `campaign-control-s42/status.json`, `review-train-smoke/`, `review-checkpoint-load/` | First automatic validation at iteration 200 | 2026-10-27 09:08 +09:00 |
 | S10 identification | active | `mc_mjlab.identification` `57c92d8`: shared log, fits within synthetic tolerances (6 tests), robot-only hashed calibration gate | simulator 700 kg trace fitted on first half, held-out RMSE recorded; no robot data | `identification/zero-700-fresh.json` | Calibration procedure note; robot data external | 2026-10-26 15:55 +09:00 |
 
 ## Decisions and starting evidence
@@ -429,8 +429,11 @@ uv run --no-sync python scripts/evaluate_locomanip_study.py --cohort docs/locoma
 ```
 
 This verifies evaluator compatibility with newly trained checkpoints; its
-two-iteration candidate cannot establish a training improvement. The first arm
-has loaded through provenance/interface validation; final rollout report pending.
+two-iteration candidate cannot establish a training improvement. Both the
+reference and fresh candidate have loaded through provenance/interface
+validation; the six reference outcomes are recorded, candidate rollout report
+pending. Only audit-only payload-event/cart-source differences were reported;
+the enforced policy interface and controller provenance matched.
 
 **Re-measure if:** evaluator, corruption clock, action mapping, runtime or
 calibration validation changes.
@@ -449,6 +452,17 @@ draws retrospectively.
   these checks. All study panes are idle following completed regressions/smoke;
   `mc_mjlab_training:1.1` remains TensorBoard. Next: launch the command above in
   pane `2.1`, inspect initialization/checkpoint 0, record the actual run identity.
+- 2026-10-27 09:08 — continuation state: the full control remains running under
+  its coordinator in `mc_mjlab_training:2.1`; checkpoint-loading evaluation
+  remains running in `4.1` with both runner loads accepted. Window `3.1` is idle;
+  window `1.1` is TensorBoard. Iteration 15 had advanced at 1,100 steps/s with
+  controller/worker failure rates 0. Next: inspect
+  `review-checkpoint-load/report.json` when the rollout finishes, then
+  `campaign-control-s42/validation-200/report.json` at the scheduled milestone.
+  Do not launch duplicate control runs. After the full control and its queued
+  validation finish, continue with the seed-42 arms-waist configuration through
+  the same coordinator using a new output directory; retain the fixed budget,
+  reference and checkpoints. No candidate has been selected or promoted.
 
 ## Amendments
 
