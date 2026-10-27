@@ -20,7 +20,7 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | S9 campaign | active | Historical control reused; duplicate stopped; arms-waist launched at `4fde1ed` in tmux `2.1`, first checkpoint finite | arms-waist training; duplicate checkpoint-200 result retained | `campaign-arms-waist-s42/status.json`, `reused-control.json`, `campaign-control-s42/` | Validate arms-waist at 200; no duplicate-control evaluation queue | 2026-10-27 16:12 +09:00 |
 | S9.1 seed-42 control | complete | Existing original run accepted; model_1180 provenance and policy interface validated; saved training contract identical to the duplicate | baseline available; not a new improvement experiment | October 21 run, `reused-control.json` | Reuse frozen model_1180 for variant comparisons | 2026-10-27 16:10 +09:00 |
 | S9.1a duplicate attempt | skipped | Stopped per user direction after iteration 1708; latest saved checkpoint 1700; coordinator/evaluator/worker group stopped | checkpoint 200 rejected; interrupted checkpoint 400 is not measured | `campaign-control-s42/status.json`, preserved snapshots and raw results | No queued duplicate-control evaluations | 2026-10-27 16:10 +09:00 |
-| S9.2 arms-waist | active | Source `4fde1ed`; two-iteration PPO smoke and finite full-run checkpoint 0; 13 actions, actor 421 / critic 550 inputs | pending validation | `campaign-arms-waist-s42/`, `arms-waist-train-smoke/` | Continue 2,000-iteration budget and automatic validation milestones | 2026-10-27 16:12 +09:00 |
+| S9.2 arms-waist | active | Source `4fde1ed`; iteration 938 reached; checkpoint-200 validation running (512/960 records); no worker failures in latest 50 training iterations | pending full validation; sporadic controller failures observed in training | `campaign-arms-waist-s42/`, `arms-waist-train-smoke/` | Continue budget; inspect complete validation-200 report | 2026-10-27 20:05 +09:00 |
 | S10 identification | active | `mc_mjlab.identification` `57c92d8`: shared log, fits within synthetic tolerances (6 tests), robot-only hashed calibration gate | simulator 700 kg trace fitted on first half, held-out RMSE recorded; no robot data | `identification/zero-700-fresh.json` | Calibration procedure note; robot data external | 2026-10-26 15:55 +09:00 |
 
 ## Decisions and starting evidence
@@ -559,6 +559,21 @@ coordinator/trainer; `3.1`/`4.1` are idle and `1.1` is TensorBoard. All old raw
 results/checkpoints remain intact. Exact next action: inspect
 `campaign-arms-waist-s42/validation-200/report.json` when created; do not resume
 the redundant seed-42 control.
+
+- 2026-10-27 20:05 +09:00 — arms-waist reached iteration 938. Checkpoint-200
+  validation launched automatically at 16:54:06; exact command/checkpoint hash
+  are in `campaign-arms-waist-s42/status.json`. It has 512/960 saved records:
+  reference 480 (239 completions, two controller failures), candidate 32
+  (all 400 kg, all complete, no controller failures); no worker failures.
+  Candidate coverage is insufficient for a comparative verdict. Training
+  controller-failure diagnostics were nonzero in two of the last 50 iterations
+  (including 0.4444 at iteration 936, then zero at 937/938); worker failures were
+  zero throughout that window. These per-iteration episode diagnostics are not
+  population failure rates. Keep the fixed budget; measure full matched safety
+  outcomes before selecting checkpoints. Recent training speed projects finish
+  near 00:50 +09:00 on October 28; first validation is estimated around
+  22:30-23:00 on October 27, subject to contention. Both jobs remain owned by
+  tmux `2.1`; `3.1`/`4.1` idle, `1.1` TensorBoard.
 
 ## validation-200
 
