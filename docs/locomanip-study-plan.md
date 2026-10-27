@@ -13,11 +13,13 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | S2 qualification | complete | Mass dtype fix `bb98c3b`; `compare_study_runs.py`; six zero sources over batch 6/reversed batch 3 with recycled partial resets | zero vs zero: no outcome disagreement; spreads 0.0135 m, 0.04 s | `zero-smoke/`, `zero-reordered/`, `zero-plain-timed/`, `zero-repeatability.json` | Validation/held-out cohorts once candidates exist | 2026-10-26 15:20 +09:00 |
 | S3 PD telemetry | complete | `pd_telemetry` `f963cb2`: motor table and chain trajectory identical, stepped-only samples, partial resets (7 tests) | live: no outcome disagreement, spread 0.017 m; +3% step time; rate traces sum exactly | `zero-telemetry/`, `zero-telemetry-rate/` | Used by S4 | 2026-10-26 15:20 +09:00 |
 | S4 phase diagnosis | complete | Corrected `df799f8` reports: nominal 192, encoder 216, encoder-650 36 episodes; one retained trace per outcome | combined -1: nominal 12/12 complete, encoder 22/24 complete with two controller failures; earlier universal completion claim withdrawn | `review-reanalysis/`; original raw traces preserved | Negative arm/waist direction remains useful; all failures count in selection | 2026-10-26 20:27 +09:00 |
-| S5 focused exploration | active | `StudySpec` arms-waist/coordinated `071c50c`, init fix `ed098ff`; live: level-0 requests equal zero and identical joint requests agree across all three tasks | not trained | `s5-mapping/`, `review-reanalysis/s5-mapping/` | Train after fresh control (S9 items 2-3) | 2026-10-26 20:27 +09:00 |
+| S5 focused exploration | active | `StudySpec` arms-waist/coordinated `071c50c`, init fix `ed098ff`; live mapping/zero-equivalence checks passed; historical control reused by user decision | not trained | `s5-mapping/`, `review-reanalysis/s5-mapping/`, `reused-control.json` | Smoke and train arms-waist (S9 item 2) | 2026-10-27 16:10 +09:00 |
 | S6 observation history | active | history-10/20 `6287f6f`; live family smoke: both build, recycle and match zero at level 0 (0.0042 m, 0.06 s); `model_1180` rejected | not trained | `history-smoke/` | Train in S9 items 4-5 | 2026-10-26 20:27 +09:00 |
 | S7 objective audit | rejected (current evidence) | `059681f`; audit of 541 matched failure/success pairs from S4 nominal | current defect 354/541 (discounted); candidate leaves 312/541, 0/541 only without residual costs | `phase-nominal/objective.json` | Re-run when learned policies complete heavy loads | 2026-10-26 16:55 +09:00 |
 | S8 robustness/transitions | active | scenarios `97244ba`; worker replacement and handover passed; `df799f8` restores first-step QP failures and keys noise by condition/time | installed-gain sensitivity motivates later tests; old noisy comparisons are sensitivity observations, not matched evidence | `scenario-smoke/`, `sensitivity/`, `worker-replacement/`, `review-noise/` | Robustness training branches depend on S9 validation | 2026-10-26 20:27 +09:00 |
-| S9 campaign | active | Full control at `4bd39ac` in tmux `2.1`; iteration 1569 reached; checkpoint-200 validation complete (960/960 valid records), checkpoint-400 validation running | checkpoint 200 rejected: completion -6.04 percentage points, CI excludes zero; failure/incomplete gates fail | `campaign-control-s42/status.json`, `validation-200/report.json`, `validation-400/` beneath that directory | Finish healthy control budget and queued validation; no checkpoint selected | 2026-10-27 15:31 +09:00 |
+| S9 campaign | active | User accepts historical seed-42 control; exact training contracts and policy interfaces match; duplicate training/queued evaluation stopped with artifacts retained | duplicate checkpoint-200 result retained; no final duplicate-run verdict | `reused-control.json`, `campaign-control-s42/` | Launch isolated arms-waist after its PPO smoke | 2026-10-27 16:10 +09:00 |
+| S9.1 seed-42 control | complete | Existing original run accepted; model_1180 provenance and policy interface validated; saved training contract identical to the duplicate | baseline available; not a new improvement experiment | October 21 run, `reused-control.json` | Reuse frozen model_1180 for variant comparisons | 2026-10-27 16:10 +09:00 |
+| S9.1a duplicate attempt | skipped | Stopped per user direction after iteration 1708; latest saved checkpoint 1700; coordinator/evaluator/worker group stopped | checkpoint 200 rejected; interrupted checkpoint 400 is not measured | `campaign-control-s42/status.json`, preserved snapshots and raw results | No queued duplicate-control evaluations | 2026-10-27 16:10 +09:00 |
 | S10 identification | active | `mc_mjlab.identification` `57c92d8`: shared log, fits within synthetic tolerances (6 tests), robot-only hashed calibration gate | simulator 700 kg trace fitted on first half, held-out RMSE recorded; no robot data | `identification/zero-700-fresh.json` | Calibration procedure note; robot data external | 2026-10-26 15:55 +09:00 |
 
 ## Decisions and starting evidence
@@ -220,7 +222,7 @@ existing PPO, checkpoints every 20 iterations**. Short initialization/reset smok
 checks precede each configuration family. Seed 42 isolated screens, then selected
 configuration and control replicated on seeds **43 and 44**. Run order:
 
-1. Fresh control.
+1. Reuse the existing original-scale seed-42 control (2026-10-27 amendment).
 2. Arms/waist.
 3. Coordinated actions.
 4. Ten-frame history.
@@ -282,18 +284,19 @@ continuation path.
 
 ## Experiment ledger
 
-**Current:** The full-budget seed-42 control is running in
-`mc_mjlab_training:2.1`, launched on 2026-10-27 at 09:02 +09:00. Review fixes,
-live regressions and the control initialization smoke passed. Checkpoint-200
-validation finished at 15:06 +09:00 and rejects that checkpoint; checkpoint-400
-validation is running alongside continued training. Existing measurements remain in
+**Current:** The existing original-scale seed-42 run is the control. The user
+accepted its recency and identical training contract; the duplicate control and
+its queued evaluations have been stopped. Checkpoint-200 validation remains a
+valid result for that duplicate snapshot; the interrupted checkpoint-400
+evaluation has no verdict. Next: arms-waist PPO smoke, then the first isolated
+training variant in `mc_mjlab_training:2.1`. Existing measurements remain in
 [locomanip.md](locomanip.md); they motivate the campaign, not its qualification.
 
 S9 launch commands in `mc_mjlab_training:2.1` (task defaults
 already equal the budget: 256 envs, 64 steps, 2,000 iterations, saves every 20,
 seed 42; about 6.4 h each from the 2x-arm run's 2,000 iterations in 6:24):
 
-1. `uv run train Mc-Mjlab-Locomanip-Study-Locomanipcontroller-Hrp5P-Control`
+1. Reuse the historical original-scale control; do not retrain seed 42.
 2. `uv run train Mc-Mjlab-Locomanip-Study-Locomanipcontroller-Hrp5P-Arms-Waist`
 3. `uv run train Mc-Mjlab-Locomanip-Study-Locomanipcontroller-Hrp5P-Coordinated`
 4. `uv run train Mc-Mjlab-Locomanip-Study-Locomanipcontroller-Hrp5P-History-10`
@@ -558,6 +561,50 @@ identity changes. Do not replace this result with a later checkpoint's result.
 smokes verified mechanisms and checkpoint compatibility only.
 
 ## Amendments
+
+- 2026-10-27 16:10 — S1/S5/S9: the user accepts the existing recent run as the
+  seed-42 control. Recursive comparison finds **zero differences in the saved
+  training contract**, and the policy-interface hashes are identical:
+  `ef5fb16aa4ae5b7e831cf57ba3c0e605b7a021c97e41efe79a370539eb9cfc57`.
+  Runner loads already enforce external controller provenance. Thus the
+  original fresh-control requirement is superseded; retain it in the launch
+  history rather than spending more compute repeating the same seed/config.
+  The duplicate ended at logged iteration 1708, checkpoint 1700 saved. Its
+  completed validation-200 is retained; validation-400 and later queued
+  evaluations are cancelled, with partial records retained as not measured.
+  SIGINT returned the coordinator to its shell; its surviving evaluation and
+  four workers were subsequently terminated as one verified job process group.
+  `campaign-control-s42/status-before-control-reuse.json` preserves the prior
+  state; `status.json` records the user-directed stop (trainer exit 143).
+  No reward/performance signal triggered this stop.
+
+  Reused run:
+  `logs/rsl_rl/Mc-Mjlab-Locomanip-Locomanipcontroller-Hrp5P-Position-Residual/2026-10-21_10-52-44_push-friction`;
+  frozen checkpoint remains `model_1180.pt`, SHA-256
+  `dd5530445dfa2f6e49e03a42ddd5687e637f9bacce069fe438e22e0640df6300`.
+  Its logs reach iteration 1479 and its latest available checkpoint is 1460;
+  it is **not** a completed 2,000-iteration run. Preserve that actual budget
+  when reporting comparisons. New variants retain the planned 2,000 iterations;
+  checkpoint-aligned historical comparisons are available within the saved
+  range, while model_1180 remains the fixed promotion reference. Seed-43/44
+  control replications remain planned. `reused-control.json` records the
+  manifest hashes, matching interface and empty contract difference list.
+  Keep the 13-run cap; this cancelled attempt does not create an extra branch.
+
+  Next training hypothesis: restricting residual exploration to individual
+  shoulder/elbow/waist joints improves safe completion at original per-joint
+  scales. Other joints follow mc_rtc; no reward/PPO/payload/history change.
+  First smoke in pane `2.1`:
+
+  ```sh
+  uv run --no-sync train Mc-Mjlab-Locomanip-Study-Locomanipcontroller-Hrp5P-Arms-Waist --env.scene.num-envs 4 --env.actions.mc-rtc-residual.num-workers 2 --agent.max-iterations 2 --agent.logger tensorboard --log-root logs/locomanip-study/arms-waist-train-smoke --agent.run-name arms-waist-s42-smoke
+  ```
+
+  Then launch the isolated variant in the same pane:
+
+  ```sh
+  uv run --no-sync python scripts/run_locomanip_study.py --variant arms-waist --seed 42 --reference logs/rsl_rl/Mc-Mjlab-Locomanip-Locomanipcontroller-Hrp5P-Position-Residual/2026-10-21_10-52-44_push-friction/model_1180.pt --output logs/locomanip-study/campaign-arms-waist-s42
+  ```
 
 - 2026-10-26 20:17 — S2/S4/S8/S10 review corrections: supersede the 18:25
   classification amendment below. Every QP failure counts as a controller
