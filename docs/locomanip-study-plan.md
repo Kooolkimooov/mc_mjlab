@@ -17,7 +17,7 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | S6 observation history | active | history-10/20 `6287f6f`; live family smoke: both build, recycle and match zero at level 0 (0.0042 m, 0.06 s); `model_1180` rejected | not trained | `history-smoke/` | Train in S9 items 4-5 | 2026-10-26 20:27 +09:00 |
 | S7 objective audit | rejected (current evidence) | `059681f`; audit of 541 matched failure/success pairs from S4 nominal | current defect 354/541 (discounted); candidate leaves 312/541, 0/541 only without residual costs | `phase-nominal/objective.json` | Re-run when learned policies complete heavy loads | 2026-10-26 16:55 +09:00 |
 | S8 robustness/transitions | active | scenarios `97244ba`; worker replacement and handover passed; `df799f8` restores first-step QP failures and keys noise by condition/time | installed-gain sensitivity motivates later tests; old noisy comparisons are sensitivity observations, not matched evidence | `scenario-smoke/`, `sensitivity/`, `worker-replacement/`, `review-noise/` | Robustness training branches depend on S9 validation | 2026-10-26 20:27 +09:00 |
-| S9 campaign | active | `0f3f29a` coordinator; full control at `4bd39ac` in tmux `2.1`; iteration 82 reached, checkpoint 80 saved; new-checkpoint evaluator smoke finished with all 12 records measured | training; no full validation result yet | `campaign-control-s42/status.json`, `review-train-smoke/`, `review-checkpoint-load/` | First automatic validation at iteration 200 | 2026-10-27 09:21 +09:00 |
+| S9 campaign | active | Full control at `4bd39ac` in tmux `2.1`; iteration 294 reached; checkpoint-200 validation launched automatically at 09:46:55; 64/960 episode records saved | training and validation active; no completed full validation yet | `campaign-control-s42/status.json`, `validation-200/` beneath that directory | Complete validation-200; subsequent milestones queued while training continues | 2026-10-27 10:10 +09:00 |
 | S10 identification | active | `mc_mjlab.identification` `57c92d8`: shared log, fits within synthetic tolerances (6 tests), robot-only hashed calibration gate | simulator 700 kg trace fitted on first half, held-out RMSE recorded; no robot data | `identification/zero-700-fresh.json` | Calibration procedure note; robot data external | 2026-10-26 15:55 +09:00 |
 
 ## Decisions and starting evidence
@@ -475,6 +475,16 @@ draws retrospectively.
   as described above, so pane `4.1` is idle. Only control/coordinator `2.1` and
   TensorBoard `1.1` remain active study jobs. Full validation is still pending
   checkpoint 200; training episode metrics are not qualification evidence.
+- 2026-10-27 10:10 — control advanced to iteration 294 (latest controller/worker
+  failure rates 0). Validation-200 launched at 09:46:55 in the same coordinator,
+  checkpoint SHA-256
+  `13475cff188e04eba0db6bf7f4058f6f9381c246655cdd4b258f829ff39be521`.
+  Its exact command is in `status.json`; default validation cohort, batch 32,
+  four workers, reference model_1180. At inspection, 64 reference episode
+  records were saved of 960 total planned records (480 per arm), no worker
+  failures, no final report yet. Training continues concurrently; its printed
+  ETA is about 6.5 hours, subject to evaluation contention. This remains the
+  first control run; action/history comparisons and final qualification remain.
 
 ## Amendments
 
