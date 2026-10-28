@@ -13,14 +13,14 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | S2 qualification | complete | Mass dtype fix `bb98c3b`; `compare_study_runs.py`; six zero sources over batch 6/reversed batch 3 with recycled partial resets | zero vs zero: no outcome disagreement; spreads 0.0135 m, 0.04 s | `zero-smoke/`, `zero-reordered/`, `zero-plain-timed/`, `zero-repeatability.json` | Validation/held-out cohorts once candidates exist | 2026-10-26 15:20 +09:00 |
 | S3 PD telemetry | complete | `pd_telemetry` `f963cb2`: motor table and chain trajectory identical, stepped-only samples, partial resets (7 tests) | live: no outcome disagreement, spread 0.017 m; +3% step time; rate traces sum exactly | `zero-telemetry/`, `zero-telemetry-rate/` | Used by S4 | 2026-10-26 15:20 +09:00 |
 | S4 phase diagnosis | complete | Corrected `df799f8` reports: nominal 192, encoder 216, encoder-650 36 episodes; one retained trace per outcome | combined -1: nominal 12/12 complete, encoder 22/24 complete with two controller failures; earlier universal completion claim withdrawn | `review-reanalysis/`; original raw traces preserved | Negative arm/waist direction remains useful; all failures count in selection | 2026-10-26 20:27 +09:00 |
-| S5 focused exploration | active | Arms-waist completed 2,000 iterations; final checkpoint finite; six complete validation cohorts through iteration 1200 | all six evaluated checkpoints rejected; later checkpoints pending | `campaign-arms-waist-s42/`, `reused-control.json` | Finish queued validation and inspect best eligible interval before verdict on variant | 2026-10-28 14:40 +09:00 |
+| S5 focused exploration | active | Arms-waist completed 2,000 iterations; final checkpoint finite; seven complete validation cohorts through iteration 1400 | all seven evaluated checkpoints rejected; later checkpoints pending | `campaign-arms-waist-s42/`, `reused-control.json` | Finish queued validation and inspect best eligible interval before verdict on variant | 2026-10-28 16:55 +09:00 |
 | S6 observation history | active | history-10/20 `6287f6f`; live family smoke: both build, recycle and match zero at level 0 (0.0042 m, 0.06 s); `model_1180` rejected | not trained | `history-smoke/` | Train in S9 items 4-5 | 2026-10-26 20:27 +09:00 |
 | S7 objective audit | rejected (current evidence) | `059681f`; audit of 541 matched failure/success pairs from S4 nominal | current defect 354/541 (discounted); candidate leaves 312/541, 0/541 only without residual costs | `phase-nominal/objective.json` | Re-run when learned policies complete heavy loads | 2026-10-26 16:55 +09:00 |
 | S8 robustness/transitions | active | scenarios `97244ba`; worker replacement and handover passed; `df799f8` restores first-step QP failures and keys noise by condition/time | installed-gain sensitivity motivates later tests; old noisy comparisons are sensitivity observations, not matched evidence | `scenario-smoke/`, `sensitivity/`, `worker-replacement/`, `review-noise/` | Robustness training branches depend on S9 validation | 2026-10-26 20:27 +09:00 |
-| S9 campaign | active | Historical control reused; duplicate stopped; arms-waist training completed; six of ten scheduled validations complete | no eligible checkpoint so far; arms-waist validation-1400 active | `campaign-arms-waist-s42/status.json`, reports 200-1200 | Finish validation queue; coordinated actions remain next training configuration | 2026-10-28 14:40 +09:00 |
+| S9 campaign | active | Historical control reused; duplicate stopped; arms-waist training completed; seven of ten scheduled validations complete | no eligible checkpoint so far; arms-waist validation-1600 active | `campaign-arms-waist-s42/status.json`, reports 200-1400 | Finish validation queue; coordinated actions remain next training configuration | 2026-10-28 16:55 +09:00 |
 | S9.1 seed-42 control | complete | Existing original run accepted; model_1180 provenance and policy interface validated; saved training contract identical to the duplicate | baseline available; not a new improvement experiment | October 21 run, `reused-control.json` | Reuse frozen model_1180 for variant comparisons | 2026-10-27 16:10 +09:00 |
 | S9.1a duplicate attempt | skipped | Stopped per user direction after iteration 1708; latest saved checkpoint 1700; coordinator/evaluator/worker group stopped | checkpoint 200 rejected; interrupted checkpoint 400 is not measured | `campaign-control-s42/status.json`, preserved snapshots and raw results | No queued duplicate-control evaluations | 2026-10-27 16:10 +09:00 |
-| S9.2 arms-waist | active | Source `4fde1ed`; completed 2,000 iterations / 32,768,000 transitions at 00:31; final checkpoint finite; validations through 1200 complete | each evaluated checkpoint has lower completion with negative paired CI and more failures; no promotion | `campaign-arms-waist-s42/`; final model_1999 | Validation-1400 active (480/960 records); then 1600/1800/1999 | 2026-10-28 14:40 +09:00 |
+| S9.2 arms-waist | active | Source `4fde1ed`; completed 2,000 iterations / 32,768,000 transitions at 00:31; final checkpoint finite; validations through 1400 complete | each evaluated checkpoint has lower completion with negative paired CI and more failures; no promotion | `campaign-arms-waist-s42/`; final model_1999 | Validation-1600 active (224/960 records); then 1800/1999 | 2026-10-28 16:55 +09:00 |
 | S10 identification | active | `mc_mjlab.identification` `57c92d8`: shared log, fits within synthetic tolerances (6 tests), robot-only hashed calibration gate | simulator 700 kg trace fitted on first half, held-out RMSE recorded; no robot data | `identification/zero-700-fresh.json` | Calibration procedure note; robot data external | 2026-10-26 15:55 +09:00 |
 
 ## Decisions and starting evidence
@@ -291,7 +291,7 @@ its queued evaluations have been stopped. Checkpoint-200 validation remains a
 valid result for that duplicate snapshot; the interrupted checkpoint-400
 evaluation has no verdict. Next: arms-waist PPO smoke, then the first isolated
 training variant in `mc_mjlab_training:2.1`. That variant completed training;
-its evaluation queue is still running. Six evaluated checkpoints fail the
+its evaluation queue is still running. Seven evaluated checkpoints fail the
 completion/failure gates; later checkpoints remain unmeasured. Existing measurements remain in
 [locomanip.md](locomanip.md); they motivate the campaign, not its qualification.
 
@@ -546,10 +546,10 @@ Full effective manifest hash:
 base-controller manifest hash (matches control):
 `8170dc0981c52225d31a0292c1091cba17ff38dd73dac09adf7aca234e64cbdf`.
 
-Six full validation cohorts (480 conditions per arm) are complete, with
+Seven full validation cohorts (480 conditions per arm) are complete, with
 deterministic actions and separate environments for the 13-action candidate
 and 35-action reference. None qualifies; detailed results below. Evaluation
-1400 is active, followed by 1600/1800/1999. After queued validation,
+1600 is active, followed by 1800/1999. After queued validation,
 inspect eligible intervals/neighbours and continue to coordinated actions.
 Keep the conditional branches and original promotion gates.
 
@@ -595,7 +595,7 @@ the redundant seed-42 control.
 
 ## arms-waist validation milestones
 
-**Current:** All six evaluated arms-waist checkpoints fail the completion and
+**Current:** All seven evaluated arms-waist checkpoints fail the completion and
 empirical failure/incomplete regression gates. This does not establish a verdict
 on later checkpoints. All reports have complete matched data, 960 episodes
 (480 per arm), no missing/excluded target measurements, no worker failures and
@@ -612,6 +612,7 @@ encoder draws, both lifecycle cohorts; 240 input-draw clusters per arm.
 | 800 | 237 | 203 | -7.08 [-10.00, -4.38] | -11.81 [-16.67, -7.29] |
 | 1000 | 236 | 206 | -6.25 [-9.17, -3.54] | -10.07 [-14.93, -5.56] |
 | 1200 | 235 | 214 | -4.38 [-6.88, -2.08] | -7.29 [-11.46, -3.47] |
+| 1400 | 235 | 211 | -5.00 [-7.71, -2.50] | -8.33 [-12.50, -4.17] |
 
 Safety labels remain separate; their combined failure union decides the gate.
 Counts below are reference -> candidate, out of 480 episodes each.
@@ -624,6 +625,7 @@ Counts below are reference -> candidate, out of 480 episodes each.
 | 800 | 203 -> 256 | 36 -> 18 | 4 -> 3 | 243 -> 277 |
 | 1000 | 202 -> 252 | 38 -> 19 | 4 -> 3 | 244 -> 274 |
 | 1200 | 200 -> 238 | 40 -> 24 | 5 -> 4 | 245 -> 266 |
+| 1400 | 204 -> 242 | 38 -> 23 | 3 -> 4 | 245 -> 269 |
 
 All early controller failures remain counted. Walking on jointly completed
 cases passes the displacement check (candidate/reference ratios 1.0051-1.0113),
@@ -642,6 +644,7 @@ Reports under `logs/locomanip-study/campaign-arms-waist-s42/`:
 | `validation-800/report.json` | `18765f83fd97ee8d2284d5463f6233163f1c2b0ff6873bd597f7a636a6f58684` | October 28 07:26:11 |
 | `validation-1000/report.json` | `810c25f414b80f4426459caac1d0e9134babe25d62395e47579e4dc0f8a55d06` | October 28 10:05:40 |
 | `validation-1200/report.json` | `36d3fe3dfd78a5d8987d1c0d8fd5a92bfe63e0ab277c91fe8e07eaf80818751f` | October 28 13:01:13 |
+| `validation-1400/report.json` | `74d6b2d66a661847ec282438d71c047c72ea022a4a88ffcf4e6d57ac77077fd9` | October 28 16:08:33 |
 
 **Re-measure if:** checkpoint identity, runtime/provenance, condition manifest,
 failure classification or statistics change. Keep these results when adding
@@ -660,6 +663,18 @@ later checkpoints; do not replace the unsuccessful measurements.
   No eligible checkpoint so far. Coordinator/evaluator remains in tmux `2.1`;
   training is finished. Next: complete 1400, then 1600/1800/1999. Estimated
   remaining queue is 8-10 hours at the recent rate, not a completion guarantee.
+
+- 2026-10-28 16:55 +09:00 — validation-1400 finished at 16:08:33, exit 0,
+  complete matched data, no worker failures or timeouts; seven early controller
+  failures remain counted. Candidate checkpoint SHA-256
+  `60ee9307c6540d364e179791eae8d818e835bcb438fa1b1bb6e650513bcbd5fa`.
+  Full-range completion remains lower by 5.00 percentage points, interval
+  [-7.71, -2.50]; failure/incomplete regression gates fail. Walking displacement
+  passes (ratio 1.00875). Validation-1600 launched at 16:08:35; 224 reference
+  records saved at inspection, no candidate batch saved yet. Seven of ten
+  scheduled validations are complete, none eligible. Next: finish 1600,
+  1800 and 1999. The coordinator/evaluator remains in tmux `2.1`; no training
+  job is active, `1.1` is TensorBoard, `3.1`/`4.1` idle.
 
 ## validation-200
 
