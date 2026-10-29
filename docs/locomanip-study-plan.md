@@ -25,6 +25,84 @@ use Asia/Tokyo (UTC+09:00). Raw traces and checkpoints stay outside Git.
 | S9.3 coordinated | active | PPO smoke passed; full run at `fe7c6a7`; checkpoint 0 finite; two policy outputs, actor 421 / critic 550 inputs | training; not yet evaluated | `campaign-coordinated-s42/`, `coordinated-train-smoke/` | Full validation at 200, then remaining planned milestones | 2026-10-29 10:17 +09:00 |
 | S10 identification | active | `mc_mjlab.identification` `57c92d8`: shared log, fits within synthetic tolerances (6 tests), robot-only hashed calibration gate | simulator 700 kg trace fitted on first half, held-out RMSE recorded; no robot data | `identification/zero-700-fresh.json` | Calibration procedure note; robot data external | 2026-10-26 15:55 +09:00 |
 
+## Planned configuration checklist
+
+**Current:** Snapshot checked against run status files and TensorBoard at
+2026-10-29 10:36 +09:00. This enumerates the original **13 training slots**;
+conditional slots are upper bounds, not commitments to launch every branch.
+Reusing the seed-42 control and rejecting the objective branch reduce new
+training work. No candidate has been promoted. Implementation, smoke checks,
+training completion and policy improvement are different statuses.
+
+| Slot / stage | Configuration | Seed | Already run? | Current disposition / next gate |
+| --- | --- | --- | --- | --- |
+| 1 / S9.1 | Original-scale full-action control (35 residual outputs) | 42 | Existing historical run adopted; frozen model_1180 | Control available; exact saved training contract matches. Do not retrain seed 42. |
+| 2 / S9.2 | Individual arms/waist residuals (13 outputs) | 42 | Yes: 2,000 iterations and all ten scheduled validations | Completed negative screen; every tested checkpoint fails promotion gates. |
+| 3 / S9.3 | Coordinated arms/waist (two policy outputs expanded to 13 joints) | 42 | Running: iteration 98/2,000 at snapshot; PPO smoke passed | First full validation at 200; no comparative result yet. |
+| 4 / S6 | Full-action control with 10-frame continuous observation history | 42 | No training; implemented and live history/reset smoke tested | Train from scratch after coordinated screen. |
+| 5 / S6 | Full-action control with 20-frame continuous observation history | 42 | No training; implemented and live history/reset smoke tested | Train from scratch after history-10. |
+| 6 / S6 | At most one action-space + history combination | 42 | No | Conditional on independently useful action and history results. Rejected arms-waist component is not admitted; coordinated remains undecided. |
+| 7 / S7 | Replace DCM reward with is_alive weight 1.0; keep other costs | 42 | No training; recorded-trajectory reward audit run | Skipped/rejected: candidate still misranks successful/failing motion. No reward-training configuration admitted. |
+| 8 / S8 | Robustness training for one isolated measured failure mechanism | 42 | No training; sensitivity diagnostics run | Conditional; mechanism and training configuration not yet selected. Preserve nominal rehearsal. |
+| 9 / S8 | Robustness training with a supported perturbation mixture | 42 | No | Conditional on evidence supporting the isolated mechanism and mixture; configuration not yet selected. |
+| 10 / S9 | Replicate selected candidate | 43 | No | No candidate selected; requires a useful seed-42 configuration. |
+| 11 / S9 | Control replication | 43 | No | Paired replication stage after candidate selection. |
+| 12 / S9 | Replicate selected candidate | 44 | No | Same selection dependency; distinct training seed. |
+| 13 / S9 | Control replication | 44 | No | Paired replication stage after candidate selection. |
+
+The additional duplicate-control **attempt** (`campaign-control-s42`) is not
+another planned configuration: it repeated slot 1, stopped per user direction
+at logged iteration 1708, latest saved checkpoint 1700. Its completed
+validation-200 and partial validation-400 remain preserved. It is not running
+and is not a successful improvement. Keep it in the compute/attempt ledger;
+do not spend a freed slot on another unplanned branch.
+
+Evidence for training status:
+
+- Adopted control: `logs/locomanip-study/reused-control.json`, model_1180 from
+  the historical `2026-10-21_10-52-44_push-friction` run. Logged through 1479,
+  latest available saved checkpoint 1460; not a completed 2,000-iteration run.
+- Completed arms-waist: `logs/locomanip-study/campaign-arms-waist-s42/status.json`,
+  source `4fde1ed`, training exit 0, final model_1999, validations
+  200/400/600/800/1000/1200/1400/1600/1800/1999 all complete and negative.
+- Running coordinated: `logs/locomanip-study/campaign-coordinated-s42/status.json`,
+  source `fe7c6a7`, tmux `mc_mjlab_training:2.1`, seed 42. No scheduled full
+  validation had started at this snapshot. Budget remains 256 environments,
+  64 steps, 2,000 iterations, saves every 20.
+- History implementation/live smoke: `history-smoke/` and S6 records below.
+  These contain constant-action/zero-equivalence rollouts, not learned history
+  checkpoints. No campaign run for history, combinations, reward, robustness or
+  seeds 43/44 exists at this inspection.
+
+Evaluation/reference configurations are tracked separately from training:
+
+| Planned evaluation configuration | Already run / evidence | Remaining limitation |
+| --- | --- | --- |
+| Zero residual; original model_1180; no-magnitude-cost model_1660; 2x-arm model_1280 | Reference loads and phase probes complete (`references.json`, corrected phase reports) | Historical comparisons only; no new no-cost or scale-increase training branch is planned. |
+| Nominal and encoder-draw cohorts; fresh/recycled episodes | Phase probes and matched validation cohorts run | Held-out cohorts remain deferred until an eligible candidate is frozen. |
+| Constant arm/waist/combined requests at -1/-0.5/+0.5/+1 | Nominal/encoder phase probes and corrected reports run | Positive branches dropped after nominal failures; diagnostic action requests are not training configurations. |
+| PD telemetry on/off; zero-action mapping; handover and worker replacement | Live mechanism checks run (`zero-telemetry*`, `s5-mapping`, `handover`, `worker-replacement`) | These establish mechanisms/containment, not policy improvement. |
+| Encoder bias and actor white noise, separately and together | Encoder draws extensively evaluated; historical white-noise sensitivity runs exist | Combined encoder+white live test not recorded; corrected keyed white-noise live revalidation remains pending. Old white-noise comparisons are not matched-noise evidence. |
+| Velocity bias: +/-0.02 and +/-0.05 m/s, each axis | x +/-0.05 run (`scenario-smoke`, `sensitivity`) | +/-0.02 and remaining axes not run. |
+| IMU mounting rotation: +/-1 and +/-2 degrees, roll/pitch | Pitch +/-2 run | Roll and pitch +/-1 not run. |
+| Correlated velocity error: 0.02/0.05 m/s RMS, 0.1/0.5 s correlation | 0.05 m/s, 0.5 s run; corrected keyed-noise/reordered live check passed (`review-noise*`) | Other RMS/correlation combinations not run. |
+| Installed PD gains: x0.9/x1.1 | Both sensitivity settings run | No robustness training admitted yet. |
+| Additional actuator delay: 2/4/10 ms | 10 ms run | 2/4 ms not run. |
+| Foot friction: x0.9/x1.1, separately from cart friction | Both foot settings run | No friction robustness training admitted. |
+| Cart friction: x0.9/x1.1, separately from foot friction | Cart x0.9 run | Cart x1.1 not run. |
+| Synthetic/simulation identification and opt-in calibration checks | Synthetic fits and simulator trace analysis run; calibration validity tests passed | Robot-data calibration unmeasured; lag/compliance disabled without verified calibration. Physical trials are not required. |
+
+**Re-measure if:** another run is launched/completed, a conditional branch is
+admitted/rejected, or provenance/configuration changes. Run status files are the
+live source; refresh this snapshot at each milestone. JVRC1 receives
+compatibility checks, not a separate training campaign; frozen locomanip_safety
+remains unchanged.
+
+**History:** This checklist consolidates the approved plan and its dated
+control-reuse amendment. It does not add configurations or change promotion
+criteria. One new full training experiment is complete (arms-waist), one is
+running (coordinated), and one duplicate control attempt was cancelled.
+
 ## Decisions and starting evidence
 
 **Current:** Optimize safe completion under heavy payloads. Safety precedes
