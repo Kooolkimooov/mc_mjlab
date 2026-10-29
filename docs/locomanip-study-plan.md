@@ -34,21 +34,26 @@ Reusing the seed-42 control and rejecting the objective branch reduce new
 training work. No candidate has been promoted. Implementation, smoke checks,
 training completion and policy improvement are different statuses.
 
-| Slot / stage | Configuration | Seed | Already run? | Current disposition / next gate |
-| --- | --- | --- | --- | --- |
-| 1 / S9.1 | Original-scale full-action control (35 residual outputs) | 42 | Existing historical run adopted; frozen model_1180 | Control available; exact saved training contract matches. Do not retrain seed 42. |
-| 2 / S9.2 | Individual arms/waist residuals (13 outputs) | 42 | Yes: 2,000 iterations and all ten scheduled validations | Completed negative screen; every tested checkpoint fails promotion gates. |
-| 3 / S9.3 | Coordinated arms/waist (two policy outputs expanded to 13 joints) | 42 | Running: iteration 98/2,000 at snapshot; PPO smoke passed | First full validation at 200; no comparative result yet. |
-| 4 / S6 | Full-action control with 10-frame continuous observation history | 42 | No training; implemented and live history/reset smoke tested | Train from scratch after coordinated screen. |
-| 5 / S6 | Full-action control with 20-frame continuous observation history | 42 | No training; implemented and live history/reset smoke tested | Train from scratch after history-10. |
-| 6 / S6 | At most one action-space + history combination | 42 | No | Conditional on independently useful action and history results. Rejected arms-waist component is not admitted; coordinated remains undecided. |
-| 7 / S7 | Replace DCM reward with is_alive weight 1.0; keep other costs | 42 | No training; recorded-trajectory reward audit run | Skipped/rejected: candidate still misranks successful/failing motion. No reward-training configuration admitted. |
-| 8 / S8 | Robustness training for one isolated measured failure mechanism | 42 | No training; sensitivity diagnostics run | Conditional; mechanism and training configuration not yet selected. Preserve nominal rehearsal. |
-| 9 / S8 | Robustness training with a supported perturbation mixture | 42 | No | Conditional on evidence supporting the isolated mechanism and mixture; configuration not yet selected. |
-| 10 / S9 | Replicate selected candidate | 43 | No | No candidate selected; requires a useful seed-42 configuration. |
-| 11 / S9 | Control replication | 43 | No | Paired replication stage after candidate selection. |
-| 12 / S9 | Replicate selected candidate | 44 | No | Same selection dependency; distinct training seed. |
-| 13 / S9 | Control replication | 44 | No | Paired replication stage after candidate selection. |
+Dependencies below are implementation prerequisites or scientific admission
+gates. Serial run order alone is not an evidence dependency: coordinated actions
+do not require a positive arms-waist result, and either history variant can be
+tested independently of action-space results or the other history length.
+
+| Slot / stage | Configuration | Seed | Rationale | Dependency | Already run? | Current disposition / next gate |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 / S9.1 | Original-scale full-action control (35 residual outputs) | 42 | Anchor safety/completion comparisons without repeating an identical seed/configuration. | S1 matching training contract and controller provenance; S2 matched-condition evaluator. | Existing historical run adopted; frozen model_1180 | Control available; exact saved training contract matches. Do not retrain seed 42. |
+| 2 / S9.2 | Individual arms/waist residuals (13 outputs) | 42 | Concentrate exploration on joints with measured authority while other joints follow mc_rtc. | S4 authority groups; S5 action mapping, joint costs and zero-equivalence checks; control/evaluator available. | Yes: 2,000 iterations and all ten scheduled validations | Completed negative screen; every tested checkpoint fails promotion gates. |
+| 3 / S9.3 | Coordinated arms/waist (two policy outputs expanded to 13 joints) | 42 | Reduce exploration dimensions through a shared arm request and shared waist request. | S4 measured joint basis; verified grouped expansion, original scales/bounds and expanded costs; control/evaluator. No positive slot-2 result required. | Running: iteration 98/2,000 at snapshot; PPO smoke passed | First full validation at 200; no comparative result yet. |
+| 4 / S6 | Full-action control with 10-frame continuous observation history | 42 | Supply about 0.2 s of coherent motion history to infer dynamics/load effects without exposing privileged payload information. | S6 noise-before-history, shared actor/critic ordering and partial-reset checks; control/evaluator; train from scratch. | No training; implemented and live history/reset smoke tested | Train from scratch after coordinated screen. |
+| 5 / S6 | Full-action control with 20-frame continuous observation history | 42 | Test whether about 0.4 s of context helps more than the shorter history, as an isolated change. | Same S6 history/reset/interface checks and control/evaluator. Does not require history-10 to succeed. | No training; implemented and live history/reset smoke tested | Train from scratch after history-10. |
+| 6 / S6 | At most one action-space + history combination | 42 | Test whether independently useful exploration and temporal-context changes combine beneficially. | An action variant and a history variant must each show useful isolated validation results; freeze the admitted combination before training. | No | Conditional on independently useful action and history results. Rejected arms-waist component is not admitted; coordinated remains undecided. |
+| 7 / S7 | Replace DCM reward with is_alive weight 1.0; keep other costs | 42 | Correct a measured objective-ranking defect using one simple replacement while retaining safety costs. | Consistent measured ranking defect and successful replay ranking safe motion above failure/low-motion alternatives. Replay gate currently fails. | No training; recorded-trajectory reward audit run | Skipped/rejected: candidate still misranks successful/failing motion. No reward-training configuration admitted. |
+| 8 / S8 | Robustness training for one isolated measured failure mechanism | 42 | Improve tolerance to a demonstrated sensitivity while identifying which perturbation causes the effect. | S8 isolated sensitivity evidence, perturbation/reset validation and frozen nominal configuration; preserve nominal rehearsal. | No training; sensitivity diagnostics run | Conditional; mechanism and training configuration not yet selected. Preserve nominal rehearsal. |
+| 9 / S8 | Robustness training with a supported perturbation mixture | 42 | Extend measured robustness to a justified combination without losing nominal safety. | Evidence of useful isolated robustness, independently supported mixture settings and nominal rehearsal/safety checks. | No | Conditional on evidence supporting the isolated mechanism and mixture; configuration not yet selected. |
+| 10 / S9 | Replicate selected candidate | 43 | Check that seed-42 benefits persist under a different training seed. | Select and freeze a useful seed-42 configuration and checkpoint-selection rule; pair with seed-43 control. | No | No candidate selected; requires a useful seed-42 configuration. |
+| 11 / S9 | Control replication | 43 | Measure baseline training variation for a matched comparison with the candidate. | Candidate selected for replication; frozen original-scale control configuration and common budget; pair with slot 10. | No | Paired replication stage after candidate selection. |
+| 12 / S9 | Replicate selected candidate | 44 | Test whether the same improvement survives a second additional training seed. | Same frozen candidate and selection rule as slot 10; pair with seed-44 control. | No | Same selection dependency; distinct training seed. |
+| 13 / S9 | Control replication | 44 | Provide the corresponding baseline and safety comparison on the second additional seed. | Candidate selected for replication; frozen control/common budget; pair with slot 12. | No | Paired replication stage after candidate selection. |
 
 The additional duplicate-control **attempt** (`campaign-control-s42`) is not
 another planned configuration: it repeated slot 1, stopped per user direction
@@ -76,21 +81,21 @@ Evidence for training status:
 
 Evaluation/reference configurations are tracked separately from training:
 
-| Planned evaluation configuration | Already run / evidence | Remaining limitation |
-| --- | --- | --- |
-| Zero residual; original model_1180; no-magnitude-cost model_1660; 2x-arm model_1280 | Reference loads and phase probes complete (`references.json`, corrected phase reports) | Historical comparisons only; no new no-cost or scale-increase training branch is planned. |
-| Nominal and encoder-draw cohorts; fresh/recycled episodes | Phase probes and matched validation cohorts run | Held-out cohorts remain deferred until an eligible candidate is frozen. |
-| Constant arm/waist/combined requests at -1/-0.5/+0.5/+1 | Nominal/encoder phase probes and corrected reports run | Positive branches dropped after nominal failures; diagnostic action requests are not training configurations. |
-| PD telemetry on/off; zero-action mapping; handover and worker replacement | Live mechanism checks run (`zero-telemetry*`, `s5-mapping`, `handover`, `worker-replacement`) | These establish mechanisms/containment, not policy improvement. |
-| Encoder bias and actor white noise, separately and together | Encoder draws extensively evaluated; historical white-noise sensitivity runs exist | Combined encoder+white live test not recorded; corrected keyed white-noise live revalidation remains pending. Old white-noise comparisons are not matched-noise evidence. |
-| Velocity bias: +/-0.02 and +/-0.05 m/s, each axis | x +/-0.05 run (`scenario-smoke`, `sensitivity`) | +/-0.02 and remaining axes not run. |
-| IMU mounting rotation: +/-1 and +/-2 degrees, roll/pitch | Pitch +/-2 run | Roll and pitch +/-1 not run. |
-| Correlated velocity error: 0.02/0.05 m/s RMS, 0.1/0.5 s correlation | 0.05 m/s, 0.5 s run; corrected keyed-noise/reordered live check passed (`review-noise*`) | Other RMS/correlation combinations not run. |
-| Installed PD gains: x0.9/x1.1 | Both sensitivity settings run | No robustness training admitted yet. |
-| Additional actuator delay: 2/4/10 ms | 10 ms run | 2/4 ms not run. |
-| Foot friction: x0.9/x1.1, separately from cart friction | Both foot settings run | No friction robustness training admitted. |
-| Cart friction: x0.9/x1.1, separately from foot friction | Cart x0.9 run | Cart x1.1 not run. |
-| Synthetic/simulation identification and opt-in calibration checks | Synthetic fits and simulator trace analysis run; calibration validity tests passed | Robot-data calibration unmeasured; lag/compliance disabled without verified calibration. Physical trials are not required. |
+| Planned evaluation configuration | Rationale | Dependency | Already run / evidence | Remaining limitation |
+| --- | --- | --- | --- | --- |
+| Zero residual; original model_1180; no-magnitude-cost model_1660; 2x-arm model_1280 | Separate learned-policy effects from zero residual and retain historical reward/authority comparisons. | S1 checkpoint identity, matching configuration and enforced controller provenance. | Reference loads and phase probes complete (`references.json`, corrected phase reports) | Historical comparisons only; no new no-cost or scale-increase training branch is planned. |
+| Nominal and encoder-draw cohorts; fresh/recycled episodes | Measure completion, bias sensitivity and episode-lifecycle effects on identical inputs. | S2 keyed conditions, repeatability, reset/retry/statistics checks; freeze an eligible candidate before held-out evaluation. | Phase probes and matched validation cohorts run | Held-out cohorts remain deferred until an eligible candidate is frozen. |
+| Constant arm/waist/combined requests at -1/-0.5/+0.5/+1 | Identify useful joint groups/directions and phase-resolved failure onset before choosing action variants. | S3 torque-equivalent PD telemetry; S4 fresh controller readouts, correct trace-attempt selection and column metadata. | Nominal/encoder phase probes and corrected reports run | Positive branches dropped after nominal failures; diagnostic action requests are not training configurations. |
+| PD telemetry on/off; zero-action mapping; handover and worker replacement | Verify observation/actuation fidelity, zero equivalence and controller fault containment. | Instrumented actuator and action mappings implemented; controlled reset/handover/worker-failure harness. | Live mechanism checks run (`zero-telemetry*`, `s5-mapping`, `handover`, `worker-replacement`) | These establish mechanisms/containment, not policy improvement. |
+| Encoder bias and actor white noise, separately and together | Distinguish persistent encoder error, per-step observation noise and their interaction. | Typed S8 scenarios, condition/channel/time-keyed noise and partial-reset isolation. | Encoder draws extensively evaluated; historical white-noise sensitivity runs exist | Combined encoder+white live test not recorded; corrected keyed white-noise live revalidation remains pending. Old white-noise comparisons are not matched-noise evidence. |
+| Velocity bias: +/-0.02 and +/-0.05 m/s, each axis | Measure sensitivity to persistent velocity-estimation offsets. | S8 persistent per-row bias, declared actor corruption and matched nominal controls. | x +/-0.05 run (`scenario-smoke`, `sensitivity`) | +/-0.02 and remaining axes not run. |
+| IMU mounting rotation: +/-1 and +/-2 degrees, roll/pitch | Test a consistent mounting/frame error across affected observation channels. | S8 consistent rotation implementation and interface/reset validation. | Pitch +/-2 run | Roll +/-1/2 and pitch +/-1 not run. |
+| Correlated velocity error: 0.02/0.05 m/s RMS, 0.1/0.5 s correlation | Test temporally correlated estimator error beyond independent white noise. | Keyed correlated-noise process, verified RMS/correlation and per-row episode clocks. | 0.05 m/s, 0.5 s run; corrected keyed-noise/reordered live check passed (`review-noise*`) | Other RMS/correlation combinations not run. |
+| Installed PD gains: x0.9/x1.1 | Measure sensitivity to actuator gain uncertainty using the installed reference gains. | Immutable installed gains captured after action initialization; one-time scaling and reset checks. | Both sensitivity settings run | No robustness training admitted yet. |
+| Additional actuator delay: 2/4/10 ms | Quantify sensitivity to extra actuator latency while retaining controller pipeline delay. | Delay model/target-order validation; original asynchronous controller delay intact. | 10 ms run | 2/4 ms not run. |
+| Foot friction: x0.9/x1.1, separately from cart friction | Isolate support/contact sensitivity from cart resistance. | Correct foot/floor contact parameters, matched conditions and isolated perturbation. | Both foot settings run | No friction robustness training admitted. |
+| Cart friction: x0.9/x1.1, separately from foot friction | Isolate cart-motion resistance from foot traction. | Correct cart contact-pair parameters and matched isolated perturbation. | Cart x0.9 run | Cart x1.1 not run. |
+| Synthetic/simulation identification and opt-in calibration checks | Validate dynamics-analysis tools and prepare measured lag/compliance models. | S10 timestamp/frame/unit/joint-order log contract, synthetic/held-out fit checks; verified robot calibration before enabling models. | Synthetic fits and simulator trace analysis run; calibration validity tests passed | Robot-data calibration unmeasured; lag/compliance disabled without verified calibration. Physical trials are not required. |
 
 **Re-measure if:** another run is launched/completed, a conditional branch is
 admitted/rejected, or provenance/configuration changes. Run status files are the
@@ -102,6 +107,8 @@ remains unchanged.
 control-reuse amendment. It does not add configurations or change promotion
 criteria. One new full training experiment is complete (arms-waist), one is
 running (coordinated), and one duplicate control attempt was cancelled.
+Rationale/dependency columns distinguish each hypothesis from its prerequisites;
+they do not turn serial scheduling into a requirement for a positive prior result.
 
 ## Decisions and starting evidence
 
